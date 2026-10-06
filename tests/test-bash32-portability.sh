@@ -75,8 +75,9 @@ else
   fi
 fi
 
-# --- the gate: every shipped .sh under brain/ ----------------------------------
-# tests/ and .github/ are out of scope: they run in CI or dev machines with a
+# --- the gate: every shipped .sh under brain/ and wave/, plus tools/ -----------
+# tools/ is in scope: maintainers run it on macOS too. tests/ and .github/ are
+# out of scope: they run in CI or dev machines with a
 # modern bash, not on end-user macOS.
 scanned=0
 violations=""

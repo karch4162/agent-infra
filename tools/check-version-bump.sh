@@ -11,7 +11,7 @@
 #
 # Compares HEAD against the merge-base with <base-ref>, mirroring what
 # `git diff base...HEAD` shows on a PR. Must run on bash 3.2 (macOS) —
-# no mapfile, no associative arrays (INNOV-284).
+# no bash-4 builtins, no associative arrays (INNOV-284).
 set -uo pipefail
 
 BASE="${1:-origin/main}"
