@@ -85,10 +85,12 @@ Resolve the vault as `$BRAIN_ROOT` (else cwd). **Pinned graphify version: `0.8.4
    **The required set is not listed here, deliberately.** It comes from `vault-commit.sh --print-required`, which is where the enforcement lives. A second copy in this skill would be the INNOV-274 defect, drifting in the most useless direction: this checker would go stale exactly when a newly-committed path made it matter.
 9. **Vault .gitignore carries the plugin's entries** — `/brain:init` only creates governance files that are *missing* (correctly — they carry user content), so a vault's `.gitignore` is frozen at scaffold time and never receives template additions. Concrete instance: the template gained `.brain/` in `0.2.24`, but every vault scaffolded before then shows machine-local session state as untracked — or gets it committed and shared between machines.
    ```bash
-   bash "${CLAUDE_PLUGIN_ROOT}/bin/check-gitignore.sh"   # from the vault root, or with BRAIN_ROOT=<vault> set
+   bash "${CLAUDE_PLUGIN_ROOT}/bin/check-gitignore.sh"                # from the vault root, or with BRAIN_ROOT=<vault> set
+   bash "${CLAUDE_PLUGIN_ROOT}/bin/check-gitignore.sh" --attributes   # the same check for .gitattributes (INNOV-389)
    ```
-   - **Exit `0` (`GITIGNORE: OK`) →** ✅.
-   - **Exit `1` (`GITIGNORE: INCOMPLETE`) →** ❌ → **R8**. The script names each missing entry *and why the plugin needs it*; relay that, don't re-derive it.
+   The second run checks `.gitattributes` for `wiki/log.md merge=union`, which keeps both sides' lines when two saves append to the log. Without it, `/brain:save`'s freshness merge conflicts on `log.md`. `land-save.sh` unions it either way. Report the two runs as one check, ❌ if either fails.
+   - **Exit `0` (`GITIGNORE: OK` / `GITATTRIBUTES: OK`) →** ✅.
+   - **Exit `1` (`GITIGNORE: INCOMPLETE` / `GITATTRIBUTES: INCOMPLETE`) →** ❌ → **R8**. The script names each missing entry *and why the plugin needs it*; relay that, don't re-derive it.
    - Skip if check 4 failed — bind a vault first. A non-vault dir reports OK/skipped.
 
    **The required set is not listed here, deliberately.** It is parsed from the `# doctor:required` markers in `templates/gitignore` — the template IS the one definition (check 8's rule, same rationale).
@@ -155,7 +157,8 @@ Resolve the vault as `$BRAIN_ROOT` (else cwd). **Pinned graphify version: `0.8.4
   **Appends only** — never overwrites, reorders, or removes, and never re-seeds from the template. A vault's `.saveinclude` is customized (one real vault carries `prototypes/hub/my-account/`), and a template overwrite would silently drop those entries. Each appended line is commented with which command needs it. Show the diff and confirm before running — this is a governance file. Afterwards it must be **committed deliberately**: `.saveinclude` is not in the allowlist, so no brain command will ever commit it for you.
 - **R8 — vault .gitignore missing plugin-required entries.** Append them:
   ```bash
-  BRAIN_ROOT=<vault> bash "${CLAUDE_PLUGIN_ROOT}/bin/check-gitignore.sh" --fix
+  BRAIN_ROOT=<vault> bash "${CLAUDE_PLUGIN_ROOT}/bin/check-gitignore.sh" --fix                # .gitignore
+  BRAIN_ROOT=<vault> bash "${CLAUDE_PLUGIN_ROOT}/bin/check-gitignore.sh" --attributes --fix   # .gitattributes (created if absent)
   ```
   **Appends only** — never overwrites, reorders, or removes, and never re-seeds from the template. A vault's `.gitignore` is customized (users add their own private patterns), and a template overwrite would silently drop them. Each appended line is commented with why the plugin needs it. Show the diff and confirm before running — this is a governance file. Afterwards commit it **deliberately**: `.gitignore` is not in the allowlist, so no brain command will ever commit it for you.
 

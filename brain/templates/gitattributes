@@ -1,0 +1,10 @@
+# Vault .gitattributes (seeded by /brain:init).
+# Marker comment lines (the ones naming why an entry is required) are the
+# plugin's dependency set — /brain:doctor check 9 (bin/check-gitignore.sh
+# --attributes) parses THIS file for them. Keep each marker directly above its entry.
+
+# wiki/log.md is append-only: two sessions each append a line, and a merge of
+# the two should keep both. `union` does exactly that, so a log.md that both
+# sides appended to never conflicts (check-freshness merges, save PRs).
+# doctor:required append-only operation log — concurrent saves keep both lines (INNOV-389)
+wiki/log.md merge=union

@@ -833,6 +833,13 @@ last="$(tail -n 1 "$BOX/out.txt" | tr -d '\r')"
 assert_eq "sync-lock/never-clears-commits" "0" "$STATUS" "$(evidence)"
 assert_contains "sync-lock/warning-in-tail" "WARNING" "$(tail -n 3 "$BOX/out.txt")" "$(evidence)"
 assert_contains "sync-lock/remedy-is-last-line" "reset -q HEAD --" "$last" "$(evidence)"
+# INNOV-389: the warning names its cause. git's own stderr from the last try is
+# printed inside the block; it used to go to /dev/null, so a held lock could not be
+# told from any other failure.
+assert_contains "sync-lock/warning-says-what-git-said" "git said:" \
+  "$(sed -n '/WARNING/,$p' "$BOX/out.txt")" "$(evidence)"
+assert_contains "sync-lock/git-error-names-the-lock" "index.lock" \
+  "$(sed -n '/WARNING/,$p' "$BOX/out.txt")" "$(evidence)"
 assert_contains "sync-lock/remedy-literal-pathspecs" "--literal-pathspecs" "$last" "$(evidence)"
 assert_not_contains "sync-lock/push-not-after-warning" "Push when ready" \
   "$(sed -n '/WARNING/,$p' "$BOX/out.txt")" "$(evidence)"

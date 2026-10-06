@@ -27,6 +27,8 @@
 #   resume-brief.sh --cat PATH   PATH's content from the briefing ref; exit 1 if absent
 #   resume-brief.sh --logs       the newest 3 logs/YYYY-MM-DD-*.md paths, oldest first
 #   resume-brief.sh --backlog    one "Harvest: ... · Drafts: ..." line, or nothing (INNOV-295)
+#   resume-brief.sh --prs        "Open PR #N (<age>h[, CONFLICTING]): <title> - <url>" per own
+#                                PR older than 12h or conflicting, or nothing (INNOV-389)
 # Always exit 0 except --cat on a missing path. Degrades to the working tree when
 # origin/<default> cannot be resolved — a briefing that cannot reach the remote is
 # still a briefing, it just must not claim to be current.
@@ -160,6 +162,31 @@ case "${1:-}" in
     elif [[ -n "$harvest$drafts" ]]; then
       echo "$harvest$drafts"
     fi
+    exit 0
+    ;;
+  --prs)
+    # INNOV-389: a save lands itself now, so what is still open is what needs a
+    # person — promote/ingest PRs (manual by design) and saves land-save left
+    # open. One line per own PR older than 12h or CONFLICTING. Silent when there
+    # are none, and when gh is missing, unauthenticated or offline: context, never
+    # a gate. The age filter runs here, not in --jq, and in awk epoch arithmetic
+    # (days-from-civil), because macOS has no `date -d`.
+    command -v gh >/dev/null 2>&1 || exit 0
+    (cd "$VAULT" 2>/dev/null && gh pr list --author @me --state open \
+        --json number,title,createdAt,mergeable,url \
+        --jq '.[] | [.number, .createdAt, .mergeable, .url, .title] | @tsv' 2>/dev/null) |
+      awk -F '\t' -v now="$(date -u +%s)" '
+        function epoch(s,  y, m, d) {
+          y = substr(s, 1, 4) + 0; m = substr(s, 6, 2) + 0; d = substr(s, 9, 2) + 0
+          if (m <= 2) { y--; m += 12 }
+          d = 365 * y + int(y / 4) - int(y / 100) + int(y / 400) + int((153 * (m - 3) + 2) / 5) + d - 719469
+          return d * 86400 + substr(s, 12, 2) * 3600 + substr(s, 15, 2) * 60 + substr(s, 18, 2)
+        }
+        $1 ~ /^[0-9]+$/ {
+          h = int((now - epoch($2)) / 3600)
+          if (h < 12 && $3 != "CONFLICTING") next
+          printf "Open PR #%s (%dh%s): %s - %s\n", $1, h, ($3 == "CONFLICTING" ? ", CONFLICTING" : ""), $5, $4
+        }'
     exit 0
     ;;
 esac

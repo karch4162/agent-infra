@@ -535,6 +535,49 @@ assert_eq "gitignore/template-has-6-markers" "6" \
   "$(grep -c '^# doctor:required ' "$GI_TEMPLATE")" \
   "required: chats/, 4 graphify scratch patterns, .brain/"
 
+# --- 26. --attributes: .gitattributes gets the same check (INNOV-389) ----
+# A vault scaffolded before templates/gitattributes has no .gitattributes at
+# all; --fix creates it (nothing in it is user content yet) and appends.
+GA_TEMPLATE="$REPO_ROOT/brain/templates/gitattributes"
+mk_gvault "$(cat "$GI_TEMPLATE")"
+run_gitignore --attributes
+assert_eq "gitattributes/missing-file-exit-1" "1" "$STATUS" "$(evidence)"
+assert_prefix "gitattributes/verdict" "GITATTRIBUTES: INCOMPLETE" "$(first_line "$BOX/err.txt")" "$(evidence)"
+assert_contains "gitattributes/names-union-entry" "wiki/log.md merge=union" "$(out_all)" "$(evidence)"
+assert_contains "gitattributes/remedy" "--attributes --fix" "$(out_all)" "$(evidence)"
+run_gitignore --attributes --fix
+assert_eq "gitattributes/fix-exit-0" "0" "$STATUS" "$(evidence)"
+assert_contains "gitattributes/fix-created" "wiki/log.md merge=union" "$(cat "$VAULT/.gitattributes" 2>/dev/null)"
+run_gitignore --fix --attributes
+assert_eq "gitattributes/fix-then-clean-any-order" "0" "$STATUS" "$(evidence)"
+assert_prefix "gitattributes/ok-verdict" "GITATTRIBUTES: OK" "$(first_line "$BOX/out.txt")" "$(evidence)"
+# A customized .gitattributes keeps every byte; the default mode never reads it.
+mk_gvault "$(cat "$GI_TEMPLATE")"
+printf '*.png binary\r\n' >"$VAULT/.gitattributes"
+before="$(cat "$VAULT/.gitattributes")"
+run_gitignore --attributes --fix
+after="$(cat "$VAULT/.gitattributes")"
+assert_eq "gitattributes/fix-preserves-prefix" "$before" "${after:0:${#before}}"
+run_gitignore
+assert_eq "gitattributes/default-mode-unchanged" "0" "$STATUS" "$(evidence)"
+assert_prefix "gitattributes/default-mode-label" "GITIGNORE: OK" "$(first_line "$BOX/out.txt")" "$(evidence)"
+assert_eq "gitattributes/template-has-1-marker" "1" "$(grep -c '^# doctor:required ' "$GA_TEMPLATE")"
+# git actually honours the shipped line: a union merge keeps both sides.
+mk_gvault
+git -C "$VAULT" init -q -b main
+git -C "$VAULT" config user.email t@t.t; git -C "$VAULT" config user.name t
+git -C "$VAULT" config core.autocrlf false
+cp "$GA_TEMPLATE" "$VAULT/.gitattributes"
+printf -- '- base\n' >"$VAULT/wiki/log.md"
+git -C "$VAULT" add -A; git -C "$VAULT" commit -qm base
+git -C "$VAULT" checkout -qb other
+printf -- '- other\n' >>"$VAULT/wiki/log.md"; git -C "$VAULT" commit -qam other
+git -C "$VAULT" checkout -q main
+printf -- '- mine\n' >>"$VAULT/wiki/log.md"; git -C "$VAULT" commit -qam mine
+git -C "$VAULT" merge -q --no-edit other >/dev/null 2>&1
+assert_eq "gitattributes/union-merge-keeps-both" "- base|- mine|- other" \
+  "$(tr -d '\r' <"$VAULT/wiki/log.md" | paste -sd '|' -)"
+
 # ================================================ INNOV-318: checks 7, 12, 13 ===
 SHADOW_CHECK="$REPO_ROOT/brain/bin/check-shadow-install.sh"
 PREFIX_CHECK="$REPO_ROOT/brain/bin/check-command-prefix.sh"

@@ -33,6 +33,12 @@ Do these in order; keep the summary tight (the user wants to start working, not 
    ```
    A current `main` does **not** mean the vault is uncontested: a PR opened minutes ago can be rewriting the very note you're about to touch. Report them in the `In flight:` line below. If `gh` is missing, unauthed, or offline, say so in one line and carry on — this is context, not a gate.
 
+   Then nudge on **your own** stalled PRs (INNOV-389). `/brain:save` lands its own PR now, so whatever of yours is still open needs a person: a promote/ingest PR (manual by design) or a save that `land-save.sh` left open:
+   ```bash
+   bash "${CLAUDE_PLUGIN_ROOT}/bin/resume-brief.sh" --prs   # one line per own PR older than 12h or CONFLICTING; silent otherwise
+   ```
+   Put each line on an `Open PRs:` line of the output, **verbatim**. Like `In flight:`, it is a nudge, not a gate. Do not merge or close anything from resume.
+
 3. **Resolve the briefing ref, then read the hot cache from it.** Steps 3–5 read from `origin/<default>`, **never the working tree** — `/brain:save` leaves the checkout on its save branch, so the tree is routinely days behind and its `hot.md` describes loops that were closed since. Always read through the helper; do not hand-run `git show ref:path` (Git Bash mangles it and reports existing files as missing):
    ```bash
    B="${CLAUDE_PLUGIN_ROOT}/bin/resume-brief.sh"   # from the vault root, or with BRAIN_ROOT=<vault> set
@@ -68,6 +74,7 @@ Drift: <the helper's DRIFT: line, verbatim>   ← omit the line entirely when th
 Focus: <from hot.md>.
 Session: <the script's SESSION: WARN line, verbatim>   ← omit the line entirely on SESSION: OK
 In flight: #<n> <title> (<author>)      ← omit the line entirely if no PRs are open
+Open PRs: <each --prs line, verbatim>   ← omit the line entirely when --prs prints nothing
 Backlog: <the helper's --backlog line, verbatim>   ← omit the line entirely when it prints nothing
 Open loops:
   - <pending item> (from <log>)

@@ -165,6 +165,8 @@ VAULT="${BRAIN_ROOT:-${CLAUDE_PROJECT_DIR:-$PWD}}"
 BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/branch.sh
 . "$BIN_DIR/lib/branch.sh"
+# shellcheck source=lib/allowlist.sh
+. "$BIN_DIR/lib/allowlist.sh"
 
 MESSAGE=""
 unset PIN   # unset = no --pin; set-but-empty (--pin "") is malformed, never "unpinned"
@@ -246,8 +248,8 @@ fi
 # Missing or empty => REFUSE. See the header: a vault with no allowlist has no
 # permission model, and there is no safe default to fall back to.
 SAVEINCLUDE="$VAULT/.saveinclude"
-ALLOW=()
-if [[ ! -f "$SAVEINCLUDE" || ! -r "$SAVEINCLUDE" ]]; then
+# allowlist_load (lib/allowlist.sh) is the one parse, shared with land-save.sh.
+if ! allowlist_load "$SAVEINCLUDE"; then
   refuse "no readable .saveinclude at '$SAVEINCLUDE'" \
     "  .saveinclude is the vault's whole permission model: it is the list of paths" \
     "  a command may commit. Without it there is no safe default — committing" \
@@ -256,13 +258,6 @@ if [[ ! -f "$SAVEINCLUDE" || ! -r "$SAVEINCLUDE" ]]; then
     "  Remedy: copy the template into the vault root:" \
     "    cp \"\${CLAUDE_PLUGIN_ROOT}/templates/saveinclude\" \"$SAVEINCLUDE\""
 fi
-while IFS= read -r line || [[ -n "$line" ]]; do
-  line="${line%$'\r'}"                       # tolerate CRLF checkouts
-  line="${line#"${line%%[![:space:]]*}"}"    # ltrim
-  line="${line%"${line##*[![:space:]]}"}"    # rtrim
-  [[ -z "$line" || "$line" == \#* ]] && continue
-  ALLOW+=("$line")
-done <"$SAVEINCLUDE"
 
 if [[ ${#ALLOW[@]} -eq 0 ]]; then
   refuse "'.saveinclude' has no entries (only comments/blank lines)" \
@@ -275,33 +270,7 @@ if [[ $PRINT_ALLOWLIST -eq 1 ]]; then
   exit 0
 fi
 
-# True when vault-relative path $1 is covered by allowlist entry $2.
-#   entry ending in '/'      => prefix match (a directory and everything under it)
-#   entry containing a glob  => shell pattern match, and also matched as a
-#                               directory prefix so `graphify*/` style entries work
-#   plain entry              => exact match, or the path is under it as a directory
-path_is_allowed_by() { # path entry
-  local path="$1" entry="$2"
-  case "$entry" in
-    */) [[ "$path" == "$entry"* ]] && return 0 ;;
-    *[\*\?\[]*)
-        # shellcheck disable=SC2053  # glob match on the RHS is the point
-        [[ "$path" == $entry ]] && return 0
-        # shellcheck disable=SC2053
-        [[ "$path" == $entry/* ]] && return 0
-        ;;
-    *)  [[ "$path" == "$entry" || "$path" == "$entry"/* ]] && return 0 ;;
-  esac
-  return 1
-}
-
-path_is_allowed() { # path
-  local entry
-  for entry in "${ALLOW[@]}"; do
-    path_is_allowed_by "$1" "$entry" && return 0
-  done
-  return 1
-}
+# path_is_allowed / path_is_allowed_by come from lib/allowlist.sh.
 
 # --- 3. what are we staging? ------------------------------------------------
 # --pr-paths: the caller's named list replaces the allowlist, and is checked here
@@ -628,11 +597,14 @@ printf '  %s\n' "${STAGED[@]}"
 # commit: once another commit lands on top, resetting to this one would stage a
 # revert of it, and that commit's own sync owns the index.
 # Returns 0 synced, 1 failed (lock), 2 skipped (HEAD is no longer this commit).
+# A failure keeps git's stderr in SYNC_ERR for the WARNING below: discarded, a
+# held index.lock could not be told from anything else (INNOV-389).
+SYNC_ERR=""
 sync_index() {
   [[ "$(git -C "$VAULT" symbolic-ref -q HEAD 2>/dev/null || echo HEAD)" == "$REF" &&
      "$(git -C "$VAULT" rev-parse -q --verify HEAD 2>/dev/null)" == "$NEW" ]] || return 2
-  printf '%s\0' "${STAGED[@]}" | git --literal-pathspecs -C "$VAULT" \
-    reset -q "$NEW" --pathspec-from-file=- --pathspec-file-nul >/dev/null 2>&1 || return 1
+  SYNC_ERR="$(printf '%s\0' "${STAGED[@]}" | git --literal-pathspecs -C "$VAULT" \
+    reset -q "$NEW" --pathspec-from-file=- --pathspec-file-nul 2>&1 >/dev/null)" || return 1
 }
 # Short polls, not long sleeps: the lock is not held between tries, and every
 # gap is a window in which a raw `git commit` would record the staged revert.
@@ -672,7 +644,9 @@ echo "  Push when ready: git -C \"$VAULT\" push"
 # reap-branches.sh refusing to switch with an unrelated-looking git error.
 if [[ $sync_rc -eq 1 ]]; then
   echo "  WARNING: the shared index is locked and still holds the pre-commit versions"
-  echo "  of the paths above (shown as staged reverts in git status). Run:"
+  echo "  of the paths above (shown as staged reverts in git status). git said:"
+  printf '%s\n' "${SYNC_ERR:-(nothing)}" | sed 's/^/    /'
+  echo "  Run:"
   printf '    git --literal-pathspecs -C %q reset -q HEAD --' "$VAULT"
   printf ' %q' "${STAGED[@]}"
   echo

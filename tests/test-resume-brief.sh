@@ -346,6 +346,57 @@ status="$(run_brief --backlog)"
 assert_eq "backlog/noremote-exit-0" "0" "$status"
 assert_eq "backlog/noremote-drafts-from-tree" "Drafts: 1 (1 past $TTL-day TTL)" "$(cat "$BOX/out.txt")"
 
+# ==================================================== --prs (INNOV-389) ====
+# A stub gh answers `pr list` with $GH_PRS (the TSV the real --jq produces) and
+# logs its arguments; the age/conflict filter under test is resume-brief's own.
+PR_STUB="$TMPROOT/prbin"
+mkdir -p "$PR_STUB"
+cat >"$PR_STUB/gh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$GH_LOG"
+[[ "$1 $2" == "pr list" ]] && printf '%b' "${GH_PRS:-}"
+exit "${GH_RC:-0}"
+EOF
+chmod +x "$PR_STUB/gh"
+NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+run_prs() { # -> out.txt; GH_PRS / GH_RC from the caller
+  ( cd "$BOX" && PATH="$PR_STUB:$PATH" GH_LOG="$BOX/gh.log" BRAIN_ROOT="$VAULT" bash "$BRIEF" --prs ) \
+    >"$BOX/out.txt" 2>"$BOX/err.txt"
+  echo $?
+}
+
+new_vault
+GH_PRS="7\t2020-01-01T00:00:00Z\tMERGEABLE\thttps://g/pull/7\tpromote: old drafts\n"
+GH_PRS="$GH_PRS""8\t$NOW_ISO\tCONFLICTING\thttps://g/pull/8\tsave: 2026-10-06 — left open\n"
+GH_PRS="$GH_PRS""9\t$NOW_ISO\tMERGEABLE\thttps://g/pull/9\tpromote: fresh\n"
+export GH_PRS
+status="$(run_prs)"
+out="$(cat "$BOX/out.txt")"
+assert_eq "prs/exit-0" "0" "$status"
+assert_contains "prs/stale-listed" "$out" "Open PR #7 ("
+assert_contains "prs/stale-has-url" "$out" "promote: old drafts - https://g/pull/7"
+assert_contains "prs/conflicting-listed" "$out" "Open PR #8 (0h, CONFLICTING): save: 2026-10-06 — left open - https://g/pull/8"
+assert_not_contains "prs/fresh-mergeable-silent" "$out" "#9"
+assert_eq "prs/two-lines" "2" "$(grep -c . "$BOX/out.txt")"
+assert_contains "prs/only-own-prs" "$(cat "$BOX/gh.log")" "--author @me"
+assert_contains "prs/open-only" "$(cat "$BOX/gh.log")" "--state open"
+# Age arithmetic is real, not "older than a constant": 2020-01-01 is > 50000h ago.
+age="$(sed -n 's/^Open PR #7 (\([0-9]*\)h.*/\1/p' "$BOX/out.txt")"
+assert_eq "prs/age-is-hours-since-created" "yes" "$([[ "${age:-0}" -gt 50000 ]] && echo yes || echo no)"
+
+GH_PRS="9\t$NOW_ISO\tMERGEABLE\thttps://g/pull/9\tfresh\n"
+status="$(run_prs)"
+assert_eq "prs/nothing-to-say-silent" "" "$(cat "$BOX/out.txt")"
+GH_PRS=""
+status="$(run_prs)"
+assert_eq "prs/none-open-silent" "" "$(cat "$BOX/out.txt")"
+# gh unauthenticated or offline: it exits non-zero; resume says nothing.
+GH_PRS="garbage"
+status="$(GH_RC=1 run_prs)"
+assert_eq "prs/gh-error-exit-0" "0" "$status"
+assert_eq "prs/gh-error-silent" "" "$(cat "$BOX/out.txt")"
+unset GH_PRS
+
 echo
 echo "$PASSED passed, $FAILED failed"
 [[ "$FAILED" -eq 0 ]]
