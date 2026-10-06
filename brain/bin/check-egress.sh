@@ -12,9 +12,10 @@
 # local `claude` CLI with no API key, so a credential scan would pass while
 # content leaves. This asserts WHICH SUBCOMMAND RUNS.
 #
-# Scans every .sh and .mjs under the given dirs (default: this plugin's own
-# root), skipping comment lines (#, //, /*, *) so prose that names a subcommand
-# to forbid it (label-communities.mjs) does not trip. CRLF-safe.
+# Scans every .sh, .mjs and .md code fence under the given dirs (default: this
+# plugin's own root), skipping comment lines (#, //, /*, *) and .md prose, so
+# text that names a subcommand to forbid it (label-communities.mjs, label/
+# SKILL.md) does not trip. CRLF-safe.
 # ponytail: static grep, misses an invocation built from a variable
 # (`$G extract`); widen the pattern if such a call site ever appears.
 #
@@ -29,7 +30,7 @@ if [[ $# -eq 0 ]]; then
 fi
 
 files=()
-while IFS= read -r f; do files+=("$f"); done < <(find "$@" -type f \( -name '*.sh' -o -name '*.mjs' \) 2>/dev/null | sort)
+while IFS= read -r f; do files+=("$f"); done < <(find "$@" -type f \( -name '*.sh' -o -name '*.mjs' -o -name '*.md' \) 2>/dev/null | sort)
 if [[ ${#files[@]} -eq 0 ]]; then
   echo "EGRESS: OK - scanned 0 file(s) under $*"
   exit 0
@@ -38,10 +39,15 @@ fi
 # graphify, an optional quote and an optional `, [` (execFile argv form), then
 # an LLM subcommand as a whole word. `graphify-out` and `graphify wiki` miss.
 # One awk over every file: a process per file costs ~1 s each on Windows.
+# A SKILL.md is agent-executed too, but only its code fences: prose there names
+# subcommands to forbid them (label/SKILL.md), so .md lines outside a fence skip.
 hits="$(awk '{
   sub(/\r$/, "")
+  if (FNR == 1) { md = (FILENAME ~ /\.md$/); fence = 0 }
   l = $0
   sub(/^[ \t]+/, "", l)
+  if (md && l ~ /^(```|~~~)/) { fence = !fence; next }
+  if (md && !fence) next
   if (l ~ /^(#|\/\/|\/\*|\*)/) next
   if (l ~ /graphify["\047`]?[ \t]*(,[ \t]*[[]?[ \t]*)?["\047`]?(extract|cluster-only|provider|label)([^A-Za-z0-9_-]|$)/)
     print FILENAME ":" FNR ": " l

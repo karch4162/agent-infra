@@ -91,6 +91,19 @@ fresh_bin
 printf "// \`graphify label\` is deliberately NOT used\n/*\n * graphify cluster-only re-clusters\n */\nconst out = 'graphify-out/graph.json';\n" >"$TMPROOT/bin/fixture.mjs"
 expect_ok "mjs/comments-and-graphify-out-pass"
 
+# --- SKILL.md: code fences are agent-executed, prose is not --------------------
+fresh_bin
+printf -- '---\nname: x\n---\nRun:\n```bash\ngraphify extract wiki/\n```\n' >"$TMPROOT/bin/SKILL.md"
+expect_warn "md/fenced-extract-detected" "SKILL.md" 6
+
+fresh_bin
+printf -- 'Run:\r\n```bash\r\n  graphify label x\r\n```\r\n' >"$TMPROOT/bin/SKILL.md"
+expect_warn "md/crlf-fenced-label-detected" "SKILL.md" 3
+
+fresh_bin
+printf -- '- **Do not shell out to `graphify label` / `graphify cluster-only`.**\n```bash\ngraphify wiki --update\n# graphify extract is forbidden\n```\ngraphify extract in prose\n' >"$TMPROOT/bin/SKILL.md"
+expect_ok "md/prose-and-fenced-comment-pass"
+
 # --- the gate: the shipped tree is clean ---------------------------------------
 out="$(bash "$GATE" "$REPO_ROOT/brain" "$REPO_ROOT/wave" 2>&1)"; rc=$?
 if [[ $rc -eq 0 && "$out" == "EGRESS: OK"* ]]; then
