@@ -6,7 +6,7 @@
 # bash-4+ construct — mapfile/readarray, associative arrays, case-conversion
 # parameter expansions, &>> — is a syntax or runtime error there, and the
 # failure surfaces on someone else's laptop, not in CI. This suite is a static
-# gate: it greps every .sh under brain/ and wave/ for the whole construct class, so a
+# gate: it greps every .sh under brain/, wave/ and tools/ for the whole construct class, so a
 # regression fails here first.
 #
 # Run:  bash tests/test-bash32-portability.sh   (from anywhere)
@@ -85,7 +85,7 @@ while IFS= read -r f; do
   if ! file_hits="$(scan_file "$f")"; then
     violations="${violations}${file_hits}"
   fi
-done < <(find "$REPO_ROOT/brain" "$REPO_ROOT/wave" -type f -name '*.sh' | sort)
+done < <(find "$REPO_ROOT/brain" "$REPO_ROOT/wave" "$REPO_ROOT/tools" -type f -name '*.sh' | sort)
 
 if [[ $scanned -eq 0 ]]; then
   fail "gate/found-scripts" "no .sh files found under $REPO_ROOT/brain — gate scanned nothing"

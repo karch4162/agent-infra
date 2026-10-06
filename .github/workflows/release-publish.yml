@@ -1,0 +1,48 @@
+name: release publish
+
+# INNOV-387: after a release/<plugin> PR (release-pr.yml) merges, tag the
+# release commit, fast-forward the vendsy/agent-infra mirror to it, and create
+# the mirror's GitHub Release. tools/release-publish.sh works from origin/main,
+# not from this event, so any run finishes what an earlier red or cancelled
+# run left undone, and a push with no new version publishes nothing.
+#
+# Repo prerequisite: the MIRROR_TOKEN Actions secret, a fine-grained PAT for
+# vendsy/agent-infra only with Contents: read and write. Unset, every push to
+# main fails this run red.
+on:
+  push:
+    # No paths filter: a later push must be able to finish an earlier run.
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write  # push release tags to this repo
+
+concurrency:
+  group: release-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # Source repo only: the mirror receives this file on every ff-push and
+    # must never publish from there. Main only, like release-pr.yml.
+    if: github.repository == 'karch4162/agent-infra' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Both remotes are on github.com; the script sends each its own token.
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Tag, mirror and release
+        env:
+          ORIGIN_TOKEN: ${{ github.token }}
+          MIRROR_TOKEN: ${{ secrets.MIRROR_TOKEN }}
+          MIRROR_URL: https://github.com/vendsy/agent-infra.git
+          MIRROR_REPO: vendsy/agent-infra
+        run: bash tools/release-publish.sh
