@@ -121,9 +121,13 @@ function stricter(a, b) {
 }
 
 // --- the two rules -------------------------------------------------------------
+// A note directly under wiki/ is in no declarable area, so it counts as internal.
+// Only drafts are exempt: they are staging, and the gate bites at promotion.
+const ROOT_AREA = '(wiki root)';
 const areaOf = (path) => {
-  const m = path.match(/^wiki\/([^/]+)\/.+\.md$/);
-  return m && m[1] !== '_drafts' ? m[1] : null;
+  if (!/^wiki\/.+\.md$/.test(path) || path.startsWith('wiki/_drafts/')) return null;
+  const m = path.match(/^wiki\/([^/]+)\//);
+  return m ? m[1] : ROOT_AREA;
 };
 
 function tierFinding(policy, path, text) {
@@ -134,7 +138,7 @@ function tierFinding(policy, path, text) {
   const tag = noteTags(text).find((t) => policy.restrictedTags.includes(t.toLowerCase()));
   if (!tag) return null;
   return `${path}: tag '${tag}' is in restrictedTags, but area '${area}' is internal` +
-    (declared ? '' : ' (not declared in brain.json areas)');
+    (declared ? '' : area === ROOT_AREA ? ' (a note directly under wiki/ is in no area)' : ' (not declared in brain.json areas)');
 }
 
 function patternFinding(policy, path, text) {
@@ -194,11 +198,12 @@ function commitGate(policyRev, treeRev) {
   // An unreadable committed policy has no rules to be stricter than, and the
   // commit that replaces it with a readable one is the only way out: judge that
   // commit by its own brain.json. Any other commit still refuses.
-  if (a.errors && !b.errors && paths.includes('brain.json')) a = b;
+  // Only when brain.json is ALL the commit carries, so nothing rides along unjudged.
+  if (a.errors && !b.errors && paths.length === 1 && paths[0] === 'brain.json') a = b;
   const errors = [...(a.errors || []).map((e) => `${e} (committed)`), ...(b.errors || []).map((e) => `${e} (in this commit)`)];
   if (errors.length) {
     refuse('brain.json cannot be read as a governance policy', [...errors,
-      'A gate that cannot read its policy refuses rather than passing. Fix brain.json', 'through a PR, then re-run.']);
+      'A gate that cannot read its policy refuses rather than passing. Commit a readable', 'brain.json on its own (vault-commit.sh --pr-paths brain.json), then re-run.']);
   }
   const policy = stricter(a.policy, b.policy);
   const rules = `${policy.restrictedTags.length} restricted tag(s) and ${policy.deniedPatterns.length} denied pattern(s)`;

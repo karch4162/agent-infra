@@ -431,6 +431,17 @@ run_land
 assert_contains "policy[$CRLF]/skipped" "$(first)" "LAND: SKIPPED - 'brain/save-2026-10-06' breaks origin/main's brain.json policy"
 assert_contains "policy[$CRLF]/names-it" "$OUT" "logs/2026-10-06-mine.md: line 2 matches deniedPatterns entry"
 assert_eq "policy[$CRLF]/nothing-pushed" "none" "$(remote_branch brain/save-2026-10-06)"
+new_sandbox   # a later commit removed the name, but the merge still publishes the earlier one
+save_in "$VAULT" mine
+ap "$VAULT/logs/2026-10-06-mine.md" 'paired with Jane Doe'
+git -C "$VAULT" commit -q -am "name"
+wr "$VAULT/logs/2026-10-06-mine.md" 'log mine'
+git -C "$VAULT" commit -q -am "scrub"
+policy_lands '{"deniedPatterns": ["\\bJane Doe\\b"]}'
+run_land
+assert_contains "policy[$CRLF]/history-skipped" "$(first)" "LAND: SKIPPED - 'brain/save-2026-10-06' breaks origin/main's brain.json policy"
+assert_contains "policy[$CRLF]/history-names-commit" "$OUT" "(in commit "
+assert_eq "policy[$CRLF]/history-nothing-pushed" "none" "$(remote_branch brain/save-2026-10-06)"
 new_sandbox   # negative control: the same policy, a save without the name, lands
 save_in "$VAULT" mine
 policy_lands '{"deniedPatterns": ["\\bJane Doe\\b"]}'

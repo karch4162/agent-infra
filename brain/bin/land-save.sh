@@ -162,7 +162,16 @@ bad="$(outside_scope HEAD)"
 # The content gate vault-commit.sh applied at commit time (INNOV-297), re-run
 # against origin's brain.json: a save that branched before the policy tightened,
 # or log.md's union blob below, was never judged by the policy on main now.
+# The merge publishes every commit on the branch, not only the tip's tree, so a
+# blob a later commit removed is still judged: each non-merge commit's own
+# changes in its own tree, then the tip's whole diff (log.md's union is a merge).
 governance() { # tip — check-governance.mjs's output; non-zero when it refuses
+  local c out
+  for c in $(g rev-list --no-merges "$BASE..$1" 2>/dev/null); do
+    out="$(g diff-tree -r -z --name-only --no-renames --root "$c" 2>/dev/null |
+      BRAIN_ROOT="$VAULT" node "$BIN_DIR/check-governance.mjs" --policy "$BASE" --tree "$c" 2>&1)" ||
+      { printf '%s\n' "$out" "  (in commit ${c:0:12})"; return 1; }
+  done
   g diff -z --name-only --no-renames "$BASE...$1" 2>/dev/null |
     BRAIN_ROOT="$VAULT" node "$BIN_DIR/check-governance.mjs" --policy "$BASE" --tree "$1" 2>&1
 }

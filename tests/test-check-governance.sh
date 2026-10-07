@@ -140,6 +140,8 @@ for CRLF in 0 1; do
   wr "$VAULT/brain.json" '{"tracker": {"type": "none"}}'
   gov --doctor
   assert_contains "$L malformed/doctor-fixed-but-uncommitted" "$OUT" "(committed on HEAD)"
+  vc_pr brain.json logs/a.md
+  assert_contains "$L malformed/repair-carries-nothing-else" "$OUT" "brain.json is not valid JSON"
   vc_pr brain.json
   assert_eq "$L malformed/the-repair-commits" "VAULT-COMMIT: OK - committed 1 path(s) on 'brain/work'" "$FIRST" "$OUT"
   vc -m "save"
@@ -157,8 +159,13 @@ for CRLF in 0 1; do
   vc_pr wiki/other/acme.md
   assert_contains "$L tier/block-list-undeclared" "$OUT" "wiki/other/acme.md: tag 'named-account' is in restrictedTags, but area 'other' is internal (not declared in brain.json areas)"
 
-  echo "--- $L 4. negative control: the same note into a restricted area commits ---"
   rm -f "$VAULT/wiki/other/acme.md"
+  note "$VAULT/wiki/acme.md" 'tags: [named-account]'
+  vc_pr wiki/acme.md
+  assert_contains "$L tier/wiki-root-is-no-area" "$OUT" "wiki/acme.md: tag 'named-account' is in restrictedTags, but area '(wiki root)' is internal"
+  rm -f "$VAULT/wiki/acme.md"
+
+  echo "--- $L 4. negative control: the same note into a restricted area commits ---"
   note "$VAULT/wiki/secure/acme.md" 'tags: [billing, named-account]'
   vc_pr wiki/secure/acme.md
   assert_eq "$L control/committed" "VAULT-COMMIT: OK - committed 1 path(s) on 'brain/work'" "$FIRST" "$OUT"

@@ -176,7 +176,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/bin/vault-commit.sh" --print-allowlist
 - **`restrictedTags`**: a note carrying one of these tags may only be committed under an area declared `restricted`. Drafts have no area.
 - **`deniedPatterns`**: regular expressions, case-insensitive. Any committed path whose name or content matches one is refused, anywhere except `brain.json` itself and the `graphify/` / `graphify-out/` code-graph mirrors. This is the "no employer identifiers in a personal vault" gate.
 
-Both lists ship empty, and empty means today's behaviour. A commit is judged by the **stricter** of its parent's and its own `brain.json`, so it can neither loosen its own gate nor declare an area and fill it at once. A `brain.json` that does not parse refuses every commit until it is fixed (`/brain:doctor` check 15).
+Both lists ship empty, and empty means today's behaviour. A commit is judged by the **stricter** of its parent's and its own `brain.json`, so it can neither loosen its own gate nor declare an area and fill it at once. A `brain.json` that does not parse refuses every commit until a readable one is committed on its own, with nothing else in that commit (`vault-commit.sh --pr-paths brain.json`; `/brain:doctor` check 15).
 
 **A tier is a declaration and a write gate, not a read control.** Git has no per-path read ACL: everyone who can clone the vault reads every area, `restricted` included. When an area's content exceeds what every collaborator may read, that area moves to its own repo.
 
