@@ -135,6 +135,15 @@ for CRLF in 0 1; do
   assert_eq "$L malformed/refused" "VAULT-COMMIT: REFUSED - brain.json's governance policy refuses this commit" "$FIRST" "$OUT"
   assert_contains "$L malformed/names-file" "$OUT" "brain.json is not valid JSON"
   assert_eq "$L malformed/nothing-committed" "seed" "$(git -C "$VAULT" log -1 --format=%s)"
+  gov --doctor
+  assert_contains "$L malformed/doctor-sees-committed" "$FIRST" "GOVERNANCE: INVALID"
+  wr "$VAULT/brain.json" '{"tracker": {"type": "none"}}'
+  gov --doctor
+  assert_contains "$L malformed/doctor-fixed-but-uncommitted" "$OUT" "(committed on HEAD)"
+  vc_pr brain.json
+  assert_eq "$L malformed/the-repair-commits" "VAULT-COMMIT: OK - committed 1 path(s) on 'brain/work'" "$FIRST" "$OUT"
+  vc -m "save"
+  assert_eq "$L malformed/saves-work-again" "VAULT-COMMIT: OK - committed 1 path(s) on 'brain/work'" "$FIRST" "$OUT"
 
   echo "--- $L 3. restricted tag into an internal / undeclared area: refused ---"
   new_vault "$POLICY"
@@ -167,6 +176,11 @@ for CRLF in 0 1; do
   wr "$VAULT/logs/2026-10-07-x.md" '# Session' '' '27 of 29 branches; 630 of 632 notes; brain/bin/vault-commit.sh:546.'
   vc -m "save"
   assert_eq "$L pattern/shape-commits" "VAULT-COMMIT: OK - committed 1 path(s) on 'brain/work'" "$FIRST" "$OUT"
+  new_vault '{"deniedPatterns": ["Jane\\s+Doe"]}'
+  wr "$VAULT/logs/wrap.md" '# Session' 'met Jane' 'Doe at noon'
+  vc -m "save"
+  assert_contains "$L pattern/spans-lines" "$OUT" "logs/wrap.md: line 2 matches deniedPatterns entry 'Jane\\s+Doe'"
+  new_vault "$POLICY"
   wr "$VAULT/graphify/repo/graph.json" '{"author": "Jane Doe"}'
   vc -m "sync"
   assert_eq "$L pattern/mirrors-not-scanned" "VAULT-COMMIT: OK - committed 1 path(s) on 'brain/work'" "$FIRST" "$OUT"
@@ -203,6 +217,13 @@ for CRLF in 0 1; do
   wr "$VAULT/brain.json" '{"restrictedTags": "named-account"}'
   vc_pr brain.json
   assert_contains "$L schema/not-a-list" "$OUT" "restrictedTags must be a list of non-empty strings"
+  # Area keys and owners land verbatim in CODEOWNERS: no second rule smuggled in.
+  wr "$VAULT/brain.json" '{"areas": {"cs": {"owner": "alice\n* @mallory"}}}'
+  vc_pr brain.json
+  assert_contains "$L schema/owner-injection" "$OUT" "areas.cs.owner must be a GitHub handle or org/team"
+  wr "$VAULT/brain.json" '{"areas": {"cs/ @mallory\n*": {"owner": "alice"}}}'
+  vc_pr brain.json
+  assert_contains "$L schema/area-injection" "$OUT" "is not a wiki folder name"
   assert_eq "$L schema/nothing-committed" "seed" "$(git -C "$VAULT" log -1 --format=%s)"
 
   echo "--- $L 8. --doctor and --print-codeowners ---"

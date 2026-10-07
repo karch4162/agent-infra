@@ -52,6 +52,8 @@ import { noteTags } from './anchors.mjs';
 const VAULT = process.env.BRAIN_ROOT || process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const ACCESS = ['internal', 'restricted'];
 const UNSCANNED = /^(brain\.json$|graphify\/|graphify-out\/)/;
+const AREA = /^[A-Za-z0-9._-]+$/;
+const OWNER = /^@?[A-Za-z0-9-]+(\/[A-Za-z0-9._-]+)?$/;
 
 function out(lines, code) {
   process.stdout.write(lines.join('\n') + '\n');
@@ -83,7 +85,7 @@ function parsePolicy(text) {
   const deniedPatterns = [];
   list('deniedPatterns').forEach((src, i) => {
     try {
-      deniedPatterns.push({ src, re: new RegExp(src, 'i') });
+      deniedPatterns.push({ src, re: new RegExp(src, 'im') });
     } catch (e) {
       errors.push(`deniedPatterns[${i}] is not a valid regular expression (${e.message})`);
     }
@@ -94,10 +96,13 @@ function parsePolicy(text) {
     errors.push('areas must be an object keyed by area name');
   } else {
     for (const [name, a] of Object.entries(rawAreas)) {
+      // Both land verbatim in a CODEOWNERS rule, so neither may carry whitespace or
+      // a pattern character: a newline in either would be a second, unreviewed rule.
+      if (!AREA.test(name)) { errors.push(`areas key ${JSON.stringify(name)} is not a wiki folder name (letters, digits, . _ -)`); continue; }
       if (!a || typeof a !== 'object' || Array.isArray(a)) { errors.push(`areas.${name} must be an object`); continue; }
       const access = a.access ?? 'internal';
       if (!ACCESS.includes(access)) errors.push(`areas.${name}.access is '${access}'; allowed: ${ACCESS.join(', ')}`);
-      if (a.owner != null && (typeof a.owner !== 'string' || !a.owner.trim())) errors.push(`areas.${name}.owner must be a non-empty string`);
+      if (a.owner != null && (typeof a.owner !== 'string' || !OWNER.test(a.owner.trim()))) errors.push(`areas.${name}.owner must be a GitHub handle or org/team`);
       areas[name] = { access, owner: typeof a.owner === 'string' ? a.owner.trim().replace(/^@/, '') : '' };
     }
   }
@@ -136,9 +141,11 @@ function patternFinding(policy, path, text) {
   if (UNSCANNED.test(path)) return null;
   for (const p of policy.deniedPatterns) {
     if (p.re.test(path)) return `${path}: the path matches deniedPatterns entry '${p.src}'`;
-    const lines = text.replace(/\r\n/g, '\n').split('\n');
-    const i = lines.findIndex((l) => p.re.test(l));
-    if (i >= 0) return `${path}: line ${i + 1} matches deniedPatterns entry '${p.src}'`;
+    // The whole blob, so a pattern can span lines (`Jane\s+Doe`); `m` keeps ^ and $
+    // per line. The line reported is where the match starts.
+    const body = text.replace(/\r\n/g, '\n');
+    const m = p.re.exec(body);
+    if (m) return `${path}: line ${body.slice(0, m.index).split('\n').length} matches deniedPatterns entry '${p.src}'`;
   }
   return null;
 }
@@ -182,8 +189,12 @@ function commitGate(policyRev, treeRev) {
   } catch (e) {
     refuse('could not read brain.json from git, so the policy is unknown', [e.message]);
   }
-  const a = parsePolicy(base);
+  let a = parsePolicy(base);
   const b = parsePolicy(tree);
+  // An unreadable committed policy has no rules to be stricter than, and the
+  // commit that replaces it with a readable one is the only way out: judge that
+  // commit by its own brain.json. Any other commit still refuses.
+  if (a.errors && !b.errors && paths.includes('brain.json')) a = b;
   const errors = [...(a.errors || []).map((e) => `${e} (committed)`), ...(b.errors || []).map((e) => `${e} (in this commit)`)];
   if (errors.length) {
     refuse('brain.json cannot be read as a governance policy', [...errors,
@@ -235,8 +246,12 @@ function walk(dir) {
 
 function doctor() {
   const w = workingPolicy();
-  if (w.errors) out(['GOVERNANCE: INVALID - brain.json cannot be read as a governance policy', ...w.errors.map((e) => `  ${e}`),
-    '  Every vault commit refuses until this is fixed.'], 1);
+  // The gate reads the COMMITTED brain.json, so a fixed but uncommitted file is not healthy yet.
+  let head = {};
+  try { head = parsePolicy(readBlobs(['HEAD:brain.json'])[0]); } catch { /* not a git checkout: the working tree is all there is */ }
+  const errors = [...(w.errors || []), ...(head.errors || []).map((e) => `${e} (committed on HEAD)`)];
+  if (errors.length) out(['GOVERNANCE: INVALID - brain.json cannot be read as a governance policy', ...errors.map((e) => `  ${e}`),
+    '  Every vault commit refuses until a readable brain.json is committed (vault-commit.sh --pr-paths brain.json).'], 1);
   const p = w.policy;
   if (!w.present) out(['GOVERNANCE: OK - no brain.json; no areas, restrictedTags or deniedPatterns declared'], 0);
   const findings = [];
