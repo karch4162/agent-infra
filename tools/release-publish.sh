@@ -69,7 +69,7 @@ release_status() { # tag -> HTTP status of the mirror's Release lookup
 }
 
 main() {
-  [ -n "${MIRROR_TOKEN:-}" ] || die "MIRROR_TOKEN is empty. Set the MIRROR_TOKEN Actions secret (a fine-grained PAT for the mirror, Contents: read and write)."
+  [ -n "${MIRROR_TOKEN:-}" ] || die "MIRROR_TOKEN is empty. Set the MIRROR_TOKEN Actions secret (a fine-grained PAT for the mirror, Contents and Workflows: read and write)."
   [ -n "${MIRROR_URL:-}" ] || die "MIRROR_URL is not set."
   [ -n "${MIRROR_REPO:-}" ] || die "MIRROR_REPO is not set."
   local origin_tok="${ORIGIN_TOKEN:-}"

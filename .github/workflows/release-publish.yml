@@ -7,7 +7,8 @@ name: release publish
 # run left undone, and a push with no new version publishes nothing.
 #
 # Repo prerequisite: the MIRROR_TOKEN Actions secret, a fine-grained PAT for
-# vendsy/agent-infra only with Contents: read and write. Unset, every push to
+# vendsy/agent-infra only with Contents and Workflows: read and write (a push that
+# touches .github/workflows/ is refused without Workflows). Unset, every push to
 # main fails this run red.
 on:
   push:
