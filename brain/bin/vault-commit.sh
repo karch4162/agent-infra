@@ -644,8 +644,8 @@ echo "  Push when ready: git -C \"$VAULT\" push"
 # reap-branches.sh refusing to switch with an unrelated-looking git error.
 if [[ $sync_rc -eq 1 ]]; then
   echo "  WARNING: the shared index is locked and still holds the pre-commit versions"
-  echo "  of the paths above (shown as staged reverts in git status). git said:"
-  printf '%s\n' "${SYNC_ERR:-(nothing)}" | sed 's/^/    /'
+  echo "  of the paths above (shown as staged reverts in git status)."
+  echo "  git said: $(printf '%s\n' "$SYNC_ERR" | sed -n '/./{p;q;}' | tr -d '\r')"
   echo "  Run:"
   printf '    git --literal-pathspecs -C %q reset -q HEAD --' "$VAULT"
   printf ' %q' "${STAGED[@]}"

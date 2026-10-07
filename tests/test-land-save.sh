@@ -267,7 +267,7 @@ assert_not_contains "race[$tag]/log-no-markers" "$log_now" "<<<<<<<"
 assert_eq "race[$tag]/hot-is-folded" "$(printf '# Hot cache\n\nfocus theirs\nfocus mine')" "$(origin_show wiki/hot.md)"
 assert_eq "race[$tag]/both-logs" "yes yes" \
   "$(origin_has logs/2026-10-06-mine.md) $(origin_has logs/2026-10-06-theirs.md)"
-assert_eq "race[$tag]/ack-cleared" "no" "$([[ -f "$VAULT/.brain/land-hot" ]] && echo yes || echo no)"
+assert_eq "race[$tag]/ack-cleared" "no" "$([[ -f "$VAULT/.git/brain-land-hot" ]] && echo yes || echo no)"
 done
 done
 CRLF=0
@@ -289,6 +289,25 @@ run_land
 assert_contains "rehot/hot-again" "$(first)" "LAND: HOT"
 assert_eq "rehot/main-untouched" "$main_before" "$(origin_main)"
 assert_eq "rehot/third-hot-kept" "focus third" "$(origin_show wiki/hot.md | tail -n 1)"
+
+echo "--- 2c. a HOT that was never folded stays HOT (the record alone proves nothing) ---"
+new_sandbox
+save_in "$VAULT" mine
+other_lands theirs
+run_land
+assert_contains "nofold/first-hot" "$(first)" "LAND: HOT"
+main_before="$(origin_main)"
+run_land
+assert_contains "nofold/still-hot" "$(first)" "LAND: HOT"
+assert_eq "nofold/main-untouched" "$main_before" "$(origin_main)"
+assert_eq "nofold/theirs-hot-kept" "focus theirs" "$(origin_show wiki/hot.md | tail -n 1)"
+assert_eq "nofold/record-not-in-tree" "" "$(git -C "$VAULT" status --porcelain --ignored | grep -v '^!! .brain/' || true)"
+# A record left by another branch does not count either.
+git -C "$VAULT" checkout -q -b brain/save-2026-10-07
+wr "$VAULT/wiki/hot.md" "# Hot cache" "" "focus other branch"
+git -C "$VAULT" commit -qam "edit hot on another save branch"
+run_land
+assert_contains "nofold/other-branch-hot" "$(first)" "LAND: HOT"
 
 echo "--- 3. a conflict outside the known paths: LEFT OPEN, main untouched ---"
 new_sandbox

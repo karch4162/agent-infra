@@ -29,8 +29,10 @@
 #                    A save's own build is never assumed to be the newer one.
 #   wiki/hot.md      never dropped. LAND: HOT, nothing pushed; the agent folds
 #                    origin's version in through write-hot.sh, commits, re-runs.
-#                    .brain/land-hot records which origin blob was handed over,
-#                    so a hot.md that moved AGAIN is handed over again — a
+#                    The git dir's brain-land-hot records which origin blob was
+#                    handed over, on which branch, at which tip; only a later
+#                    hot.md commit on that branch counts as the fold, and a
+#                    hot.md that moved AGAIN is handed over again — a
 #                    compare-and-swap, like write-hot.sh's own pin.
 # Any other conflicted path (logs/, graphify/, a trusted note) leaves the PR
 # open and the default branch untouched.
@@ -129,6 +131,7 @@ fi
   skip "could not resolve origin's default branch"
 BASE="refs/remotes/origin/$DEFAULT"
 HEAD_SHA="$(g rev-parse HEAD)"
+ACK="$(g rev-parse --path-format=absolute --git-path brain-land-hot)"
 [[ "$(g rev-list --count "$BASE..HEAD" 2>/dev/null)" -gt 0 ]] ||
   skip "nothing to land: '$BRANCH' has no commit that origin/$DEFAULT lacks"
 
@@ -223,13 +226,20 @@ if ! g merge-base --is-ancestor "$BASE" HEAD; then
         "  or close the PR. /brain:resume lists it until then."
     fi
 
-    ACK="$VAULT/.brain/land-hot"
+    # The hand-over record: "<origin hot.md blob> <branch> <tip when handed over>".
+    # It counts as a fold only for THIS branch, and only once a later commit on it
+    # changed hot.md — so a stale record (a HOT never folded, another save) never
+    # lets a save take its own side. Kept in the git dir, not the working tree.
     if [[ "$CONFLICTED" == *$'\n'wiki/hot.md$'\n'* ]]; then
       origin_hot="$(blob_at "$BASE" wiki/hot.md)"
-      if [[ -n "$HOT2" && -f "$ACK" && "$(tr -d '\r\n' <"$ACK")" == "$origin_hot" ]]; then
+      read -r ack_blob ack_branch ack_tip _ 2>/dev/null <"$ACK" || ack_blob=""
+      if [[ -n "$HOT2" && -n "$ack_blob" && "$ack_blob" == "$origin_hot" && "$ack_branch" == "$BRANCH" &&
+            "$ack_tip" != "$HEAD_SHA" ]] &&
+         g merge-base --is-ancestor "$ack_tip" HEAD 2>/dev/null &&
+         ! g diff --quiet "$ack_tip" HEAD -- wiki/hot.md 2>/dev/null; then
         RESOLVED="$RESOLVED wiki/hot.md (this save's fold of origin's version)"
       else
-        mkdir -p "$VAULT/.brain" && printf '%s\n' "$origin_hot" >"$ACK"
+        printf '%s %s %s\n' "$origin_hot" "$BRANCH" "$HEAD_SHA" >"$ACK"
         say "HOT - wiki/hot.md changed on origin/$DEFAULT since this save branched; nothing was pushed" \
           "  hot.md is rewritten wholesale, so taking either side would discard a session's" \
           "  curation. Fold origin's version into this save's, then re-run land-save:" \
@@ -296,7 +306,7 @@ while :; do
   sleep "${LAND_MERGE_RETRY_SECS:-2}"
 done
 
-rm -f "$VAULT/.brain/land-hot"
+rm -f "$ACK"
 notes=()
 if ! g push -q origin --delete "$BRANCH" >/dev/null 2>&1; then
   notes+=("  NOTE: could not delete origin's '$BRANCH'; delete it by hand (it is merged).")
