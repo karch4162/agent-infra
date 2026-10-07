@@ -126,6 +126,30 @@ export function parseFrontmatter(text) {
 }
 
 /**
+ * A note's `tags:`, inline (`tags: [a, b]`) or as a block list (`tags:` then
+ * `  - a` lines). parseFrontmatter is flat, so it sees a block list as an empty
+ * value; this is the one tag grammar, shared by the weekly report
+ * (freshness.mjs) and the write gate (check-governance.mjs, INNOV-297).
+ */
+export function noteTags(text) {
+  const m = text.replace(/\r\n/g, '\n').match(/^---\n([\s\S]*?)\n---/);
+  if (!m) return [];
+  const lines = m[1].split('\n');
+  const at = lines.findIndex((l) => /^tags:/.test(l));
+  if (at < 0) return [];
+  const clean = (t) => stripComment(t).trim().replace(/^(["'])(.*)\1$/, '$2').trim();
+  const inline = stripComment(lines[at].slice('tags:'.length)).trim();
+  if (inline) return inline.replace(/^\[|\]$/g, '').split(',').map(clean).filter(Boolean);
+  const tags = [];
+  for (const l of lines.slice(at + 1)) {
+    const item = l.match(/^\s*-\s+(.*)$/);
+    if (!item) break;
+    tags.push(clean(item[1]));
+  }
+  return tags.filter(Boolean);
+}
+
+/**
  * The frontmatter enums (INNOV-294) — the one definition, shared by the weekly
  * report (freshness.mjs) and the promote gate (check-anchors.mjs).
  */

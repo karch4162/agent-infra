@@ -12,7 +12,8 @@
 # hot.md that moved again re-HOTs); a conflict outside the known paths is LEFT
 # OPEN with origin's default untouched; graphify-out/ keeps origin's whole tree;
 # no remote / no gh auth / a non-save branch / an out-of-sync index / a path
-# outside origin's .saveinclude are SKIPPED with nothing pushed; a moved remote
+# outside origin's .saveinclude, or content origin's brain.json now denies
+# (INNOV-297), are SKIPPED with nothing pushed; a moved remote
 # branch is never overwritten; a blocked merge is LEFT OPEN; a dirty trusted note
 # in the checkout never stops a landing, and is never touched.
 #
@@ -408,6 +409,35 @@ run_land
 assert_contains "scope/skipped" "$(first)" "LAND: SKIPPED"
 assert_contains "scope/names-path" "$OUT" "private/secret.md"
 assert_eq "scope/nothing-pushed" "none" "$(remote_branch brain/save-2026-10-06)"
+
+for CRLF in 0 1; do
+echo "--- 8b. [crlf$CRLF] origin's brain.json tightened after the save branched: SKIPPED (INNOV-297) ---"
+policy_lands() { # brain.json body — origin main gains it, and nothing else
+  local co="$BOX/policy"
+  rm -rf "$co"
+  git clone -q -c core.autocrlf="$(ac)" "$ORIGIN" "$co"
+  cfg "$co"
+  wr "$co/brain.json" "$1"
+  git -C "$co" add brain.json
+  git -C "$co" commit -q -m policy
+  git -C "$co" push -q origin main
+}
+new_sandbox
+save_in "$VAULT" mine
+ap "$VAULT/logs/2026-10-06-mine.md" 'paired with Jane Doe'
+git -C "$VAULT" commit -q -am "name"
+policy_lands '{"deniedPatterns": ["\\bJane Doe\\b"]}'
+run_land
+assert_contains "policy[$CRLF]/skipped" "$(first)" "LAND: SKIPPED - 'brain/save-2026-10-06' breaks origin/main's brain.json policy"
+assert_contains "policy[$CRLF]/names-it" "$OUT" "logs/2026-10-06-mine.md: line 2 matches deniedPatterns entry"
+assert_eq "policy[$CRLF]/nothing-pushed" "none" "$(remote_branch brain/save-2026-10-06)"
+new_sandbox   # negative control: the same policy, a save without the name, lands
+save_in "$VAULT" mine
+policy_lands '{"deniedPatterns": ["\\bJane Doe\\b"]}'
+run_land
+assert_eq "policy[$CRLF]/clean-save-lands" "LAND: MERGED #1" "$(first)" "$OUT"
+done
+CRLF=0
 
 echo "--- 9. the remote save branch moved: push rejected, never overwritten ---"
 new_sandbox

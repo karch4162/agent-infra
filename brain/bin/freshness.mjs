@@ -37,7 +37,7 @@ import { join, basename, relative } from 'node:path';
 // revisions, the three-state verdict) lives in ONE place and is shared with
 // check-anchors.mjs — see brain/bin/anchors.mjs. Two implementations of one
 // resolver is the defect, not the convenience.
-import { buildAnchorContext, classifyAnchors, parseFrontmatter, enumValue, stripComment, malformedEnums } from './anchors.mjs';
+import { buildAnchorContext, classifyAnchors, parseFrontmatter, noteTags, enumValue, stripComment, malformedEnums } from './anchors.mjs';
 
 const argv = process.argv.slice(2);
 const argVal = (flag) => (argv.indexOf(flag) >= 0 ? argv[argv.indexOf(flag) + 1] : undefined);
@@ -134,10 +134,7 @@ function parseNote(file) {
   const text = readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
   const fm = parseFrontmatter(text);
   const links = wikilinks(text);
-  // tags: [a, b, c]  → ['a','b','c']
-  const tags = fm.tags
-    ? fm.tags.replace(/^\[|\]$/g, '').split(',').map((t) => t.trim()).filter(Boolean)
-    : [];
+  const tags = noteTags(text);
   return { file, text, fm, links, tags };
 }
 

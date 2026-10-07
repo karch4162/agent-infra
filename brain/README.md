@@ -146,6 +146,7 @@ Every command that commits to a vault goes through it. `/brain:save` step 6 and 
 | **HEAD moved** since the caller pinned it — a concurrent session changed branches or merged underneath the run | **none** |
 | the branch has an **open PR** | `--force-commit` |
 | **no `.saveinclude`**, or an empty one | **none** |
+| content that breaks the vault's **`brain.json` governance** (a restricted tag outside a restricted area, a denied pattern), or a `brain.json` that does not parse — see below | **none** |
 | the git index contains **any path outside `.saveinclude`** | **none** |
 | `--pr-paths` (a PR-bound commit of named paths outside `.saveinclude`): no `--pin`, a named path under `chats/`, gitignored or outside the vault, or **anything already staged** | **none** |
 
@@ -158,6 +159,26 @@ The last row is the one that makes the guarantee real. The git index is **global
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/bin/vault-commit.sh" --print-allowlist
 ```
+
+**Content, not just paths (INNOV-297).** `.saveinclude` says which paths may be committed, never whether their content belongs in this vault. The vault's committed `brain.json` can declare that too, and `bin/check-governance.mjs` checks every commit `vault-commit.sh` makes and every save `land-save.sh` lands (against origin's `brain.json`):
+
+```json
+{
+  "tracker": { "type": "jira", "project": "INNOV" },
+  "people": ["alice"],
+  "areas": { "hub": { "access": "internal", "owner": "alice" }, "cs-context": { "access": "restricted", "owner": "alice" } },
+  "restrictedTags": ["named-account"],
+  "deniedPatterns": ["\\bJane Doe\\b"]
+}
+```
+
+- **`areas`**: `wiki/<area>/` → `access` (`internal` | `restricted`; absent area or absent access = `internal`) and `owner` (a GitHub handle; `--print-codeowners` turns these into `.github/CODEOWNERS` lines).
+- **`restrictedTags`**: a note carrying one of these tags may only be committed under an area declared `restricted`. Drafts have no area.
+- **`deniedPatterns`**: regular expressions, case-insensitive. Any committed path whose name or content matches one is refused, anywhere except `brain.json` itself and the `graphify/` / `graphify-out/` code-graph mirrors. This is the "no employer identifiers in a personal vault" gate.
+
+Both lists ship empty, and empty means today's behaviour. A commit is judged by the **stricter** of its parent's and its own `brain.json`, so it can neither loosen its own gate nor declare an area and fill it at once. A `brain.json` that does not parse refuses every commit until it is fixed (`/brain:doctor` check 15).
+
+**A tier is a declaration and a write gate, not a read control.** Git has no per-path read ACL: everyone who can clone the vault reads every area, `restricted` included. When an area's content exceeds what every collaborator may read, that area moves to its own repo.
 
 ### Layer 2 — the optional net: a `wiki/**` push ruleset
 

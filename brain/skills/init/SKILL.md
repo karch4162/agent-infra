@@ -26,14 +26,12 @@ A user/org-level list of known vaults at **`~/.claude/brain/registry.json`** (cr
   "vaults": [
     {
       "name": "personal",
-      "path": "/c/Users/me/Projects/AI-OS/personal-brain",
-      "governance": { "egress": "off", "access": "private", "graphifyignore": "default" }
+      "path": "/c/Users/me/Projects/AI-OS/personal-brain"
     },
     {
       "name": "team-brain",
       "remote": "git@github.com:<org>/team-brain.git",
-      "path": "/c/Users/me/Projects/team-brain",
-      "governance": { "egress": "off", "access": "eng-only", "graphifyignore": "strict" }
+      "path": "/c/Users/me/Projects/team-brain"
     }
   ]
 }
@@ -102,7 +100,7 @@ A user/org-level list of known vaults at **`~/.claude/brain/registry.json`** (cr
    ```
    **This is the one commit in the plugin that does not go through `bin/vault-commit.sh`, and the exception is narrow: a brand-new vault, `git init`ed seconds ago, empty, with no remote and no other session.** Every guard vault-commit.sh applies is either meaningless here (there is no protected branch to protect, no PR, no concurrent session) or actively wrong (the allowlist it enforces is one of the files being created by this very commit — it cannot gate its own creation). It applies to case **(b) only**: an **existing** vault takes path (a), which adds missing governance files but **does not commit them** — the user commits those deliberately. From the second commit onward, every write to any vault goes through `vault-commit.sh`.
 
-   In **both** cases, append the vault to the registry with its governance profile. Then check the vault's **committed** `<vault>/brain.json` for a `tracker` — **only if it is missing**, ask (via `AskUserQuestion`) **where this vault's auto-filed findings should go**: a Jira project, a Linear team, or "keep them queued". Write the answer to `<vault>/brain.json` (`{"tracker": {"type": "jira", "project": "…"}}` / `{"tracker": {"type": "linear", "team": "…"}}` / `{"tracker": {"type": "none"}}`; preserve any other keys). A Jira tracker may also carry an optional `"site": "<name>.atlassian.net"`; the wave plugin's `bootstrap.sh` reads it for `WAVE_JIRA_SITE`. It belongs to the **vault**, not the per-machine registry: everyone who pulls the vault must file to the same board, so a teammate's `/brain:init` finds it already set and never re-asks. In case **(b)** write it before the scaffold commit so it ships in that commit; in case **(a)** it is a new governance file like the others — tell the user to commit it deliberately. A work vault and a personal vault must not share a board, so never default this silently; `/brain:save`'s drain step asks the same question later if it's left unset.
+   In **both** cases, append the vault to the registry. Then check the vault's **committed** `<vault>/brain.json` for a `tracker` — **only if it is missing**, ask (via `AskUserQuestion`) **where this vault's auto-filed findings should go**: a Jira project, a Linear team, or "keep them queued". Write the answer to `<vault>/brain.json` (`{"tracker": {"type": "jira", "project": "…"}}` / `{"tracker": {"type": "linear", "team": "…"}}` / `{"tracker": {"type": "none"}}`; preserve any other keys). A Jira tracker may also carry an optional `"site": "<name>.atlassian.net"`; the wave plugin's `bootstrap.sh` reads it for `WAVE_JIRA_SITE`. It belongs to the **vault**, not the per-machine registry: everyone who pulls the vault must file to the same board, so a teammate's `/brain:init` finds it already set and never re-asks. In case **(b)** write it before the scaffold commit so it ships in that commit; in case **(a)** it is a new governance file like the others — tell the user to commit it deliberately. A work vault and a personal vault must not share a board, so never default this silently; `/brain:save`'s drain step asks the same question later if it's left unset.
 
 6. **Wire this project to the vault — machine-locally.** `BRAIN_ROOT`/`REPOS_DIR` are **absolute, machine-specific** paths, so persist them to **`.claude/settings.local.json`** (the per-machine override) — NOT the shared `.claude/settings.json`, which would carry one dev's paths into every teammate's clone. Create it if missing, preserve existing keys, and ensure it's gitignored (append `.claude/settings.local.json` to the project's `.gitignore` if absent — never commit one machine's paths into a shared repo):
    ```json
@@ -156,7 +154,7 @@ A user/org-level list of known vaults at **`~/.claude/brain/registry.json`** (cr
 
    Call this out as a real choice because the first build can take a few minutes on a large repo (the docs-ingest dispatches subagents). Don't auto-run it silently.
 
-8. **Verify, then confirm.** Setup isn't done until it's *checked* — run the `/brain:doctor` check table (all checks, no repairs unless something is ❌; offer the matching repair if so) so the user leaves init with a green bill of health instead of an assumption. Then print: the chosen vault (name + path), its recorded governance profile (label it *recorded, not enforced* — it is not part of the health check), that `BRAIN_ROOT`/`REPOS_DIR` are wired (machine-local), the recorded graph scope, and **whether the brain was seeded just now or is still empty pending `/brain:save`**. If seeded, the vault is ready to `/brain:resume` and query; if deferred, the next step is `/brain:save`. **Do not run raw `/graphify` on the repo** — it would ask you to pick a scope, which the brain has already standardized away.
+8. **Verify, then confirm.** Setup isn't done until it's *checked* — run the `/brain:doctor` check table (all checks, no repairs unless something is ❌; offer the matching repair if so) so the user leaves init with a green bill of health instead of an assumption. Then print: the chosen vault (name + path), that `BRAIN_ROOT`/`REPOS_DIR` are wired (machine-local), the recorded graph scope, and **whether the brain was seeded just now or is still empty pending `/brain:save`**. If seeded, the vault is ready to `/brain:resume` and query; if deferred, the next step is `/brain:save`. **Do not run raw `/graphify` on the repo** — it would ask you to pick a scope, which the brain has already standardized away.
 
 ## Running more than one session at once — use a git worktree
 
@@ -184,4 +182,4 @@ Why it is an upgrade and not a prerequisite: `bin/vault-commit.sh` (one guarded 
 
 - The graph-before-grep hook ships **with this plugin** (`hooks/hooks.json`) — enabling the plugin is enough; `/brain:init` does **not** edit the global `~/.claude/settings.json` (a change from the hand-assembled pilot, which installed the hook globally).
 - Reconfigurable later: re-run `/brain:init` to point a project at a different vault.
-- A vault's `governance` block (`egress`, `access`, `graphifyignore`) is **recorded** on its registry entry for future use. **Nothing reads or enforces it yet** — selecting a vault does not change that project's sync. Do not tell the user it is in effect.
+- The registry carries **no governance profile** (INNOV-297). Sensitivity is per wiki area, declared in the vault's committed `brain.json` (`areas`, `restrictedTags`, `deniedPatterns`) and enforced at commit by `bin/check-governance.mjs` (doctor check 15). LLM egress is asserted from code paths by doctor check 14. A legacy registry entry that still carries a `governance` block is not imported. Routing a repo to the right vault is still this skill's confirm step, not a recorded value.

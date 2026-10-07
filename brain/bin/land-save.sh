@@ -159,6 +159,17 @@ bad="$(outside_scope HEAD)"
   skip "'$BRANCH' carries path(s) outside origin/$DEFAULT's .saveinclude: $(printf '%s' "$bad" | tr '\n' ' ')" \
     "  Nothing was pushed. Session output lands automatically; anything else goes" \
     "  through a reviewed PR ([[promote]])."
+# The content gate vault-commit.sh applied at commit time (INNOV-297), re-run
+# against origin's brain.json: a save that branched before the policy tightened,
+# or log.md's union blob below, was never judged by the policy on main now.
+governance() { # tip — check-governance.mjs's output; non-zero when it refuses
+  g diff -z --name-only --no-renames "$BASE...$1" 2>/dev/null |
+    BRAIN_ROOT="$VAULT" node "$BIN_DIR/check-governance.mjs" --policy "$BASE" --tree "$1" 2>&1
+}
+gov="$(governance HEAD)" ||
+  skip "'$BRANCH' breaks origin/$DEFAULT's brain.json policy" \
+    "$(printf '%s\n' "$gov" | sed 's/^/    /')" \
+    "  Nothing was pushed."
 
 # --- 4. merge, if origin moved ------------------------------------------------
 open_pr() {
@@ -296,6 +307,9 @@ g fetch -q origin 2>/dev/null
 load_policy || say "LEFT OPEN #$PR - origin/$DEFAULT no longer has a .saveinclude with entries"
 bad="$(outside_scope "${pushed:-$TIP}")"
 [[ -z "$bad" ]] || say "LEFT OPEN #$PR - the pushed branch carries path(s) outside origin/$DEFAULT's .saveinclude: $(printf '%s' "$bad" | tr '\n' ' ')"
+gov="$(governance "${pushed:-$TIP}")" ||
+  say "LEFT OPEN #$PR - the pushed branch breaks origin/$DEFAULT's brain.json policy" \
+    "$(printf '%s\n' "$gov" | sed 's/^/    /')"
 
 tries=0
 while :; do

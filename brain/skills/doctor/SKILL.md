@@ -129,6 +129,13 @@ Resolve the vault as `$BRAIN_ROOT` (else cwd). **Pinned graphify version: `0.8.4
     ```
     - **Exit `0` (`EGRESS: OK`) →** ✅, quote the line.
     - **Exit `1` (`EGRESS: WARN <file:line>`) →** ⚠️ **no scripted repair** — the installed plugin itself invokes an LLM subcommand. Relay each line **verbatim** and file it as a plugin finding; never edit the plugin cache. `tests/test-egress-gate.sh` runs the same script in CI, so this should only fire on a hand-edited install.
+15. **Area governance (INNOV-297)** — the vault's committed `brain.json` declares per-area access tiers (`areas.<area>.access`: `internal` | `restricted`, plus `owner`), `restrictedTags` and `deniedPatterns`. `vault-commit.sh` and `land-save.sh` enforce them on every commit through `bin/check-governance.mjs`. A tier is **a declaration and a write gate, not a read control**: git has no per-path read ACL, so every collaborator reads every area. An area whose tier exceeds what all of them may read belongs in its own repo.
+    ```bash
+    node "${CLAUDE_PLUGIN_ROOT}/bin/check-governance.mjs" --doctor   # from the vault root, or with BRAIN_ROOT=<vault> set
+    ```
+    - **Exit `0` (`GOVERNANCE: OK`) →** ✅, quote the line. No `brain.json` is OK: nothing is declared.
+    - **Exit `0` (`GOVERNANCE: WARN`) →** ⚠️ **no scripted repair**, relay each line **verbatim**. An area with no `owner` is a finding, never a refusal. A trusted note that already carries a restricted tag outside a `restricted` area will be refused the next time a commit touches it. A missing or stale `.github/CODEOWNERS` line: generate the lines with `node "${CLAUDE_PLUGIN_ROOT}/bin/check-governance.mjs" --print-codeowners` and commit them through a PR. CODEOWNERS routes review of an area to its owner; it is not a read control either.
+    - **Exit `1` (`GOVERNANCE: INVALID`) →** ❌ **every vault commit refuses until it is fixed** (the gate fails closed). Relay verbatim; the fix is a `brain.json` edit through a PR. Skip this check if check 4 failed.
 
 ## Repairs (ask before R1 and R9 — they touch global installs)
 
@@ -203,5 +210,6 @@ Brain doctor — <vault name or path>
   shadowing install    ❌ brain@agent-infra 0.2.36 (user) + tray-brain@tray-brain-marketplace 0.2.33 (project) → offer R9
   command prefix       ❌ vault CLAUDE.md names /tray-brain: x4, installed is /brain: → offer R10
   LLM egress           ✅ EGRESS: OK - scanned 63 file(s), no graphify LLM subcommand invoked
+  area governance      ⚠️ GOVERNANCE: WARN - 1 finding(s) in brain.json's governance: area 'ops' has no owner
 <then apply confirmed repairs and re-check>
 ```
