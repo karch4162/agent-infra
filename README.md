@@ -142,7 +142,7 @@ claude plugin install   brain@agent-infra   # then /reload-plugins (or restart)
 | graphify | **delegated** (`uv tool install graphifyy`), not vendored | one-installer rule (§16.1) |
 | Always-on query rule | shipped as `templates/CLAUDE.brain.md`, written into the vault `CLAUDE.md` by `/brain:init` | plugins can't ship an always-on `CLAUDE.md`; matches the pilot + the §17.2 diff target |
 | grep-before-grep hook | shipped in the plugin (`hooks/hooks.json`) | replaces the pilot's **global** `~/.claude/settings.json` hook — `/brain:init` no longer edits global config |
-| Covered repos | auto-derived from `graphify/<repo>/` mirror folders | removes the pilot's hardcoded volleyball repo list |
+| Covered repos | auto-derived from `graphify/<repo>/` mirror folders, resolved to checkouts via `repos.json` (sub-path mirrors harvest their shared checkout root) | removes the pilot's hardcoded volleyball repo list |
 
 ## Maps to the baseline acceptance checklist
 
