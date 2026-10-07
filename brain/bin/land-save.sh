@@ -297,6 +297,14 @@ if ! g merge-base --is-ancestor "$BASE" HEAD; then
 fi
 
 # --- 5. push, PR, re-verify, merge --------------------------------------------
+# The merge above can write a blob no commit was ever judged on (log.md's union),
+# so the tip is checked before it leaves this machine, not only after.
+if [[ "$TIP" != "$HEAD_SHA" ]]; then
+  gov="$(governance "$TIP")" ||
+    skip "the merge of origin/$DEFAULT into '$BRANCH' breaks origin/$DEFAULT's brain.json policy" \
+      "$(printf '%s\n' "$gov" | sed 's/^/    /')" \
+      "  Nothing was pushed."
+fi
 push_tip "$TIP"
 ensure_pr
 g fetch -q origin "refs/heads/$BRANCH" 2>/dev/null

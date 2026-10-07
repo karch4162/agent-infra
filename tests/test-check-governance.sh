@@ -125,6 +125,10 @@ for CRLF in 0 1; do
   OUT="$(printf 'logs/a.md\0' | BRAIN_ROOT="$VAULT" node "$GOV" --policy "$sha" --tree "$sha" 2>&1)"; ST=$?
   assert_eq "$L empty/gate-ran-exit" "0" "$ST" "$OUT"
   assert_contains "$L empty/gate-ran-says-so" "$OUT" "GOVERNANCE: OK - 1 path(s) checked against 0 restricted tag(s) and 0 denied pattern(s)"
+  # cat-file --batch reads newline-delimited specs: such a name is refused, never skipped.
+  OUT="$(printf 'logs/a\nb.md\0logs/c.md\r\0' | BRAIN_ROOT="$VAULT" node "$GOV" --policy "$sha" --tree "$sha" 2>&1)"; ST=$?
+  assert_eq "$L newline-path/refused-exit" "1" "$ST" "$OUT"
+  assert_contains "$L newline-path/refused" "$OUT" "2 path(s) contain a newline or carriage return"
   new_vault '{"tracker": '
   wr "$VAULT/logs/a.md" 'anything'
   vc -m "save"

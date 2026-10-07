@@ -167,8 +167,15 @@ function readBlobs(specs) {
 }
 
 function commitGate(policyRev, treeRev) {
-  const paths = readFileSync(0).toString('utf8').split('\0').map((p) => p.replace(/\r$/, '')).filter(Boolean);
+  const paths = readFileSync(0).toString('utf8').split('\0').filter(Boolean);
   const refuse = (head, lines) => out([`GOVERNANCE: REFUSED - ${head}`, ...lines.map((l) => `  ${l}`)], 1);
+  // `cat-file --batch` reads newline-delimited specs, so a name holding a newline
+  // or CR would be read as some other request and its content never checked.
+  const unreadable = paths.filter((p) => /[\r\n]/.test(p));
+  if (unreadable.length) {
+    refuse(`${unreadable.length} path(s) contain a newline or carriage return, so their content cannot be checked`,
+      [...unreadable.map((p) => JSON.stringify(p)), 'Rename them; a gate that cannot read a file refuses rather than passing it.']);
+  }
   let base, tree;
   try {
     [base, tree] = readBlobs([`${policyRev}:brain.json`, `${treeRev}:brain.json`]);
