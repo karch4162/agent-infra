@@ -99,6 +99,7 @@ assert_contains "jira/file-to" "$out" "File follow-ups to Jira project ABC"
 assert_not_contains "jira/no-linear-verbs" "$out" "orca linear"
 assert_contains "jira/load-timeouts-not-gate-loop" "$out" "not a failure on the same command: do not gate-loop"
 assert_contains "jira/no-vendor-feedback" "$out" "never to the host's or any vendor's feedback or bug-report channel"
+assert_contains "jira/grok-timeout-not-a-NO" "$out" "grok-timeout (fallback) is not a NO"
 
 echo "--- 4. worker script paths are absolute and exist ---"
 review_path="$(grep -o 'bash "[^"]*/review.sh"' <<<"$out" | head -1 | sed 's/^bash "//; s/"$//')"
@@ -311,6 +312,100 @@ echo "--- 23. lib.sh refusal points at the bootstrap ---"
 new_sandbox ""
 spawn_dry >/dev/null
 assert_contains "no-config/names-bootstrap" "$(cat "$BOX/out.txt")" "bootstrap.sh"
+
+# --- Grok timeout and Windows env (INNOV-391, INNOV-392): stub codex, grok, timeout,
+# cygpath on PATH. grok.plan holds one line per grok call: "<exit> <output>" (printf %b),
+# or "<exit> MKDIR" to drop a literal %SystemDrive%/ tree in cwd like the real bug did.
+STUB="$TMPROOT/stub"
+mkdir -p "$STUB/bin"
+cat >"$STUB/bin/grok" <<'EOF'
+#!/bin/sh
+n=$(( $(cat "$STUB/grok.n" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$STUB/grok.n"
+env >"$STUB/grok.env"
+line="$(sed -n "${n}p" "$STUB/grok.plan")"
+rc="${line%% *}"; text="${line#* }"
+if [ "$text" = MKDIR ]; then mkdir -p "./%SystemDrive%/ProgramData" && echo x >"./%SystemDrive%/ProgramData/c.db"
+else printf '%b\n' "$text"; fi
+exit "$rc"
+EOF
+cat >"$STUB/bin/timeout" <<'EOF'
+#!/bin/sh
+echo "$1" >>"$STUB/timeout.limits"; shift; exec "$@"
+EOF
+cat >"$STUB/bin/codex" <<'EOF'
+#!/bin/sh
+cat >/dev/null
+case "$*" in *"PLAN VERDICT"*) echo "PLAN VERDICT: APPROVE" ;; *) echo "TEST VERDICT: none" ;; esac
+EOF
+cat >"$STUB/bin/cygpath" <<'EOF'
+#!/bin/sh
+case "$1 $2" in "-w -W") echo 'C:\WINDOWS' ;; "-w -F") echo 'C:\ProgramData' ;; *) echo "$2" ;; esac
+EOF
+chmod +x "$STUB/bin/"*
+export STUB
+grok_run() { # script plan-lines... ; output in $BOX/out.txt, prints exit status
+  local script="$1"; shift
+  rm -f "$STUB/grok.n" "$STUB/grok.env" "$STUB/timeout.limits"
+  printf '%s\n' "$@" >"$STUB/grok.plan"
+  (cd "$BOX" && PATH="$STUB/bin:$PATH" RISK_REVIEW=1 bash "$WAVE/$script" ABC-7) >"$BOX/out.txt" 2>&1
+  echo $?
+}
+new_sandbox "$JIRA_CONFIG"
+echo change >"$BOX/change.txt"
+printf 'the plan\n' >"$BOX/.wave-plan.md"
+PASS_OUT='0 looks fine\nARCHITECTURE VERDICT: PASS'
+
+echo "--- 24. grok timeout once: retried at 1.5x, verdict used ---"
+st="$(grok_run review.sh '124 I will start by reading' "$PASS_OUT")"
+assert_eq "grok-retry/exit-0" "0" "$st"
+assert_eq "grok-retry/two-calls" "2" "$(cat "$STUB/grok.n")"
+assert_eq "grok-retry/limits" "900 1350" "$(tail -2 "$STUB/timeout.limits" | tr '\n' ' ' | sed 's/ $//')"
+assert_eq "grok-retry/marker" "1" "$(grep -cx 'ARCHITECTURE REVIEWER: grok' "$BOX/out.txt")"
+
+echo "--- 25. grok timeout twice: fallback marker, PR may open ---"
+st="$(grok_run review.sh '124 I will start' '124 I will start again')"
+assert_eq "grok-2timeouts/exit-0" "0" "$st"
+assert_contains "grok-2timeouts/marker" "$(cat "$BOX/out.txt")" "ARCHITECTURE REVIEWER: grok-timeout (fallback)"
+assert_not_contains "grok-2timeouts/no-NO" "$(cat "$BOX/out.txt")" "NO GROK"
+assert_eq "grok-2timeouts/no-third" "2" "$(cat "$STUB/grok.n")"
+
+echo "--- 26. grok exit 0 with no verdict: not retried, still blocks ---"
+st="$(grok_run review.sh '0 I will start by reading' "$PASS_OUT")"
+assert_eq "grok-incomplete/exit-1" "1" "$st"
+assert_contains "grok-incomplete/says" "$(cat "$BOX/out.txt")" "NO GROK ARCHITECTURE REVIEW: incomplete verdict (exit 0)"
+assert_eq "grok-incomplete/one-call" "1" "$(cat "$STUB/grok.n")"
+st="$(grok_run review.sh '1 boom')"
+assert_contains "grok-crash/exit-code" "$(cat "$BOX/out.txt")" "incomplete verdict (exit 1)"
+
+echo "--- 27. plan-review: REVISE still reported, timeouts fall back ---"
+st="$(grok_run plan-review.sh '0 the plan misses a caller\nPLAN VERDICT: REVISE')"
+assert_eq "plan-revise/exit-0" "0" "$st"
+assert_contains "plan-revise/verdict" "$(cat "$BOX/out.txt")" "PLAN VERDICT: REVISE"
+assert_eq "plan-revise/critic" "1" "$(grep -cx 'PLAN CRITIC: grok' "$BOX/out.txt")"
+st="$(grok_run plan-review.sh '124 reading' '124 reading')"
+assert_eq "plan-2timeouts/exit-0" "0" "$st"
+assert_contains "plan-2timeouts/marker" "$(cat "$BOX/out.txt")" "PLAN CRITIC: grok-timeout (fallback)"
+st="$(grok_run plan-review.sh '0 reading')"
+assert_eq "plan-incomplete/exit-1" "1" "$st"
+assert_contains "plan-incomplete/says" "$(cat "$BOX/out.txt")" "NO GROK PLAN REVIEW: incomplete verdict (exit 0)"
+
+echo "--- 28. Windows env reaches grok; a stray %SystemDrive% tree still trips the guard ---"
+grok_run review.sh "$PASS_OUT" >/dev/null
+assert_contains "grok-env/SystemDrive" "$(cat "$STUB/grok.env")" "
+SystemDrive=C:
+"
+assert_contains "grok-env/SystemRoot" "$(cat "$STUB/grok.env")" "
+SystemRoot=C:\\"
+assert_contains "grok-env/ProgramData" "$(cat "$STUB/grok.env")" "
+ProgramData=C:\\"
+st="$(grok_run review.sh '0 MKDIR')"
+assert_eq "grok-mkdir/exit-1" "1" "$st"
+assert_contains "grok-mkdir/says" "$(cat "$BOX/out.txt")" "NO GROK ARCHITECTURE REVIEW: grok modified the worktree"
+rm -rf "$BOX/%SystemDrive%"
+st="$(grok_run review.sh '124 MKDIR')"
+assert_contains "grok-mkdir-timeout/guard-wins" "$(cat "$BOX/out.txt")" "grok modified the worktree"
+assert_eq "grok-mkdir-timeout/no-retry" "1" "$(cat "$STUB/grok.n")"
+rm -rf "$BOX/%SystemDrive%"
 
 echo
 echo "$PASSED passed, $FAILED failed"

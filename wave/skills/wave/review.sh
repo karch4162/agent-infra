@@ -41,8 +41,9 @@ elif grep -qiE 'usage limit|usage_limit_exceeded|rate limit' "$ROOT/.wave-review
   # Sonnet. The REVIEWER line names the fallback so human review sees the weaker gate.
   fallback_prompt="${correctness_prompt/supplied on stdin/in the file .wave-review.diff at the repo root (read it first; you are read-only, edit nothing)}"
   name=grok-fallback
-  fb_out="$(guard_readonly timeout 900 grok --permission-mode bypassPermissions -p "$fallback_prompt" 2>"$ROOT/.wave-review.$name.err")"
-  if [ $? -eq 3 ]; then
+  run_grok "$fallback_prompt" "$ROOT/.wave-review.$name.err"
+  fb_out="$GROK_OUT"
+  if [ "$GROK_RC" -eq 3 ]; then
     echo "NO CODEX REVIEW: the grok fallback modified the worktree; inspect git status before anything else"
     exit 1
   fi
@@ -53,7 +54,7 @@ elif grep -qiE 'usage limit|usage_limit_exceeded|rate limit' "$ROOT/.wave-review
     printf '%s\n' "$fb_out" > "$ROOT/.wave-review.$name.log"
   fi
   if ! verdict_ok 'TEST VERDICT:' "$fb_out"; then
-    echo "NO CODEX REVIEW: Codex quota exhausted and no fallback returned a complete TEST VERDICT; see .wave-review.*-fallback.log/.err"
+    echo "NO CODEX REVIEW: Codex quota exhausted and no fallback returned a complete TEST VERDICT (grok: $GROK_WHY); see .wave-review.*-fallback.log/.err"
     exit 1
   fi
   printf '%s\nREVIEWER: %s (codex quota exhausted)\n' "$fb_out" "$name"
@@ -68,14 +69,21 @@ fi
 
 # Grok's CLI requires bypassPermissions to complete this read-only review in the
 # current local setup. The prompt confines its role and guard_readonly enforces it.
-grok_out="$(guard_readonly timeout 900 grok --permission-mode bypassPermissions -p "$architecture_prompt" 2>"$ROOT/.wave-review.grok.err")"
-if [ $? -eq 3 ]; then
+run_grok "$architecture_prompt" "$ROOT/.wave-review.grok.err"
+grok_out="$GROK_OUT"
+if [ "$GROK_RC" -eq 3 ]; then
   echo "NO GROK ARCHITECTURE REVIEW: grok modified the worktree; inspect git status before anything else"
   exit 1
 fi
 printf '%s\n' "$grok_out" > "$ROOT/.wave-review.grok.log"
+if [ "$GROK_RC" -eq 124 ]; then
+  # Reviewer wall-clock alone never blocks a PR (INNOV-391): like Codex quota, the
+  # marker names the missing gate so the human reads that diff themselves.
+  printf 'Grok %s; see .wave-review.grok.log/.err\nARCHITECTURE REVIEWER: grok-timeout (fallback)\n' "$GROK_WHY"
+  exit 0
+fi
 if ! verdict_ok 'ARCHITECTURE VERDICT:' "$grok_out"; then
-  echo "NO GROK ARCHITECTURE REVIEW: incomplete verdict; see .wave-review.grok.log/.err"
+  echo "NO GROK ARCHITECTURE REVIEW: $GROK_WHY; see .wave-review.grok.log/.err"
   exit 1
 fi
 

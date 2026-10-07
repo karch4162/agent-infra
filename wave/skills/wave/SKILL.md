@@ -124,6 +124,9 @@ still open when the review loop hit its cap.
 Any `NO ... REVIEW:` marker blocks the PR and needs human review; it is not a reason to
 try another provider. `REVIEWER: grok-fallback` or `sonnet-fallback (codex quota
 exhausted)` means the gate ran on a weaker reviewer, so read that diff yourself.
+`ARCHITECTURE REVIEWER: grok-timeout (fallback)` or `PLAN CRITIC: grok-timeout
+(fallback)` means Grok was killed by `timeout` twice (900s, then 1350s): the PR opened
+without that review, so read that diff (or plan) yourself.
 
 **3. Sweep merged worktrees.** `bash "$WAVE/status.sh" --sweep` prints the commands;
 read them, then pipe to `bash`. A worktree comment dies with its worktree — Orca keeps
