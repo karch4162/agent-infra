@@ -121,6 +121,12 @@ Resolve the vault as `$BRAIN_ROOT` (else cwd). **Pinned graphify version: `0.8.4
     - **Exit `0` (`COMMAND-PREFIX: OK`) →** ✅.
     - **Exit `1` (`COMMAND-PREFIX: STALE`) →** ❌ → **R10**. Relay verbatim.
     - **`COMMAND-PREFIX: SKIPPED` (exit `0`) →** ⚠️ "skipped — <reason>", never ✅. Skip if check 4 failed.
+14. **LLM egress off (INNOV-390)** — POC §7's `egress` is which LLM backend graphify ships vault content to. The brain is egress-off by construction: the only graphify subcommand it runs is `graphify wiki` (local modules only); `extract`, `cluster-only`, `provider` and `label` import `graphify.llm` and can reach a remote backend. This asserts which subcommand runs, **not** which env keys are set: graphify's `claude-cli` backend needs no API key, so a key scan would pass while content leaves.
+    ```bash
+    bash "${CLAUDE_PLUGIN_ROOT}/bin/check-egress.sh"   # scans this plugin's own .sh/.mjs and SKILL.md code fences; comments and prose are skipped
+    ```
+    - **Exit `0` (`EGRESS: OK`) →** ✅, quote the line.
+    - **Exit `1` (`EGRESS: WARN <file:line>`) →** ⚠️ **no scripted repair** — the installed plugin itself invokes an LLM subcommand. Relay each line **verbatim** and file it as a plugin finding; never edit the plugin cache. `tests/test-egress-gate.sh` runs the same script in CI, so this should only fire on a hand-edited install.
 
 ## Repairs (ask before R1 and R9 — they touch global installs)
 
@@ -193,5 +199,6 @@ Brain doctor — <vault name or path>
   findings tracker     ⚠️ brain.json has no tracker — next /brain:save asks and writes it
   shadowing install    ❌ brain@agent-infra 0.2.36 (user) + tray-brain@tray-brain-marketplace 0.2.33 (project) → offer R9
   command prefix       ❌ vault CLAUDE.md names /tray-brain: x4, installed is /brain: → offer R10
+  LLM egress           ✅ EGRESS: OK - scanned 63 file(s), no graphify LLM subcommand invoked
 <then apply confirmed repairs and re-check>
 ```
