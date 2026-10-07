@@ -4,10 +4,11 @@
 #
 # For each .bumps/<plugin>/ holding a fragment, rebuild release/<plugin> from
 # the current HEAD plus one commit that runs tools/bump-version.mjs, force-push
-# it, create the PR (or edit the open one), and dispatch ci.yml on the branch:
-# a GITHUB_TOKEN push or PR starts no push/pull_request workflows, but a
-# workflow_dispatch does, so the release SHA is tested before merge. A
-# dispatched run does not show in the PR's checks, so the body links to it.
+# it, create the PR (or edit the open one), and dispatch ci.yml on the branch.
+# The GITHUB_TOKEN PR's pull_request run waits in action_required until someone
+# clicks "Approve workflows to run"; a workflow_dispatch runs with no click, so
+# the release SHA is tested before merge. A dispatched run does not show in the
+# PR's checks, so the body links to it.
 #
 # The branch name carries no version: a later minor fragment changes the
 # version, and a versioned name would open a second PR. No fragments: exit 0
@@ -80,7 +81,7 @@ Automated by \`.github/workflows/release-pr.yml\` (INNOV-330): \`node tools/bump
 
 $(printf '%s\n' "$frags" | sed 's/^/- /')
 
-**Checks are not on this PR.** A \`GITHUB_TOKEN\` PR starts no \`pull_request\` run, so CI is dispatched on the branch instead, and a dispatched run does not attach to the PR. Merge once the \`tests\` run for release commit \`$sha\` is green on both runners: $runs. The branch is force-pushed on every rebuild, so a green run for an older commit does not count.
+**Checks wait for approval on this PR.** A \`GITHUB_TOKEN\` PR's \`pull_request\` run waits in \`action_required\` until someone clicks **Approve workflows to run**. CI is also dispatched on the branch, which tests the release commit with no click, but a dispatched run does not attach to the PR. Approving the pending run puts real checks on the PR too, \`version-bump\` included. Merge once the \`tests\` run for release commit \`$sha\` is green on both runners: $runs. The branch is force-pushed on every rebuild, so a green run for an older commit does not count.
 
 Merging is the last manual step: \`.github/workflows/release-publish.yml\` then tags the merge commit, fast-forwards the \`vendsy/agent-infra\` mirror and creates its GitHub Release. Check that run after merging.
 

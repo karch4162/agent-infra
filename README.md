@@ -110,7 +110,9 @@ Each branch adds a bump fragment instead, `.bumps/brain/<ticket>` containing `pa
    and dispatches CI on it. To run it by hand, use `node tools/bump-version.mjs brain` on a branch.
    Until the PR merges, merged `brain/` changes are on `main`, but installs do not pick them up.
 2. Merge the release PR once the dispatched CI run is green on both runners. The PR body links to the
-   run; a dispatched run does not appear in the PR's own checks.
+   run; a dispatched run does not appear in the PR's own checks. The PR's own `pull_request` run waits in
+   `action_required` until someone clicks **Approve workflows to run**; approving it also puts checks on
+   the PR, `version-bump` included. The dispatched run needs no click.
 3. **The rest publishes itself.** The merge is a push to `main`, so `.github/workflows/release-publish.yml`
    runs `tools/release-publish.sh`. It tags `brain--vX.Y.Z` on the merge commit, fast-forwards the
    `vendsy/agent-infra` mirror's `main` to that commit with the new tags, and creates the mirror's GitHub
