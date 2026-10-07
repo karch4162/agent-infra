@@ -9,9 +9,13 @@
 # stop at the first one already tagged on both origin and the mirror, so a run
 # that went red is finished by the next one. Each unpublished release gets:
 #   - tag <plugin>--v<version> on that commit, on origin and on the mirror;
-#   - the mirror's main fast-forwarded to the NEWEST release commit, never to
-#     the tip: commits merged after it wait for the next release;
+#   - the mirror's main fast-forwarded to that commit, so it ends on the NEWEST
+#     release commit, never the tip: commits merged after it wait for the next
+#     release;
 #   - a GitHub Release on the mirror (`--generate-notes`).
+# Releases publish one at a time, oldest first, and the run stops at the first
+# failure. A version's tags are what end the walk, so they must never land
+# before every older version is fully published.
 # Every check runs before the first push. A tag on another commit, a mirror
 # main that is not an ancestor, or a Release lookup that is neither 200 nor
 # 404 fails the run. Nothing is ever forced.
@@ -85,8 +89,10 @@ main() {
   mirror_main="$(printf '%s\n' "$mirror_refs" | awk '$2 == "refs/heads/main" { print $1 }')"
   [ -n "$mirror_main" ] || die "the mirror has no main branch."
 
-  local origin_push="" mirror_tags="" creates="" target="" published=""
-  local d p c v t o m st
+  # items: one "commit tag origin-missing mirror-missing create" line per
+  # walked release, the flags 0 or 1.
+  local items="" target=""
+  local d p c v t o m st om mm cr
   for d in $(git ls-tree -d --name-only "$tip"); do
     p="$d"
     git cat-file -e "$tip:$p/.claude-plugin/plugin.json" 2>/dev/null || continue
@@ -101,48 +107,64 @@ main() {
       [ -z "$m" ] || [ "$m" = "$c" ] || die "tag $t on the mirror points at $m, not at its release commit $c. Fix the tag by hand; this never moves a tag."
       st="$(release_status "$t")"
       case "$st" in
-        200) ;;
-        404) creates="$t $creates" ;; # oldest first
+        200) cr=0 ;;
+        404) cr=1 ;;
         *) die "looking up the mirror's GitHub Release $t returned HTTP ${st:-no response}, not 200 or 404." ;;
       esac
-      # The newest release of each plugin is a candidate for the mirror's main.
+      # The newest release across plugins is where the mirror's main ends.
       if [ -z "$target" ] || git merge-base --is-ancestor "$target" "$c"; then
         target="$c"
       fi
-      [ -n "$o" ] || origin_push="$c:refs/tags/$t $origin_push"
-      [ -n "$m" ] || mirror_tags="$c:refs/tags/$t $mirror_tags"
-      [ -n "$o" ] && [ -n "$m" ] && break
-      published="$published $t"
+      om=1; [ -z "$o" ] || om=0
+      mm=1; [ -z "$m" ] || mm=0
+      items="$items$c $t $om $mm $cr
+"
+      if [ "$om$mm" = "00" ]; then break; fi
     done
   done
 
-  local mirror_push="$mirror_tags"
+  local need_main=0
   if [ -n "$target" ] && [ "$target" != "$mirror_main" ]; then
     remote_git "$MIRROR_TOKEN" fetch -q "$MIRROR_URL" main
     if git merge-base --is-ancestor "$target" "$mirror_main"; then
       : # the mirror already holds the newest release
     elif git merge-base --is-ancestor "$mirror_main" "$target"; then
-      mirror_push="$target:refs/heads/main $mirror_push"
+      need_main=1
     else
       die "the mirror's main ($mirror_main) is not an ancestor of release commit $target. It has diverged; fix it by hand. This never force-pushes."
     fi
   fi
 
-  if [ -z "$origin_push$mirror_push$creates" ]; then
+  if [ "$need_main" = 0 ] && [ -z "$(printf '%s' "$items" | awk '$3 || $4 || $5')" ]; then
     echo "release-publish: every release is tagged, mirrored and released; nothing to publish."
     return 0
   fi
 
-  # Write phase.
-  # shellcheck disable=SC2086 # refspec lists are space-separated by construction
-  [ -z "$origin_push" ] || remote_git "$origin_tok" push -q --atomic origin $origin_push
-  # shellcheck disable=SC2086
-  [ -z "$mirror_push" ] || remote_git "$MIRROR_TOKEN" push -q --atomic "$MIRROR_URL" $mirror_push
-  for t in $creates; do
-    GH_TOKEN="$MIRROR_TOKEN" gh release create "$t" --repo "$MIRROR_REPO" --verify-tag --generate-notes \
-      || die "gh release create $t failed; the tags and the mirror are pushed, so a re-run creates only the Release."
-  done
-  echo "release-publish: published${published:- (Releases only)}; mirror main at ${target:-unchanged}."
+  # Write phase, oldest release first along main's first-parent line.
+  local ordered refs published=""
+  ordered="$(printf '%s' "$items" \
+    | awk 'NR == FNR { pos[$1] = NR; next } { print pos[$1], $0 }' <(git rev-list --first-parent "$tip") - \
+    | sort -k1,1nr | cut -d' ' -f2-)"
+  while read -r c t om mm cr <&3; do
+    [ -n "$c" ] || continue
+    [ "$om" = 0 ] || remote_git "$origin_tok" push -q origin "$c:refs/tags/$t"
+    refs=""
+    [ "$mm" = 0 ] || refs="$c:refs/tags/$t"
+    if [ "$need_main" = 1 ] && [ "$c" != "$mirror_main" ] && git merge-base --is-ancestor "$mirror_main" "$c"; then
+      refs="$c:refs/heads/main $refs"
+      mirror_main="$c"
+    fi
+    # shellcheck disable=SC2086 # refs is space-separated by construction
+    [ -z "$refs" ] || remote_git "$MIRROR_TOKEN" push -q --atomic "$MIRROR_URL" $refs
+    if [ "$cr" = 1 ]; then
+      GH_TOKEN="$MIRROR_TOKEN" gh release create "$t" --repo "$MIRROR_REPO" --verify-tag --generate-notes \
+        || die "gh release create $t failed. Its tags are pushed and newer releases are held back; a re-run continues from $t."
+    fi
+    [ "$om$mm$cr" = "000" ] || published="$published $t"
+  done 3<<EOF
+$ordered
+EOF
+  echo "release-publish: published${published:- nothing new}; mirror main at $mirror_main."
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then

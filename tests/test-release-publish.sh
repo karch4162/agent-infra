@@ -6,7 +6,8 @@
 # Each case runs in a scratch repo with a bare `origin`, a bare mirror and a
 # stub `gh` on PATH. The stub answers `gh api -i .../releases/tags/<tag>` with
 # 200 when <tag> is listed in $GH_RELEASES, $GH_API_STATUS when set, else 404,
-# and `gh release create` appends the tag to $GH_RELEASES.
+# and `gh release create` appends the tag to $GH_RELEASES (or fails for the
+# tag named in $GH_CREATE_FAIL).
 #
 # Run:  bash tests/test-release-publish.sh   (from anywhere)
 # No network. Requires a real `node` on PATH (versions are read with node).
@@ -61,7 +62,7 @@ if [ "$1" = "api" ]; then
   printf 'HTTP/2.0 404 Not Found\n\n{"message":"Not Found"}\n'; echo "gh: Not Found (HTTP 404)" >&2; exit 1
 fi
 if [ "$1 $2" = "release create" ]; then
-  [ -z "${GH_CREATE_FAIL:-}" ] || { echo "gh: create failed" >&2; exit 1; }
+  [ "${GH_CREATE_FAIL:-}" != "$3" ] || { echo "gh: create failed" >&2; exit 1; }
   printf '%s\n' "$3" >>"$GH_RELEASES"
 fi
 exit 0
@@ -264,13 +265,36 @@ assert_eq "api500/no-create" "0" "$(creates)"
 echo "--- 12. Release create fails after the push: red; the rerun creates only the Release ---"
 new_sandbox
 release_merge brain 0.3.9
-GH_CREATE_FAIL=1 run_publish
+GH_CREATE_FAIL=brain--v0.3.9 run_publish
 assert_eq "createfail/exit-1" "1" "$ST"
 assert_eq "createfail/mirror-tag-pushed" "$(git -C "$BOX" rev-parse main)" "$(tag_at "$MIRROR" brain--v0.3.9)"
 : >"$GH_LOG"
 run_publish
 assert_eq "createfail/rerun-exit-0" "0" "$ST"
 assert_eq "createfail/rerun-creates-once" "1" "$(creates)"
+
+echo "--- 12b. two versions of one plugin, the older Release create fails: the rerun creates both ---"
+# Tags for the newer version must wait until the older one is fully
+# published; otherwise the rerun stops at the fully tagged newer version and
+# never sees the older one's missing Release.
+new_sandbox
+release_merge brain 0.3.9
+first="$(git -C "$BOX" rev-parse main)"
+release_merge brain 0.4.0
+second="$(git -C "$BOX" rev-parse main)"
+GH_CREATE_FAIL=brain--v0.3.9 run_publish
+assert_eq "batchfail/exit-1" "1" "$ST"
+assert_eq "batchfail/older-tagged" "$first" "$(tag_at "$MIRROR" brain--v0.3.9)"
+assert_eq "batchfail/newer-held-back-origin" "none" "$(tag_at "$ORIGIN" brain--v0.4.0)"
+assert_eq "batchfail/newer-held-back-mirror" "none" "$(tag_at "$MIRROR" brain--v0.4.0)"
+assert_eq "batchfail/mirror-main-at-older" "$first" "$(head_of "$MIRROR")"
+: >"$GH_LOG"
+run_publish
+assert_eq "batchfail/rerun-exit-0" "0" "$ST"
+assert_eq "batchfail/rerun-creates-both" "2" "$(creates)"
+assert_eq "batchfail/older-released" "1" "$(grep -cx 'brain--v0.3.9' "$GH_RELEASES")"
+assert_eq "batchfail/newer-tagged" "$second" "$(tag_at "$MIRROR" brain--v0.4.0)"
+assert_eq "batchfail/mirror-main-newest" "$second" "$(head_of "$MIRROR")"
 
 echo "--- 13. a later plugin.json edit that keeps the version: tag stays on the bump commit ---"
 new_sandbox
