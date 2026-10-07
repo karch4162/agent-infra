@@ -91,6 +91,7 @@ case "$1 $2" in
     arg_after --base "$@" >"$GH_STATE/pr-$n.base"
     arg_after --title "$@" >"$GH_STATE/pr-$n.title"
     echo open >"$GH_STATE/pr-$n.state"
+    [[ -z "${GH_ON_CREATE:-}" ]] || bash -c "$GH_ON_CREATE" >/dev/null 2>&1
     echo "https://github.com/o/vault/pull/$n"
     exit 0 ;;
   "pr merge")
@@ -440,6 +441,22 @@ new_sandbox
 git -C "$VAULT" checkout -q -b brain/save-2026-10-06
 run_land
 assert_contains "empty/skipped" "$(first)" "nothing to land"
+
+echo "--- 13. origin narrows .saveinclude while landing: re-read before merge, LEFT OPEN ---"
+new_sandbox
+save_in "$VAULT" mine
+narrow() { # drop logs/ from origin main's policy, as another PR would
+  local co="$BOX/narrow"
+  git clone -q -c core.autocrlf=false "$ORIGIN" "$co"; cfg "$co"
+  grep -v "^logs/" "$co/.saveinclude" >"$co/.si"; mv "$co/.si" "$co/.saveinclude"
+  git -C "$co" commit -qam narrow; git -C "$co" push -q origin main
+}
+export BOX ORIGIN CRLF; export -f narrow cfg ac
+GH_ON_CREATE=narrow run_land
+assert_contains "narrowed/left-open" "$(first)" "LAND: LEFT OPEN #1"
+assert_contains "narrowed/names-path" "$(first)" "logs/2026-10-06-mine.md"
+assert_eq "narrowed/no-merge" "0" "$(gh_called 'pr merge')"
+assert_eq "narrowed/log-not-published" "no" "$(origin_has logs/2026-10-06-mine.md)"
 
 echo
 echo "passed: $PASSED  failed: $FAILED"

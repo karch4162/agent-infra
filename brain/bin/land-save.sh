@@ -140,11 +140,14 @@ ACK="$(g rev-parse --path-format=absolute --git-path brain-land-hot)"
 # release policy just because a commit got through. ls-tree + cat-file, not
 # `rev:path`, which Git Bash's path conversion mangles.
 blob_at() { g ls-tree "$1" -- "$2" 2>/dev/null | awk '{print $3; exit}'; }
-policy="$(blob_at "$BASE" .saveinclude)"
-[[ -n "$policy" ]] || skip "origin/$DEFAULT has no committed .saveinclude, so nothing may be published"
-g cat-file blob "$policy" >"$TMP/policy" 2>/dev/null
-allowlist_load "$TMP/policy" && [[ ${#ALLOW[@]} -gt 0 ]] ||
-  skip "origin/$DEFAULT's .saveinclude has no entries, so nothing may be published"
+load_policy() { # loads ALLOW from origin/<default>'s .saveinclude as fetched NOW
+  local policy
+  policy="$(blob_at "$BASE" .saveinclude)"
+  [[ -n "$policy" ]] && g cat-file blob "$policy" >"$TMP/policy" 2>/dev/null &&
+    allowlist_load "$TMP/policy" && [[ ${#ALLOW[@]} -gt 0 ]]
+}
+load_policy ||
+  skip "origin/$DEFAULT has no committed .saveinclude with entries, so nothing may be published"
 outside_scope() { # tip — prints each changed path the policy does not allow
   local p
   while IFS= read -r -d '' p; do
@@ -287,8 +290,12 @@ push_tip "$TIP"
 ensure_pr
 g fetch -q origin "refs/heads/$BRANCH" 2>/dev/null
 pushed="$(g rev-parse -q --verify FETCH_HEAD 2>/dev/null)"
+# Re-read the policy too: the default branch may have narrowed .saveinclude since
+# step 3, and the merge publishes against the default branch as it is now.
+g fetch -q origin 2>/dev/null
+load_policy || say "LEFT OPEN #$PR - origin/$DEFAULT no longer has a .saveinclude with entries"
 bad="$(outside_scope "${pushed:-$TIP}")"
-[[ -z "$bad" ]] || say "LEFT OPEN #$PR - the pushed branch carries path(s) outside the policy: $bad"
+[[ -z "$bad" ]] || say "LEFT OPEN #$PR - the pushed branch carries path(s) outside origin/$DEFAULT's .saveinclude: $(printf '%s' "$bad" | tr '\n' ' ')"
 
 tries=0
 while :; do
