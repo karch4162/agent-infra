@@ -109,7 +109,9 @@ $REVIEW_SELECT
    Astra call in this whole run, plan or diff:
      bash \"$WAVE_HOME/tiebreak.sh\" $ISSUE
    If any required review prints NO ..., do not open a PR; record it in the summary
-   and stop for human review.
+   and stop for human review. ARCHITECTURE REVIEWER: grok-timeout (fallback) or
+   PLAN CRITIC: grok-timeout (fallback) is not a NO: Grok timed out twice, so carry
+   on and copy that line into the summary.
 
    Triage the findings YOURSELF - do not forward them to the human. For each:
    - real bug in code your diff touches, or a CLAUDE.md rule it caught: fix it and

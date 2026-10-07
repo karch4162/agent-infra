@@ -98,3 +98,34 @@ guard_readonly() {
   [ "$before" = "$(worktree_fingerprint)" ] || return 3
   return "$rc"
 }
+
+# Git Bash exports SYSTEMDRIVE/SYSTEMROOT upper-cased; Grok looks them up by their
+# Windows spelling, misses, and writes a literal %SystemDrive%/ tree into cwd
+# (INNOV-392). Give it the exact names. No-op off Windows (no cygpath).
+grok_env() {
+  command -v cygpath >/dev/null 2>&1 || return 0
+  local root="${SystemRoot:-${SYSTEMROOT:-$(cygpath -w -W)}}"
+  export SystemRoot="$root"
+  export SystemDrive="${SystemDrive:-${SYSTEMDRIVE:-${root%%:*}:}}"
+  export ProgramData="${ProgramData:-${PROGRAMDATA:-$(cygpath -w -F 35)}}"
+}
+
+# One read-only Grok run, retried once with 1.5x the limit if `timeout` killed it
+# (exit 124); any other result is final (INNOV-391). Sets GROK_OUT, GROK_RC
+# (3 = edited the worktree, 124 = timed out twice) and GROK_WHY for a NO line.
+#   run_grok "$prompt" "$ERRFILE"
+run_grok() {
+  local limit=900 attempt
+  : >"$2"
+  for attempt in 1 2; do
+    GROK_OUT="$(grok_env; guard_readonly timeout "$limit" grok --permission-mode bypassPermissions -p "$1" 2>>"$2")"
+    GROK_RC=$?
+    [ "$GROK_RC" -eq 124 ] || break
+    [ "$attempt" -eq 2 ] || limit=$((limit * 3 / 2))
+  done
+  if [ "$GROK_RC" -eq 124 ]; then
+    GROK_WHY="timeout twice, last after ${limit}s (exit 124)"
+  else
+    GROK_WHY="incomplete verdict (exit $GROK_RC)"
+  fi
+}

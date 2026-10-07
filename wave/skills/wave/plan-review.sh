@@ -28,8 +28,9 @@ timeout 900 codex exec -s read-only --model gpt-5.6-terra "$technical_prompt" \
   < "$PLAN" > "$LOG.codex-terra.log" 2> "$LOG.codex-terra.err" &
 codex_pid=$!
 
-grok_out="$(guard_readonly timeout 900 grok --permission-mode bypassPermissions -p "$critic_prompt" 2>"$LOG.grok.err")"
-grok_rc=$?
+run_grok "$critic_prompt" "$LOG.grok.err"
+grok_out="$GROK_OUT"
+grok_rc="$GROK_RC"
 printf '%s\n' "$grok_out" > "$LOG.grok.log"
 wait "$codex_pid"
 codex_out="$(cat "$LOG.codex-terra.log")"
@@ -44,10 +45,12 @@ fi
 if [ "$grok_rc" -eq 3 ]; then
   echo "NO GROK PLAN REVIEW: grok modified the worktree; inspect git status before anything else"
   status=1
+elif [ "$grok_rc" -eq 124 ]; then
+  printf 'Grok %s; see .wave-plan-review.grok.log/.err\nPLAN CRITIC: grok-timeout (fallback)\n' "$GROK_WHY"
 elif verdict_ok 'PLAN VERDICT:' "$grok_out"; then
   printf '%s\nPLAN CRITIC: grok\n' "$grok_out"
 else
-  echo "NO GROK PLAN REVIEW: incomplete verdict; see .wave-plan-review.grok.log/.err"
+  echo "NO GROK PLAN REVIEW: $GROK_WHY; see .wave-plan-review.grok.log/.err"
   status=1
 fi
 exit "$status"
