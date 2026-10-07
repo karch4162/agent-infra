@@ -55,6 +55,8 @@ BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # drift lib/branch.sh exists to prevent.
 # shellcheck source=lib/branch.sh
 . "$BIN_DIR/lib/branch.sh"
+# shellcheck source=lib/index-sync.sh
+. "$BIN_DIR/lib/index-sync.sh"
 
 refuse() { # reason-line, then extra lines
   {
@@ -155,33 +157,16 @@ if [[ "$CUR_BRANCH" != "$DEFAULT" ]]; then
   if ! sw_err="$(git -C "$VAULT" switch "$DEFAULT" 2>&1)"; then
     # A save whose post-commit index sync lost to a held lock (INNOV-377) leaves
     # the shared index at the pre-commit versions of the paths HEAD's commit
-    # touched: edits as staged reverts, new files untracked. git's refusal then
-    # reads as unrelated, so name it and print vault-commit.sh's own remedy.
-    # --no-renames: a rename's source must be reset too, not just its destination.
-    # A path counts only when its index entry is still exactly the parent's
-    # version (absent, for a file the commit added). A staged edit made AFTER the
-    # commit also differs from HEAD, and resetting it would drop that work.
-    # `git diff` takes no --pathspec-from-file, so diff the whole index and
-    # match names in newline-framed lists (bash 3.2 has no hashes).
-    parent="$(git -C "$VAULT" rev-parse -q --verify 'HEAD^' 2>/dev/null ||
-      git -C "$VAULT" hash-object -t tree --stdin </dev/null)"
-    touched=$'\n'
-    not_parent=$'\n'
-    stale=()
-    while IFS= read -r -d '' p; do touched="$touched$p"$'\n'; done < <(
-      git -C "$VAULT" diff-tree -r -z --name-only --no-renames --root --no-commit-id HEAD 2>/dev/null)
-    while IFS= read -r -d '' p; do not_parent="$not_parent$p"$'\n'; done < <(
-      git -C "$VAULT" diff --cached -z --name-only --no-renames "$parent" 2>/dev/null)
-    while IFS= read -r -d '' p; do
-      [[ "$touched" == *$'\n'"$p"$'\n'* && "$not_parent" != *$'\n'"$p"$'\n'* ]] && stale+=("$p")
-    done < <(git -C "$VAULT" diff --cached -z --name-only --no-renames HEAD 2>/dev/null)
-    if [[ ${#stale[@]} -gt 0 ]]; then
+    # touched, and git's refusal then reads as unrelated, so name it and print
+    # vault-commit.sh's own remedy. The rule is lib/index-sync.sh's.
+    stale_index_paths
+    if [[ ${#STALE[@]} -gt 0 ]]; then
       refuse "could not switch from '$CUR_BRANCH' to '$DEFAULT'" \
-        "  The shared index still holds the pre-commit versions of ${#stale[@]} path(s) the" \
+        "  The shared index still holds the pre-commit versions of ${#STALE[@]} path(s) the" \
         "  last commit on '$CUR_BRANCH' touched: vault-commit.sh's post-commit index sync" \
         "  did not land (usually a held index.lock). Nothing was changed. Unless you staged" \
         "  a revert of these paths on purpose (that looks the same), run, then re-run:" \
-        "$(printf '    git --literal-pathspecs -C %q reset -q HEAD --' "$VAULT"; printf ' %q' "${stale[@]}")" \
+        "$(stale_index_remedy)" \
         "  git said:" \
         "$(printf '    %s\n' "$sw_err")"
     fi

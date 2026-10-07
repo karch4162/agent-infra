@@ -25,6 +25,8 @@
 # Usage:
 #   BRAIN_ROOT=<vault> bash check-gitignore.sh          # report only, change nothing
 #   BRAIN_ROOT=<vault> bash check-gitignore.sh --fix    # APPEND what is missing
+#   ... --attributes [--fix]   the same for .gitattributes vs templates/gitattributes,
+#                              labelled GITATTRIBUTES: (INNOV-389)
 #
 # Contract (the /brain:doctor skill and its tests depend on exactly this):
 #   exit 0  => the vault .gitignore carries every required entry (or --fix just made it)
@@ -50,17 +52,36 @@ GITIGNORE="$VAULT/.gitignore"
 TEMPLATE="$SCRIPT_DIR/../templates/gitignore"
 
 FIX=0
-case "${1:-}" in
-  --fix) FIX=1 ;;
-  "")    ;;
-  *)     echo "GITIGNORE: INCOMPLETE - unknown argument '${1}'" >&2
-         echo "  Usage: check-gitignore.sh [--fix]" >&2
-         exit 1 ;;
-esac
+ATTRS=0
+for arg in "$@"; do
+  case "$arg" in
+    --fix)        FIX=1 ;;
+    --attributes) ATTRS=1 ;;
+    *)            echo "GITIGNORE: INCOMPLETE - unknown argument '$arg'" >&2
+                  echo "  Usage: check-gitignore.sh [--attributes] [--fix]" >&2
+                  exit 1 ;;
+  esac
+done
+
+# --attributes (INNOV-389): the same check and the same append-only fix, for the
+# vault's .gitattributes against templates/gitattributes — one mechanism for
+# every governance file a vault never re-receives from its template. A vault
+# scaffolded before that template has no .gitattributes at all, and none of it
+# is user content yet, so --fix may create it (by appending).
+LABEL="GITIGNORE"
+NAME=".gitignore"
+EFFECT="machine-local scratch shows as untracked noise, or gets committed and shared between machines"
+if [[ $ATTRS -eq 1 ]]; then
+  LABEL="GITATTRIBUTES"
+  NAME=".gitattributes"
+  GITIGNORE="$VAULT/.gitattributes"
+  TEMPLATE="$SCRIPT_DIR/../templates/gitattributes"
+  EFFECT="concurrent saves conflict on wiki/log.md instead of keeping both sides' lines"
+fi
 
 incomplete() { # reason-line, then extra lines
   {
-    echo "GITIGNORE: INCOMPLETE - $1"
+    echo "$LABEL: INCOMPLETE - $1"
     shift
     local line
     for line in "$@"; do echo "$line"; done
@@ -78,7 +99,7 @@ trim() { # trims leading/trailing whitespace and CR, echoes result
 
 # --- 0. is this a vault? ----------------------------------------------------
 if [[ ! -d "$VAULT/graphify" && ! -d "$VAULT/wiki" ]]; then
-  echo "GITIGNORE: OK - '$VAULT' doesn't look like a brain vault (no graphify/ or wiki/), check skipped"
+  echo "$LABEL: OK - '$VAULT' doesn't look like a brain vault (no graphify/ or wiki/), check skipped"
   echo "  hint: set BRAIN_ROOT to the vault if this was meant to be checked." >&2
   exit 0
 fi
@@ -91,7 +112,7 @@ fi
 if [[ ! -f "$TEMPLATE" || ! -r "$TEMPLATE" ]]; then
   incomplete "cannot read the shipped template at '$TEMPLATE'" \
     "  The template IS the definition of the required entry set. Without it" \
-    "  there is no way to tell whether this vault's .gitignore is complete," \
+    "  there is no way to tell whether this vault's $NAME is complete," \
     "  so this reports a failure rather than a false OK." \
     "  Check the plugin install is intact (/brain:doctor check 7)."
 fi
@@ -123,12 +144,14 @@ if [[ ${#REQ_ENTRIES[@]} -eq 0 ]]; then
     "  Check the plugin install is intact (/brain:doctor check 7)."
 fi
 
-# --- 2. the vault's .gitignore ----------------------------------------------
-if [[ ! -f "$GITIGNORE" || ! -r "$GITIGNORE" ]]; then
+# --- 2. the vault's .gitignore (or .gitattributes) --------------------------
+if [[ $ATTRS -eq 1 && ! -e "$GITIGNORE" ]]; then
+  : # no .gitattributes yet: every entry is missing, and --fix creates the file
+elif [[ ! -f "$GITIGNORE" || ! -r "$GITIGNORE" ]]; then
   # Deliberately not auto-created even under --fix: dropping in a template is
   # /brain:init's job and its consent flow, and a vault missing this file may
   # be mid-setup rather than broken.
-  incomplete "no readable .gitignore at '$GITIGNORE'" \
+  incomplete "no readable $NAME at '$GITIGNORE'" \
     "  Without it, machine-local scratch (chats/, .brain/, .graphify_*) shows" \
     "  as untracked noise — or worse, gets committed and shared." \
     "  Remedy: seed it from the template, then re-run this check:" \
@@ -140,7 +163,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   line="$(trim "$line")"
   [[ -z "$line" ]] && continue
   LINES+=("$line")
-done <"$GITIGNORE"
+done < <(cat "$GITIGNORE" 2>/dev/null)
 
 # --- 3. which required entries are absent? -----------------------------------
 # Exact line match only (gitignore semantics — a "close" pattern is a
@@ -163,7 +186,7 @@ done
 
 # --- 4. all present -> OK ---------------------------------------------------
 if [[ ${#MISSING_ENTRIES[@]} -eq 0 ]]; then
-  echo "GITIGNORE: OK - .gitignore carries all ${#REQ_ENTRIES[@]} required entry(ies)"
+  echo "$LABEL: OK - $NAME carries all ${#REQ_ENTRIES[@]} required entry(ies)"
   exit 0
 fi
 
@@ -171,32 +194,38 @@ fi
 if [[ $FIX -eq 1 ]]; then
   {
     printf '\n# Added by check-gitignore.sh (/brain:doctor check 9) — entries the plugin\n'
-    printf '# depends on. Without these, machine-local scratch shows as untracked or\n'
-    printf '# gets committed and shared between machines.\n'
+    printf '# depends on. Without these, %s.\n' "$EFFECT"
     for i in "${!MISSING_ENTRIES[@]}"; do
       printf '# %s\n%s\n' "${MISSING_WHY[$i]}" "${MISSING_ENTRIES[$i]}"
     done
   } >>"$GITIGNORE" || incomplete "could not append to '$GITIGNORE'" \
       "  The file was NOT modified. Check permissions."
 
-  echo "GITIGNORE: OK - appended ${#MISSING_ENTRIES[@]} missing entry(ies) to .gitignore"
+  echo "$LABEL: OK - appended ${#MISSING_ENTRIES[@]} missing entry(ies) to $NAME"
   printf '  + %s\n' "${MISSING_ENTRIES[@]}"
   echo "  Nothing was removed or reordered — existing lines are byte-identical."
-  echo "  .gitignore is a governance file, so commit it deliberately:"
-  echo "    git -C \"$VAULT\" commit -o .gitignore -m 'chore: ignore plugin-required paths'"
+  echo "  $NAME is a governance file, so commit it deliberately:"
+  if [[ $ATTRS -eq 1 ]]; then
+    echo "    git -C \"$VAULT\" add .gitattributes && git -C \"$VAULT\" commit -o .gitattributes -m 'chore: plugin-required git attributes'"
+  else
+    echo "    git -C \"$VAULT\" commit -o .gitignore -m 'chore: ignore plugin-required paths'"
+  fi
   exit 0
 fi
 
 # --- 6. report ---------------------------------------------------------------
 {
-  echo "GITIGNORE: INCOMPLETE - .gitignore is missing ${#MISSING_ENTRIES[@]} of ${#REQ_ENTRIES[@]} required entry(ies)"
+  echo "$LABEL: INCOMPLETE - $NAME is missing ${#MISSING_ENTRIES[@]} of ${#REQ_ENTRIES[@]} required entry(ies)"
   for i in "${!MISSING_ENTRIES[@]}"; do
     echo "  missing: ${MISSING_ENTRIES[$i]}"
     echo "           why: ${MISSING_WHY[$i]}"
   done
-  echo "  Effect: machine-local scratch shows as untracked noise, or gets committed"
-  echo "  and shared between machines — the exact state these entries prevent."
+  echo "  Effect: $EFFECT — the exact state these entries prevent."
   echo "  Remedy — appends only, never rewrites your customized file:"
-  echo "    BRAIN_ROOT=\"$VAULT\" bash \"${BASH_SOURCE[0]}\" --fix"
+  if [[ $ATTRS -eq 1 ]]; then
+    echo "    BRAIN_ROOT=\"$VAULT\" bash \"${BASH_SOURCE[0]}\" --attributes --fix"
+  else
+    echo "    BRAIN_ROOT=\"$VAULT\" bash \"${BASH_SOURCE[0]}\" --fix"
+  fi
 } >&2
 exit 1

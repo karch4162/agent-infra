@@ -82,7 +82,7 @@ A user/org-level list of known vaults at **`~/.claude/brain/registry.json`** (cr
 
    **(a) Existing vault → register + fill gaps non-destructively. NEVER overwrite.**
    - Do **not** run the skeleton/template `cp` commands over it — that would clobber the user's `CLAUDE.md`, `wiki/`, `.graphifyignore`, etc.
-   - Create only **missing** governance files from templates (skip any that exist): e.g. `[ -f "<vault>/.saveinclude" ] || cp "${CLAUDE_PLUGIN_ROOT}/templates/saveinclude" "<vault>/.saveinclude"` (same pattern for `.gitignore`). **Leave `CLAUDE.md` and `.graphifyignore` untouched** — they're user content.
+   - Create only **missing** governance files from templates (skip any that exist): e.g. `[ -f "<vault>/.saveinclude" ] || cp "${CLAUDE_PLUGIN_ROOT}/templates/saveinclude" "<vault>/.saveinclude"` (same pattern for `.gitignore` and `.gitattributes`). **Leave `CLAUDE.md` and `.graphifyignore` untouched** — they're user content.
    - If `CLAUDE.md` has **no** "3-step query rule" section, *offer* to merge one in from `${CLAUDE_PLUGIN_ROOT}/templates/CLAUDE.brain.md` — **ask first via AskUserQuestion, never auto-edit** an existing CLAUDE.md.
    - Likewise, if `CLAUDE.md` does **not** name `file-finding.sh`, *offer* to merge the template's "Found a bug in the brain plugin itself?" block (the findings route and its vendor-feedback-channel prohibition) — same rule, ask first. A vault seeded from an older template has the query-rule section but not this block, so the check above never offers it.
    - Likewise, if `CLAUDE.md` does **not** have a `## What the graph does not see` heading, it predates the INNOV-356 graph wording: *offer* to merge that section plus the template's reworded "Staleness rule" paragraph (a caller list is a minimum, never authoritative) and "How to query the graph" list (`explain`/`affected` first, `query` only as the fallback) in place of the older ones — same rule, ask first, and keep any vault-specific lines the owner added.
@@ -94,6 +94,7 @@ A user/org-level list of known vaults at **`~/.claude/brain/registry.json`** (cr
    cp "${CLAUDE_PLUGIN_ROOT}/templates/graphifyignore" "<vault>/.graphifyignore"
    cp "${CLAUDE_PLUGIN_ROOT}/templates/saveinclude"     "<vault>/.saveinclude"
    cp "${CLAUDE_PLUGIN_ROOT}/templates/gitignore"       "<vault>/.gitignore"
+   cp "${CLAUDE_PLUGIN_ROOT}/templates/gitattributes"   "<vault>/.gitattributes"   # wiki/log.md merge=union (INNOV-389)
    ```
    Substitute the skeleton placeholders (`{{VAULT_NAME}}`, `{{DATE}}`, `{{area}}`). Write the **3-step query rule** into `CLAUDE.md` by copying `${CLAUDE_PLUGIN_ROOT}/templates/CLAUDE.brain.md` (it's absent in a new vault). `git init` if not a repo, then **commit the scaffolding so the vault is reproducible from the start** — these governance/skeleton files are NOT in `.saveinclude` (that allowlist is for session output), so `/brain:save` will never stage them; they must be committed here:
    ```bash
