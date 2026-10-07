@@ -126,7 +126,8 @@ create and approve pull requests.* It applies repo-wide; only `release-pr.yml` r
 `pull-requests: write`.
 
 `release-publish.yml` also needs the **`MIRROR_TOKEN`** Actions secret: a fine-grained PAT for
-`vendsy/agent-infra` only, with *Contents: read and write*. Its owner must be allowed to update the
+`vendsy/agent-infra` only, with *Contents: read and write* and *Workflows: read and write* (GitHub refuses a
+push that touches `.github/workflows/` without it, even though the mirror never runs them). Its owner must be allowed to update the
 mirror's `main` and create tags there. While the secret is unset, every push to `main` fails that run red.
 
 Consumers then pick it up with `claude plugin marketplace update` → `claude plugin update brain@agent-infra`
