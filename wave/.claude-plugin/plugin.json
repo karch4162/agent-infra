@@ -1,6 +1,6 @@
 {
   "name": "wave",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Run waves of unsupervised Orca workers on agent-ready Linear or Jira issues: per-repo config, worker prompt contract, pre-PR Codex/Grok review, labelling triage, and the fresh-session checklist (leftovers, brain save, sweep). Consumes the brain plugin (/brain:resume, /brain:save); brain never depends on it.",
   "author": {
     "name": "Mason Beard",
