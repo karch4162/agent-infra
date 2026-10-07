@@ -2,8 +2,8 @@ name: release PR
 
 # INNOV-330: when main holds pending .bumps/<plugin>/ fragments, open (or
 # refresh) one release/<plugin> PR that applies them with
-# tools/bump-version.mjs. The merge stays a human click; tagging the merge
-# commit and pushing the vendsy mirror stay manual.
+# tools/bump-version.mjs. The merge stays a human click; release-publish.yml
+# then tags the merge commit and pushes the vendsy mirror (INNOV-387).
 #
 # Repo prerequisite: Settings > Actions > General > "Allow GitHub Actions to
 # create and approve pull requests". Without it `gh pr create` returns 403.

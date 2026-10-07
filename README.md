@@ -111,14 +111,21 @@ Each branch adds a bump fragment instead, `.bumps/brain/<ticket>` containing `pa
    Until the PR merges, merged `brain/` changes are on `main`, but installs do not pick them up.
 2. Merge the release PR once the dispatched CI run is green on both runners. The PR body links to the
    run; a dispatched run does not appear in the PR's own checks.
-3. Tag the **merge commit**, after the merge: `git tag brain--vX.Y.Z MERGE_SHA`, then push the
-   tag. Tag the commit `main` points to, not the release branch's commit.
-4. Push the mirror by URL, fast-forward only. Check `git merge-base --is-ancestor OLD_MIRROR_HEAD main`
-   first, then `git push https://github.com/vendsy/agent-infra.git main:main brain--vX.Y.Z`, listing every new tag. Never force.
+3. **The rest publishes itself.** The merge is a push to `main`, so `.github/workflows/release-publish.yml`
+   runs `tools/release-publish.sh`. It tags `brain--vX.Y.Z` on the merge commit, fast-forwards the
+   `vendsy/agent-infra` mirror's `main` to that commit with the new tags, and creates the mirror's GitHub
+   Release (`--generate-notes`). Commits merged after the release wait on `main` for the next one. Every
+   push to `main` re-checks, so a red run is finished by the next push or by a re-run. It never moves a tag
+   or forces the mirror; a tag on another commit, or a mirror `main` that has diverged, fails the run red
+   for a human to fix.
 
 One-time repo setting the workflow needs: *Settings → Actions → General → Allow GitHub Actions to
 create and approve pull requests.* It applies repo-wide; only `release-pr.yml` requests
 `pull-requests: write`.
+
+`release-publish.yml` also needs the **`MIRROR_TOKEN`** Actions secret: a fine-grained PAT for
+`vendsy/agent-infra` only, with *Contents: read and write*. Its owner must be allowed to update the
+mirror's `main` and create tags there. While the secret is unset, every push to `main` fails that run red.
 
 Consumers then pick it up with `claude plugin marketplace update` → `claude plugin update brain@agent-infra`
 (→ `/reload-plugins` or restart). *(Trade-off: an omitted marketplace `version` means the plugin's

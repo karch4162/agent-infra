@@ -15,7 +15,8 @@
 # fragments) skips itself. Every release commit is built before the first
 # push, so one bad plugin never strands another's half-published release.
 #
-# Merging, tagging the merge commit and pushing the mirror stay manual.
+# Merging stays a human click. Tagging the merge commit, pushing the mirror and
+# the GitHub Release follow from that push: release-publish.yml (INNOV-387).
 # Needs: git with an `origin`, node, gh (GH_TOKEN). Bash 3.2 (INNOV-284).
 set -euo pipefail
 
@@ -81,9 +82,7 @@ $(printf '%s\n' "$frags" | sed 's/^/- /')
 
 **Checks are not on this PR.** A \`GITHUB_TOKEN\` PR starts no \`pull_request\` run, so CI is dispatched on the branch instead, and a dispatched run does not attach to the PR. Merge once the \`tests\` run for release commit \`$sha\` is green on both runners: $runs. The branch is force-pushed on every rebuild, so a green run for an older commit does not count.
 
-After merging:
-1. Tag the **merge commit**, not this branch's commit.
-2. Push the \`vendsy/agent-infra\` mirror by URL, fast-forward only.
+Merging is the last manual step: \`.github/workflows/release-publish.yml\` then tags the merge commit, fast-forwards the \`vendsy/agent-infra\` mirror and creates its GitHub Release. Check that run after merging.
 
 This branch is rebuilt from \`main\` on every push there, so hand edits here are overwritten. To hold a release, leave this PR open. Closing it opens a fresh one on the next push to \`main\`.
 EOF
