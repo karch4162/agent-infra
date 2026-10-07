@@ -1,6 +1,6 @@
 {
   "name": "brain",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "description": "Shared Git-backed knowledge, session continuity, graph context, and wiki maintenance for coding agents.",
   "author": {
     "name": "Mason Beard",
