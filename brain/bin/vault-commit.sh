@@ -551,6 +551,17 @@ if [[ ${#violations[@]} -gt 0 ]]; then
   refuse_foreign "$UNTOUCHED" "${violations[@]}"
 fi
 
+# --- 7b. governance: brain.json's area tiers and denied patterns (INNOV-297) --
+# The allowlist above says which PATHS may be committed; this says whether their
+# CONTENT belongs in this vault. Judged on the same tree object, against the
+# stricter of the parent's and the tree's brain.json. Its OK line is swallowed so
+# this script's first line stays VAULT-COMMIT; any failure to run it refuses.
+if ! gov_out="$(printf '%s\0' "${STAGED[@]}" |
+     BRAIN_ROOT="$VAULT" node "$BIN_DIR/check-governance.mjs" --policy "$CUR_SHA" --tree "$TREE" 2>&1)"; then
+  refuse "brain.json's governance policy refuses this commit" \
+    "$(printf '%s\n' "$gov_out" | sed 's/^/    /')" "$UNTOUCHED"
+fi
+
 # --- 8. commit, then move the branch by compare-and-swap --------------------
 # `git commit -m` cleans whitespace; commit-tree takes the message verbatim.
 printf '%s\n' "$MESSAGE" >"$PRIVATE_INDEX.msg"

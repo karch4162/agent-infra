@@ -159,6 +159,26 @@ bad="$(outside_scope HEAD)"
   skip "'$BRANCH' carries path(s) outside origin/$DEFAULT's .saveinclude: $(printf '%s' "$bad" | tr '\n' ' ')" \
     "  Nothing was pushed. Session output lands automatically; anything else goes" \
     "  through a reviewed PR ([[promote]])."
+# The content gate vault-commit.sh applied at commit time (INNOV-297), re-run
+# against origin's brain.json: a save that branched before the policy tightened,
+# or log.md's union blob below, was never judged by the policy on main now.
+# The merge publishes every commit on the branch, not only the tip's tree, so a
+# blob a later commit removed is still judged: each non-merge commit's own
+# changes in its own tree, then the tip's whole diff (log.md's union is a merge).
+governance() { # tip — check-governance.mjs's output; non-zero when it refuses
+  local c out
+  for c in $(g rev-list --no-merges "$BASE..$1" 2>/dev/null); do
+    out="$(g diff-tree -r -z --name-only --no-renames --root "$c" 2>/dev/null |
+      BRAIN_ROOT="$VAULT" node "$BIN_DIR/check-governance.mjs" --policy "$BASE" --tree "$c" 2>&1)" ||
+      { printf '%s\n' "$out" "  (in commit ${c:0:12})"; return 1; }
+  done
+  g diff -z --name-only --no-renames "$BASE...$1" 2>/dev/null |
+    BRAIN_ROOT="$VAULT" node "$BIN_DIR/check-governance.mjs" --policy "$BASE" --tree "$1" 2>&1
+}
+gov="$(governance HEAD)" ||
+  skip "'$BRANCH' breaks origin/$DEFAULT's brain.json policy" \
+    "$(printf '%s\n' "$gov" | sed 's/^/    /')" \
+    "  Nothing was pushed."
 
 # --- 4. merge, if origin moved ------------------------------------------------
 open_pr() {
@@ -286,6 +306,14 @@ if ! g merge-base --is-ancestor "$BASE" HEAD; then
 fi
 
 # --- 5. push, PR, re-verify, merge --------------------------------------------
+# The merge above can write a blob no commit was ever judged on (log.md's union),
+# so the tip is checked before it leaves this machine, not only after.
+if [[ "$TIP" != "$HEAD_SHA" ]]; then
+  gov="$(governance "$TIP")" ||
+    skip "the merge of origin/$DEFAULT into '$BRANCH' breaks origin/$DEFAULT's brain.json policy" \
+      "$(printf '%s\n' "$gov" | sed 's/^/    /')" \
+      "  Nothing was pushed."
+fi
 push_tip "$TIP"
 ensure_pr
 g fetch -q origin "refs/heads/$BRANCH" 2>/dev/null
@@ -296,6 +324,9 @@ g fetch -q origin 2>/dev/null
 load_policy || say "LEFT OPEN #$PR - origin/$DEFAULT no longer has a .saveinclude with entries"
 bad="$(outside_scope "${pushed:-$TIP}")"
 [[ -z "$bad" ]] || say "LEFT OPEN #$PR - the pushed branch carries path(s) outside origin/$DEFAULT's .saveinclude: $(printf '%s' "$bad" | tr '\n' ' ')"
+gov="$(governance "${pushed:-$TIP}")" ||
+  say "LEFT OPEN #$PR - the pushed branch breaks origin/$DEFAULT's brain.json policy" \
+    "$(printf '%s\n' "$gov" | sed 's/^/    /')"
 
 tries=0
 while :; do

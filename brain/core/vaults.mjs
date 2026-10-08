@@ -81,14 +81,16 @@ export function initVault(options) {
     }
     path = assertVault(path);
     if (identityForPath(path) !== identity) throw new Error('Checkout remote does not match the requested vault.');
-    const vault = { ...prior, id, name: options.name || prior?.name || basename(path), identity,
+    const { governance: _retired, ...kept } = prior || {}; // INNOV-297: the registry carries no governance
+    const vault = { ...kept, id, name: options.name || prior?.name || basename(path), identity,
       remote: git(path, ['config', '--get', 'remote.origin.url'], true), path,
       ...(options.reposDir ? { reposDir: resolve(options.reposDir) } : {}) };
     registry.vaults = registry.vaults.filter(v => v.id !== id).concat(vault);
-    // Import only the matching legacy vault's policy, not unrelated credentials/config.
+    // Import only the matching legacy vault's tracker, not unrelated credentials/config.
+    // Its `governance` block is retired (INNOV-297): policy lives in the vault's brain.json.
     const legacy = readJson(join(homedir(), '.claude/brain/registry.json'), { vaults: [] });
     const match = legacy.vaults?.find(v => v.path && resolve(v.path) === path);
-    for (const key of ['governance', 'tracker']) if (!vault[key] && match?.[key]) vault[key] = match[key];
+    if (!vault.tracker && match?.tracker) vault.tracker = match.tracker;
     writeJson(registryPath, registry);
     const ignore = join(project, '.gitignore');
     const text = existsSync(ignore) ? readFileSync(ignore, 'utf8') : '';

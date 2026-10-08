@@ -1,20 +1,18 @@
 {
   "//": "Brain registry (POC §16.2). Canonical location: ~/.claude/brain/registry.json.",
-  "//governance": "Each vault records its §7 profile here for future use. Nothing reads or enforces it yet: selecting a vault at /brain:init does not change that project's sync. egress: off|anthropic-dpa|allow; access: private|eng-only|public; graphifyignore: default|strict.",
+  "//governance": "Not here (INNOV-297). Per-area access tiers, restricted tags and denied patterns are committed IN the vault's brain.json and enforced at commit by bin/check-governance.mjs. LLM egress is asserted from code paths by /brain:doctor check 14. A legacy governance block in this file is ignored.",
   "//tracker": "Not here. Where auto-filed findings drain to is committed IN the vault as <vault>/brain.json {\"tracker\": {...}}, so every machine that pulls the vault agrees. A legacy per-vault tracker field in this file is ignored.",
   "vaults": [
     {
       "name": "personal",
       "path": "/c/Users/me/Projects/AI-OS/personal-brain",
       "remote": "git@github.com:me/personal-brain.git",
-      "repos_dir": "/c/Users/me/Projects",
-      "governance": { "egress": "off", "access": "private", "graphifyignore": "default" }
+      "repos_dir": "/c/Users/me/Projects"
     },
     {
       "name": "team-brain",
       "path": "/c/Users/me/Projects/team-brain",
-      "remote": "git@github.com:<org>/team-brain.git",
-      "governance": { "egress": "off", "access": "eng-only", "graphifyignore": "strict" }
+      "remote": "git@github.com:<org>/team-brain.git"
     }
   ]
 }

@@ -104,6 +104,22 @@ test('bad vaults and credential-bearing URLs do not bind a project', t => {
   assert.equal(existsSync(join(f.project, '.brain/config.json')), false);
 });
 
+// INNOV-297: a legacy registry entry still carrying the retired governance block
+// (egress/access/graphifyignore) migrates: its tracker comes over, the block does not.
+test('a legacy registry entry with a governance block still migrates, without it', t => {
+  const f = fixture(t);
+  const legacyHome = join(f.dir, 'legacy-home');
+  mkdirSync(join(legacyHome, '.claude/brain'), { recursive: true });
+  writeFileSync(join(legacyHome, '.claude/brain/registry.json'), JSON.stringify({ vaults: [{
+    path: assertVault(f.source), tracker: { type: 'jira', project: 'X' },
+    governance: { egress: 'off', access: 'eng-only', graphifyignore: 'strict' } }] }));
+  const r = f.run('init', '--vault', f.source, { HOME: legacyHome, USERPROFILE: legacyHome });
+  assert.equal(r.exit, 0, JSON.stringify(r));
+  const entry = JSON.parse(readFileSync(join(f.home, 'registry.json'), 'utf8')).vaults[0];
+  assert.deepEqual(entry.tracker, { type: 'jira', project: 'X' });
+  assert.equal('governance' in entry, false);
+});
+
 // A Windows short name (C:\Users\RUNNER~1\) or off-case path must still bind: git
 // reports the long canonical path, so a non-canonical compare refuses the vault
 // outright. Case is the portable stand-in for the 8.3 name the CI runner supplies.
