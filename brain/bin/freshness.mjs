@@ -37,7 +37,7 @@ import { join, basename, relative } from 'node:path';
 // revisions, the three-state verdict) lives in ONE place and is shared with
 // check-anchors.mjs — see brain/bin/anchors.mjs. Two implementations of one
 // resolver is the defect, not the convenience.
-import { buildAnchorContext, classifyAnchors, parseFrontmatter, noteTags, enumValue, stripComment, malformedEnums } from './anchors.mjs';
+import { buildAnchorContext, classifyAnchors, parseFrontmatter, noteTags, enumValue, stripComment, malformedEnums, fileAliases } from './anchors.mjs';
 
 const argv = process.argv.slice(2);
 const argVal = (flag) => (argv.indexOf(flag) >= 0 ? argv[argv.indexOf(flag) + 1] : undefined);
@@ -121,7 +121,7 @@ for (const repo of COVERED) {
         // Rename-protected stubs keep their OLD filename and carry the new label
         // in `aliases:` frontmatter (build-community-notes.mjs) — a label-based
         // [[_COMMUNITY_<Label>]] link must resolve too (INNOV-282). Same parser
-        // as the connectivity section below (fileAliases — hoisted declaration).
+        // as the connectivity section below (fileAliases, from anchors.mjs).
         for (const a of fileAliases(readFileSync(join(cdir, f), 'utf8').replace(/\r\n/g, '\n')))
           targetSet.add(a);
       }
@@ -267,22 +267,6 @@ function walkAll(dir, acc = []) {
     else if (e.name.endsWith('.md')) acc.push(p);
   }
   return acc;
-}
-function fileAliases(text) {
-  const fm = text.match(/^---\n([\s\S]*?)\n---/);
-  if (!fm) return [];
-  const unquote = (s) => s.trim().replace(/^["']|["']$/g, '');
-  const am = fm[1].match(/^aliases:\s*\n((?:[ \t]*-[ \t]*.*\n?)+)/m);
-  if (am) return [...am[1].matchAll(/^[ \t]*-[ \t]*(.*)$/gm)].map((x) => unquote(x[1]));
-  // Inline forms, valid YAML that Obsidian resolves too (INNOV-367):
-  // `aliases: [A, "B, C"]` (a quoted entry may hold a comma) and `aliases: A`,
-  // either with a trailing `# comment`. A multi-line flow list is not read.
-  const im = fm[1].match(/^aliases:[ \t]*(\S.*?)[ \t]*$/m);
-  if (!im) return [];
-  const value = stripComment(im[1]);
-  const list = value.match(/^\[(.*)\]$/);
-  if (!list) return [unquote(value)];
-  return [...list[1].matchAll(/\s*("[^"]*"|'[^']*'|[^,]+)/g)].map((x) => unquote(x[1])).filter(Boolean);
 }
 const allFiles = walkAll(VAULT);
 const allText = new Map(allFiles.map((f) => [f, readFileSync(f, 'utf8').replace(/\r\n/g, '\n')]));

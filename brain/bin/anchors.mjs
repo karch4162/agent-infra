@@ -167,6 +167,28 @@ export const stripComment = (raw) => raw.replace(/\s+#.*$/, '');
 export const enumValue = (raw) => stripComment(raw).replace(/^(["'])(.*)\1$/, '$2');
 
 /**
+ * A note's frontmatter `aliases:`, block list or inline. The one alias grammar,
+ * shared by freshness.mjs, consolidate.mjs and build-community-notes.mjs.
+ * Expects LF text.
+ */
+export function fileAliases(text) {
+  const fm = text.match(/^---\n([\s\S]*?)\n---/);
+  if (!fm) return [];
+  const unquote = (s) => s.trim().replace(/^["']|["']$/g, '');
+  const am = fm[1].match(/^aliases:\s*\n((?:[ \t]*-[ \t]*.*\n?)+)/m);
+  if (am) return [...am[1].matchAll(/^[ \t]*-[ \t]*(.*)$/gm)].map((x) => unquote(x[1]));
+  // Inline forms, valid YAML that Obsidian resolves too (INNOV-367):
+  // `aliases: [A, "B, C"]` (a quoted entry may hold a comma) and `aliases: A`,
+  // either with a trailing `# comment`. A multi-line flow list is not read.
+  const im = fm[1].match(/^aliases:[ \t]*(\S.*?)[ \t]*$/m);
+  if (!im) return [];
+  const value = stripComment(im[1]);
+  const list = value.match(/^\[(.*)\]$/);
+  if (!list) return [unquote(value)];
+  return [...list[1].matchAll(/\s*("[^"]*"|'[^']*'|[^,]+)/g)].map((x) => unquote(x[1])).filter(Boolean);
+}
+
+/**
  * Enum fields of one note's frontmatter that are outside their enum. Only
  * validated when present: absent `status:` means `current`, and a missing
  * `confidence:` is not this check's concern.

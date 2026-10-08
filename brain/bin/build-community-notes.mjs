@@ -34,6 +34,7 @@
 
 import { readFileSync, writeFileSync, readdirSync, mkdirSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileAliases } from './anchors.mjs';
 import { foldCommunityName, nameKey } from './community-name.mjs';
 import { isNamedLabel } from './label-guard.mjs';
 
@@ -131,8 +132,9 @@ for (const name of names) {
     }
   }
 
-  rmSync(outDir, { recursive: true, force: true });
-  mkdirSync(outDir, { recursive: true });
+  // The new stub set, filename -> content. Flushed at the end so an unchanged
+  // stub is never rewritten (INNOV-395).
+  const stubs = new Map();
 
   const nodeKey = (n) => String(n.name ?? n.label ?? n.id ?? '');
   const jaccard = (a, b) => {
@@ -273,17 +275,12 @@ for (const name of names) {
       ...(memberKeys.length ? ['members:', ...memberKeys.map((m) => `  - ${JSON.stringify(m)}`)] : []),
       '---',
     ].join('\n');
-  // tiny alias re-reader so resolvable stays in sync with what we wrote
-  const fmAliases = (fm) => {
-    const m = fm.match(/^aliases:\s*\n((?:[ \t]*-[ \t]*.*\n?)+)/m);
-    return m ? [...m[1].matchAll(/^[ \t]*-[ \t]*(.*)$/gm)].map((x) => x[1].trim().replace(/^"|"$/g, '')) : [];
-  };
   const baseByName = new Map(); // rawName -> fileBase actually written
   const writeStub = (rawName, fileBase, fm, bodyMid) => {
-    writeFileSync(join(outDir, `${fileBase}.md`), `${fm}\n\n# ${rawName}\n${bodyMid}\nSee [[${backlink}]] for the full graph picture.\n`);
+    stubs.set(`${fileBase}.md`, `${fm}\n\n# ${rawName}\n${bodyMid}\nSee [[${backlink}]] for the full graph picture.\n`);
     baseByName.set(rawName, fileBase);
     resolvable.add(fileBase);
-    for (const a of fmAliases(fm)) resolvable.add(a);
+    for (const a of fileAliases(fm)) resolvable.add(a);
     written++;
   };
 
@@ -374,7 +371,7 @@ To retire this stub, give the communities distinct labels in the report
 (\`bin/label-communities.mjs\` uniquifies newly minted labels case-insensitively)
 and rebuild.
 `;
-    writeFileSync(join(outDir, `${bare}.md`), `${fm}\n\n# ${bare.replace(/^_COMMUNITY_/, '')} (ambiguous)\n${body}\nSee [[${backlink}]] for the full graph picture.\n`);
+    stubs.set(`${bare}.md`, `${fm}\n\n# ${bare.replace(/^_COMMUNITY_/, '')} (ambiguous)\n${body}\nSee [[${backlink}]] for the full graph picture.\n`);
     resolvable.add(bare);
     written++;
     disamb++;
@@ -383,6 +380,18 @@ and rebuild.
         `(${rows.map((r) => (r.ids.length ? `c${r.ids.join('/')}` : 'link-only')).join(', ')}) — ` +
         `report link is ambiguous; wrote a disambiguation stub`
     );
+  }
+
+  // Prune first: on a case-insensitive filesystem a case-only rename would
+  // otherwise write into the old file and then delete it. Then write only what
+  // changed. A CRLF checkout of an unchanged stub (the vault is autocrlf) stays
+  // byte-identical; rewriting it with LF changes its size, so git reports it
+  // modified with an empty diff and reap-branches.sh cannot switch branches.
+  mkdirSync(outDir, { recursive: true });
+  for (const f of readdirSync(outDir)) if (!stubs.has(f)) rmSync(join(outDir, f), { recursive: true, force: true });
+  for (const [f, text] of stubs) {
+    const path = join(outDir, f);
+    if (!existsSync(path) || readFileSync(path, 'utf8').replace(/\r\n/g, '\n') !== text) writeFileSync(path, text);
   }
 
   console.log(

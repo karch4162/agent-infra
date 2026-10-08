@@ -1264,6 +1264,64 @@ else
     "dir: [$(ls "$cdir" 2>/dev/null | tr '\n' ' ')]"
 fi
 
+# ================================================================= PART L ===
+# INNOV-395: a rerun on an unchanged graph must leave every stub byte-identical
+# and untouched. The generator used to wipe the dir and rewrite each stub with
+# LF; on an autocrlf checkout the stubs are CRLF, so git saw a size change
+# (` M` with an empty diff) and reap-branches.sh refused to switch branches.
+
+echo "--- L. unchanged stubs are not rewritten (INNOV-395) ---"
+
+run_rewrite_suite() { # tag [crlf]
+  local tag="$1" box cdir f touched
+  box="$(mktemp -d "$TMPROOT/boxXXXXXX")"
+  write_rename_mirror "$box"
+  crlf_if "$box/vault/graphify/demo/demo-GRAPH_REPORT.md" "${2:-}"
+  run_stubs "$box" >/dev/null
+  cdir="$box/vault/graphify/demo/communities"
+  for f in "$cdir"/*.md; do crlf_if "$f" "${2:-}"; done
+  printf 'stale\n' >"$cdir/_COMMUNITY_Gone.md"
+  touch -t 200001010000 "$cdir"/*.md
+  touch -t 200101010000 "$box/marker"
+  mkdir -p "$box/before"
+  cp -p "$cdir"/*.md "$box/before/"
+  rm -f "$box/before/_COMMUNITY_Gone.md"
+  assert_eq "rewrite-$tag/rerun-exit-0" "0" "$(run_stubs "$box")" "stderr: [$(cat "$box/stubs.err")]"
+  for f in "$box/before"/*.md; do
+    assert_files_identical "rewrite-$tag/bytes-kept/$(basename "$f")" "$f" "$cdir/$(basename "$f")"
+  done
+  touched="$(find "$cdir" -name '*.md' -newer "$box/marker" | wc -l | tr -d ' ')"
+  assert_eq "rewrite-$tag/no-stub-rewritten" "0" "$touched" \
+    "rewritten: [$(find "$cdir" -name '*.md' -newer "$box/marker" | tr '\n' ' ')]"
+  if [[ -f "$cdir/_COMMUNITY_Gone.md" ]]; then
+    fail "rewrite-$tag/stale-stub-removed" "_COMMUNITY_Gone.md survived"
+  else
+    pass "rewrite-$tag/stale-stub-removed"
+  fi
+}
+
+run_rewrite_suite lf
+run_rewrite_suite crlf crlf
+
+# A changed stub is still rewritten (the control for the skip above).
+box="$(mktemp -d "$TMPROOT/boxXXXXXX")"
+write_rename_mirror "$box"
+run_stubs "$box" >/dev/null
+cdir="$box/vault/graphify/demo/communities"
+printf 'hand edit\n' >>"$cdir/_COMMUNITY_Label Guard.md"
+run_stubs "$box" >/dev/null
+assert_not_grep "rewrite/changed-stub-regenerated" 'hand edit' "$cdir/_COMMUNITY_Label Guard.md"
+
+# A case-only rename lands under the new case. On a case-insensitive FS a
+# write-then-prune order would write into the old file and then delete it.
+box="$(mktemp -d "$TMPROOT/boxXXXXXX")"
+write_rename_mirror "$box"
+write_prior_stub "$box" "_COMMUNITY_LABEL GUARD" "LABEL GUARD" zz1 zz2
+run_stubs "$box" >/dev/null
+cdir="$box/vault/graphify/demo/communities"
+assert_eq "rewrite/case-rename-lands-new-case" "_COMMUNITY_Label Guard.md" \
+  "$(ls "$cdir" | grep -i '^_COMMUNITY_label guard\.md$')" "dir: [$(ls "$cdir" | tr '\n' ' ')]"
+
 # ================================================================= SUMMARY ==
 echo
 echo "$PASSED passed, $FAILED failed"
