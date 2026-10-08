@@ -103,8 +103,9 @@ keep in sync. Feature branches do **not** edit `version` — parallel PRs all co
 Each branch adds a bump fragment instead, `.bumps/brain/<ticket>` containing `patch`, `minor` or
 `major`; the CI version-bump check accepts it. On every release:
 
-1. **The bump PR opens itself.** On every push to `main`, `.github/workflows/release-pr.yml`
-   runs `tools/release-pr.sh`. For each plugin with pending fragments it rebuilds a `release/<plugin>`
+1. **The bump PR opens itself, once a day.** At 13:00 UTC `.github/workflows/release-pr.yml`
+   runs `tools/release-pr.sh` (or run the workflow by hand when a fix can't wait). A day with no
+   fragments does nothing. For each plugin with pending fragments it rebuilds a `release/<plugin>`
    branch: current `main` plus one `node tools/bump-version.mjs <plugin>` commit, which bumps the
    version, regenerates the host manifests, and deletes the fragments. It then opens or refreshes the PR
    and dispatches CI on it. To run it by hand, use `node tools/bump-version.mjs brain` on a branch.

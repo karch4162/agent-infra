@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # release-pr.sh — open (or refresh) one release PR per plugin with pending bump
-# fragments (INNOV-330). Run by .github/workflows/release-pr.yml on push to main.
+# fragments (INNOV-330). Run by .github/workflows/release-pr.yml once a day.
 #
 # For each .bumps/<plugin>/ holding a fragment, rebuild release/<plugin> from
 # the current HEAD plus one commit that runs tools/bump-version.mjs, force-push
@@ -85,7 +85,7 @@ $(printf '%s\n' "$frags" | sed 's/^/- /')
 
 Merging is the last manual step: \`.github/workflows/release-publish.yml\` then tags the merge commit, fast-forwards the \`vendsy/agent-infra\` mirror and creates its GitHub Release. Check that run after merging.
 
-This branch is rebuilt from \`main\` on every push there, so hand edits here are overwritten. To hold a release, leave this PR open. Closing it opens a fresh one on the next push to \`main\`.
+This branch is rebuilt from \`main\` by the daily run, so hand edits here are overwritten. To hold a release, leave this PR open. Closing it opens a fresh one on the next daily run.
 EOF
 )"
   # --head matches the branch name only; a fork can open a PR from its own

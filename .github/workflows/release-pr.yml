@@ -8,10 +8,13 @@ name: release PR
 # Repo prerequisite: Settings > Actions > General > "Allow GitHub Actions to
 # create and approve pull requests". Without it `gh pr create` returns 403.
 on:
-  push:
-    # No paths filter: release-pr.sh steps aside when main has moved past its
-    # commit, which is only safe if every push to main queues a run.
-    branches: [main]
+  # Once a day, not on every push: each merged release PR is a published
+  # release and a Slack alert, so the day's fragments batch into one PR.
+  # A day with no fragments exits untouched. Run it by hand for an urgent fix.
+  # If main moves mid-run, release-pr.sh steps aside and tomorrow's run (or a
+  # manual one) picks it up.
+  schedule:
+    - cron: '0 13 * * *'   # 13:00 UTC daily
   workflow_dispatch:
 
 permissions:
