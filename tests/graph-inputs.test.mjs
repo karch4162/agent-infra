@@ -12,7 +12,7 @@ test('graph validity tracks uncommitted sources, scope, graph bytes, and extract
   mkdirSync(join(root, 'src')); mkdirSync(join(root, 'graphify-out'));
   spawnSync('git', ['init', root]);
   writeFileSync(join(root, 'src/a.js'), 'export const a = 1;');
-  prepareGraph(root, ['src'], 'graphify-0.8.46');
+  prepareGraph(root, ['src'], 'graphify-0.9.79');
   writeFileSync(join(root, 'graphify-out/graph.json'), '{"nodes":[],"links":[]}');
   recordGraph(root);
   assert.equal(graphStatus(root).state, 'fresh');
@@ -21,7 +21,7 @@ test('graph validity tracks uncommitted sources, scope, graph bytes, and extract
   writeFileSync(join(root, 'src/a.js'), 'export const a = 2;');
   assert.equal(graphStatus(root).state, 'stale');
   assert.throws(() => recordGraph(root), /changed/);
-  prepareGraph(root, ['src'], 'graphify-0.8.46'); recordGraph(root);
+  prepareGraph(root, ['src'], 'graphify-0.9.79'); recordGraph(root);
   assert.equal(graphStatus(root, 'graphify-new').state, 'stale');
   writeFileSync(join(root, 'graphify-out/graph.json'), '{}');
   assert.equal(graphStatus(root).state, 'stale');

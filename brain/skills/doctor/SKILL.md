@@ -17,7 +17,7 @@ error 4395`) and the launcher breaks — "points at a venv that no longer exists
 graphify.__main__` / "failed to canonicalize script path". The §6.1 grep fallback keeps the agent
 answering, but the graph's value is lost until repaired. This command finds and fixes that class.
 
-Resolve the vault as `$BRAIN_ROOT` (else cwd). **Pinned graphify version: `0.8.46`**, with its wheel sha256, in `bin/install-graphify.sh` — the one place both `/brain:init` and R1 read; bump deliberately there.
+Resolve the vault as `$BRAIN_ROOT` (else cwd). **Pinned graphify version: `0.9.79`**, with its wheel sha256, in `bin/install-graphify.sh` — the one place both `/brain:init` and R1 read; bump deliberately there.
 
 ## Checks — run all, print a ✅/⚠️/❌ table, then offer the matching repair per ❌
 
@@ -194,9 +194,9 @@ clean, consistent state.
 
 ```
 Brain doctor — <vault name or path>
-  graphify CLI         ✅ 0.8.46 runnable
+  graphify CLI         ✅ 0.9.79 runnable
   /graphify skill      ✅ registered (~/.claude/skills/graphify)
-  CLI vs skill         ✅ 0.8.46 == 0.8.46
+  CLI vs skill         ✅ 0.9.79 == 0.9.79
   BRAIN_ROOT           ✅ C:/.../personal-brain (wiki/ present)
   vault self-binding   ❌ vault .claude/settings.local.json has no env block → offer R5
   repo aliases         ⚠️ 6 sub-path aliases reserve: android/ docs/ groovy/ lib/ scripts/ terraform/

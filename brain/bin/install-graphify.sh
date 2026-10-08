@@ -15,8 +15,8 @@
 # `uv tool install`, which takes none.
 set -eu
 
-GRAPHIFY_VERSION=0.8.46
-GRAPHIFY_SHA256=e2ee72fb84ac8d5eb1fcf6f4421c9e1b7b50e7208b07b89d181d220c321a1e6e
+GRAPHIFY_VERSION=0.9.79
+GRAPHIFY_SHA256=51969b5ab321e369120d2d87ca1f42a169002a82bb2dad1dd7c03ee3b8773c65
 
 wheel="graphifyy-${GRAPHIFY_VERSION}-py3-none-any.whl"
 url=${GRAPHIFY_WHEEL_URL:-https://files.pythonhosted.org/packages/py3/g/graphifyy/$wheel}
