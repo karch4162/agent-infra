@@ -26,7 +26,7 @@
 
 import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { join, relative, resolve, basename } from 'node:path';
-import { parseFrontmatter } from './anchors.mjs';
+import { parseFrontmatter, fileAliases } from './anchors.mjs';
 import { nameKey } from './community-name.mjs';
 
 const VAULT = resolve(process.env.BRAIN_ROOT || process.env.CLAUDE_PROJECT_DIR || process.cwd());
@@ -47,11 +47,6 @@ const die = (msg) => {
   process.exit(1);
 };
 
-const listOf = (text, key) =>
-  [...(text.match(new RegExp(`^${key}:\\s*\\n((?:[ \\t]*-[ \\t]*.*\\n?)+)`, 'm'))?.[1] ?? '').matchAll(/^[ \t]*-[ \t]*(.*)$/gm)].map(
-    (m) => m[1].trim().replace(/^"|"$/g, '')
-  );
-
 function readStubs() {
   if (!existsSync(COMMUNITIES)) return [];
   return readdirSync(COMMUNITIES)
@@ -65,7 +60,7 @@ function readStubs() {
       const files = [...(text.match(/^## Top files\n((?:- .*\n?)+)/m)?.[1] ?? '').matchAll(/^- `([^`]+)` \((\d+) nodes?\)/gm)].map(
         (m) => ({ path: m[1].replace(/^wiki\//, ''), count: Number(m[2]) })
       );
-      const keys = new Set([name, base, ...listOf(text, 'aliases')].map((k) => nameKey(k.replace(/^_COMMUNITY_/, ''))));
+      const keys = new Set([name, base, ...fileAliases(text)].map((k) => nameKey(k.replace(/^_COMMUNITY_/, ''))));
       return { file, name, keys, files };
     });
 }
