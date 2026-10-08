@@ -137,6 +137,8 @@ fi
     # nodes in memory, then the #479 shrink guard refuses to write the smaller
     # graph.json, and the update has already saved a manifest without them, so a
     # re-run reports nothing to update. The phantom nodes survive for good.
+    # Re-measured on 0.9.79 (INNOV-393): same outcome, the update's to_json
+    # refuses 4 < 7 nodes and the next detect_incremental lists no deletions.
     echo "  $D of them are deleted notes. An incremental wiki --update cannot drop their"
     echo "  nodes: graphify's shrink guard (#479) refuses the smaller graph, and the update"
     echo "  has already forgotten the deletions. Remedy: rm graphify-out/graph.json, then"

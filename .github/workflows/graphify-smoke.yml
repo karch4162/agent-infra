@@ -18,7 +18,7 @@ jobs:
     env:
       # Keep in sync with brain/bin/install-graphify.sh
       # (tests/test-graphify-smoke.sh fails on drift).
-      GRAPHIFY_VERSION: '0.8.46'
+      GRAPHIFY_VERSION: '0.9.79'
       PYTHONHASHSEED: '0'
       TARGET: brain/bin
       OUT: brain/bin/graphify-out # graphify writes next to the target, not the cwd
