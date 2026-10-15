@@ -435,6 +435,14 @@ box="$(nodename_case '{"nodes":[{"id":"x","label":"other","community":1}],"links
 status="$(run_sync "$box")"
 assert_files_identical "integration/node-name-control-unwitnessed-labels-copy" \
   "$box/src.before" "$box/$DST_REL"
+# A keyless vault report still refreshes from the next keyless build.
+box="$(nodename_case '{"nodes":[{"id":"b","label":"Button","community":1},{"id":"c","label":"cn()","community":2},{"id":"m","label":"map","community":3}],"links":[]}')"
+cp "$box/$SRC_REL" "$box/$DST_REL"
+printf '\n### Community 4 - "Community 4"\n' >>"$box/$SRC_REL"
+cp "$box/$SRC_REL" "$box/src.before"
+status="$(run_sync "$box")"
+assert_files_identical "integration/node-name-keyless-report-refreshes" \
+  "$box/src.before" "$box/$DST_REL"
 
 # --- 6..8. FAIL CLOSED: a guard that cannot run must PRESERVE the report ----
 # The single most important property of the extraction (INNOV-274). The old bash

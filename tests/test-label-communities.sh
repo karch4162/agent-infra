@@ -1438,6 +1438,12 @@ for eol in lf crlf; do
   rc=0
   out="$(node "$(to_native "$GUARD")" --may-replace "$(to_native "$box/existing.md")" "$(to_native "$box/incoming.md")")" || rc=$?
   assert_eq "nodename/control-without-graph-allows-$eol" "allow 2 3 rc=0" "$out rc=$rc"
+  # A keyless vault report must still refresh from the same keyless rebuild: the
+  # filler it shares with the incoming report is discounted on both sides.
+  cp "$box/incoming.md" "$box/keyless.md"
+  rc=0
+  out="$(node "$(to_native "$GUARD")" --may-replace "$(to_native "$box/keyless.md")" "$(to_native "$box/incoming.md")" "$g")" || rc=$?
+  assert_eq "nodename/keyless-refreshes-from-keyless-$eol" "allow 1 1 rc=0" "$out rc=$rc"
 done
 # An incoming graph we were told to use but cannot read is "could not decide".
 printf 'not json' >"$box/bad.json"

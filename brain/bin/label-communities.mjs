@@ -859,13 +859,6 @@ if (argv.includes('--reconcile')) {
   side.anchors = side.anchors && typeof side.anchors === 'object' ? side.anchors : {};
   let sideChanged = false;
   for (const d of demoted) { side.labels[d.id] = { name: d.to, provenance: 'derived' }; sideChanged = true; }
-  // An agent's name moved to a new id takes its 'agent' record along (INNOV-403):
-  // left on the old id, the next /brain:label would read it as graphify filler.
-  for (const [id, r] of Object.entries(remapped)) {
-    if (!isAgentName(m, r.from, r.label)) continue;
-    side.labels[id] = { name: r.label, provenance: 'agent' };
-    sideChanged = true;
-  }
   for (const [id, label] of Object.entries(preserved)) {
     const k = nameKey(label);
     if (m.anchors.has(k) || side.anchors[k] || !seedable(m, Number(id), remapped)) continue;
@@ -877,6 +870,17 @@ if (argv.includes('--reconcile')) {
   // would leave a derived name with no 'derived' record, i.e. preserved.
   if (sideChanged) { side.version = 2; writeFileSync(p, JSON.stringify(side, null, 2) + '\n', 'utf8'); }
   if (text !== m.report) writeFileSync(m.reportPath, text, 'utf8');
+  // An agent's name moved to a new id takes its 'agent' record along (INNOV-403):
+  // left on the old id, the next /brain:label reads it as graphify filler. Written
+  // AFTER the report: interrupted before this, the moved name is merely re-offered;
+  // the other order would leave an 'agent' row naming a heading not yet moved,
+  // which preserves whatever heading sits there now.
+  const carried = Object.entries(remapped).filter(([, r]) => isAgentName(m, r.from, r.label));
+  if (carried.length) {
+    for (const [id, r] of carried) side.labels[id] = { name: r.label, provenance: 'agent' };
+    side.version = 2;
+    writeFileSync(p, JSON.stringify(side, null, 2) + '\n', 'utf8');
+  }
   for (const [id, r] of Object.entries(remapped)) console.error(`reconcile ${repo}: "${r.label}" moved with its members, community ${r.from} -> ${id}`);
   if (demoted.length)
     console.error(

@@ -211,17 +211,24 @@ export function namedLabelCountOf(path, graphPath) {
 // existing one. An equal count (a same-count relabel, or a plain content refresh)
 // still copies; strictly fewer named communities never does.
 // Throws when it cannot tell — callers must read a throw as "refuse".
-// INNOV-403: node-name filler is discounted on the INCOMING side only, judged
-// against `incomingGraphPath`, the graph built with it. The existing report keeps
-// the text-only count: the graph beside it may have moved since it was frozen, and
-// scoring it against reissued ids could undercount real names (fail open). Filler
-// left in the existing count only raises the floor.
+// INNOV-403: node-name filler is judged against `incomingGraphPath`, the graph
+// built with the incoming report. The existing report is never scored against a
+// graph: the one beside it may have moved since it was frozen, and reissued ids
+// could undercount real names (fail open). It loses only the labels the incoming
+// report carries verbatim as filler; dropping those loses nothing, since the copy
+// writes the same string back. That keeps a keyless report refreshing from the
+// next keyless build instead of freezing on its own filler.
 export function mayReplaceReport(existingPath, incomingPath, incomingGraphPath) {
   const incoming = loadReport(incomingPath);
   if (!incoming.present) throw new Error(`incoming report not found: ${incomingPath}`);
   const members = loadMembers(incomingGraphPath);
+  const filler = new Set();
+  for (const [id, label] of readReportLabels(incoming.text))
+    if (isNodeNameLabel(label, members?.get(String(id)))) filler.add(label);
   const existing = loadReport(existingPath);
-  const existingNamed = existing.present ? countNamedLabels(existing.text) : 0;
+  let existingNamed = 0;
+  if (existing.present)
+    for (const label of readReportLabels(existing.text).values()) if (isNamedLabel(label) && !filler.has(label)) existingNamed++;
   const incomingNamed = countNamedLabels(incoming.text, members);
   return {
     verdict: incomingNamed >= existingNamed ? 'allow' : 'refuse',
