@@ -551,12 +551,12 @@ assert_eq "shared/fully-named-mirror-survives-a-thin-labels-file" \
 # 2026-10-12 sports-management: a resync report of file-path labels outscored 76
 # agent names and the guard let it overwrite them.
 assert_eq "shared/path-derived-labels-are-unnamed" \
-  "false false false false true true true true" \
+  "false false false false true true true true true" \
   "$(GUARD_URL="$(to_native "$GUARD")" node --input-type=module -e "
     const { pathToFileURL } = await import('node:url');
     const { isNamedLabel } = await import(pathToFileURL(process.env.GUARD_URL).href);
     console.log(['foo/bar.ts', 'app/api/-param-id-/route.ts', 'Community 12', 'photo-service.ts',
-      'Reservation checkout flow', 'Offline Sync / Tab Charging', 'page & related (9)', 'HTTP/2.0'].map(isNamedLabel).join(' '));
+      'Reservation checkout flow', 'Offline Sync / Tab Charging', 'page & related (9)', 'HTTP/2.0', 'Configure -param- Routes'].map(isNamedLabel).join(' '));
   ")"
 f5_reports() { # dir eol
   {

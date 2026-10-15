@@ -94,7 +94,7 @@ export const HEADING_RE = /^### Community (\d+) - "(.+?)"/gm;
 
 // A label graphify derived from a file path rather than a name: a whitespace-free
 // token ending in a file extension (`photo-service.ts`, `(sub-pages)/layout.tsx`,
-// `README.md`), or carrying graphify's `-param-` fold of a `[param]` route
+// `README.md`) or carrying graphify's `-param-` fold of a `[param]` route
 // segment. On 2026-10-12 a sports-management resync produced 175 of these;
 // counted as named, they outscored 76 real names and the guard let the report
 // overwrite them (INNOV-397). Requiring no whitespace keeps human names like
@@ -104,7 +104,7 @@ export const HEADING_RE = /^### Community (\d+) - "(.+?)"/gm;
 // counting as named. label-communities' isPathName is a different, stricter
 // question (does a path label still fit its cluster?), so it stays separate.
 // ponytail: shape heuristic; a bare one-word name like "Next.js" reads as a file.
-export const DERIVED_LABEL = /^\S*\.[a-z][a-z0-9]{0,4}$|-param-/;
+export const DERIVED_LABEL = /^(?:\S*\.[a-z][a-z0-9]{0,4}|\S*-param-\S*)$/;
 export const isDerivedLabel = (label) => typeof label === 'string' && DERIVED_LABEL.test(label.trim());
 
 // (a) THE definition of "named". A label is named when it is a non-empty string
