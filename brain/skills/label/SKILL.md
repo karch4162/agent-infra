@@ -18,7 +18,7 @@ Resolve the vault root as `$BRAIN_ROOT` (else the current project dir / cwd).
 
 ## Hard rules
 
-- **Never change an existing non-generic label.** The script enforces this (preserved > your labels > derived), but don't try either. A partially-named mirror (e.g. repo-a: 30 named, 400+ placeholders) gets its placeholders filled and its named communities left byte-identical.
+- **Never change an existing non-generic label.** The script enforces this (preserved > your labels > derived), but don't try either. A partially-named mirror (e.g. repo-a: 30 named, 400+ placeholders) gets its placeholders filled and its named communities left byte-identical. A file-path heading graphify derived (`components/foo.tsx`, `photo-service.ts`) is not a name: it is offered for naming like a placeholder (INNOV-397).
 - **Never resync a mirror to fix labels.** A keyless resync replaces named stubs with "Community N" placeholders and breaks `Code:` links — the documented incident this skill exists to prevent. (`bin/sync-graph.sh` now guards against it, but don't lean on the guard.)
 - **Never hand-edit `graphify/<repo>/communities/`** — `build-community-notes.mjs` wholesale-regenerates that dir.
 - **Do not shell out to `graphify label` / `graphify cluster-only`.** The bare CLI has no host-session mode: with no API key it silently degrades to placeholders, and it re-clusters + writes to the wrong location as side effects. The keyless path is this skill.

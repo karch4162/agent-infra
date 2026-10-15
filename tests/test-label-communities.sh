@@ -547,6 +547,42 @@ assert_eq "shared/fully-named-mirror-survives-a-thin-labels-file" \
   "$fully_named" "$(guard_count "$box/$REPORT_REL")" \
   "exit: $status" "stderr: [$(cat "$box/err.txt")]"
 
+# --- F5. INNOV-397: path-derived headings are NOT names ---------------------
+# 2026-10-12 sports-management: a resync report of file-path labels outscored 76
+# agent names and the guard let it overwrite them.
+assert_eq "shared/path-derived-labels-are-unnamed" \
+  "false false false false true true true true" \
+  "$(GUARD_URL="$(to_native "$GUARD")" node --input-type=module -e "
+    const { pathToFileURL } = await import('node:url');
+    const { isNamedLabel } = await import(pathToFileURL(process.env.GUARD_URL).href);
+    console.log(['foo/bar.ts', 'app/api/-param-id-/route.ts', 'Community 12', 'photo-service.ts',
+      'Reservation checkout flow', 'Offline Sync / Tab Charging', 'page & related (9)', 'HTTP/2.0'].map(isNamedLabel).join(' '));
+  ")"
+f5_reports() { # dir eol
+  {
+    printf '# Graph Report\n\n## Communities\n'
+    printf '### Community 0 - "Reservation Checkout Flow"\nNodes (2): a, b\n\n'
+    printf '### Community 1 - "Stripe Webhook Handlers"\nNodes (2): c, d\n\n'
+    printf '### Community 2 - "Community 2"\nNodes (2): e, f\n'
+  } >"$1/existing.md"
+  {
+    printf '# Graph Report\n\n## Communities\n'
+    printf '### Community 0 - "components/checkout.tsx"\nNodes (2): a, b\n\n'
+    printf '### Community 1 - "app/api/-param-id-/route.ts"\nNodes (2): c, d\n\n'
+    printf '### Community 2 - "photo-service.ts"\nNodes (2): e, f\n\n'
+    printf '### Community 3 - "(sub-pages)/layout.tsx"\nNodes (2): g, h\n'
+  } >"$1/incoming.md"
+  if [[ "$2" == crlf ]]; then sed -i 's/\r*$/\r/' "$1/existing.md" "$1/incoming.md"; fi
+}
+for eol in lf crlf; do
+  box="$(mktemp -d "$TMPROOT/boxXXXXXX")"
+  f5_reports "$box" "$eol"
+  assert_eq "shared/all-derived-report-counts-0-$eol" "0" "$(guard_count "$box/incoming.md")"
+  rc=0
+  out="$(node "$(to_native "$GUARD")" --may-replace "$(to_native "$box/existing.md")" "$(to_native "$box/incoming.md")")" || rc=$?
+  assert_eq "shared/derived-report-may-not-replace-named-$eol" "refuse 2 0 rc=10" "$out rc=$rc"
+done
+
 # ================================================================= PART G ===
 # INNOV-2xx — staleness is CLUSTER IDENTITY, not name genericness.
 #
@@ -1079,8 +1115,10 @@ run_recheck_suite() { # tag [crlf]
   assert_eq "recheck-$tag/path-name-without-its-file-goes-to-batches" "true|false" \
     "$(jexpr "$box/d.json" "('0' in d[0].labels_template)+'|'+('0' in d[0].preserved)")" \
     "digest: [$(head -c 900 "$box/d.json")]"
-  assert_eq "recheck-$tag/path-name-with-its-file-kept" "src/live/file.ts" \
-    "$(jexpr "$box/d.json" "d[0].preserved['1']")"
+  # INNOV-397: a path label is graphify filler, not a name, so even with its
+  # file still present it is offered for naming rather than preserved.
+  assert_eq "recheck-$tag/path-name-with-its-file-goes-to-batches" "true|false" \
+    "$(jexpr "$box/d.json" "('1' in d[0].labels_template)+'|'+('1' in d[0].preserved)")"
   assert_eq "recheck-$tag/shrunk-cluster-goes-to-batches" "true|false" \
     "$(jexpr "$box/d.json" "('2' in d[0].labels_template)+'|'+('2' in d[0].preserved)")"
   assert_eq "recheck-$tag/intact-cluster-kept" "Kept Cluster" \
