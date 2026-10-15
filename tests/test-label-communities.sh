@@ -1360,6 +1360,134 @@ cdir="$box/vault/graphify/demo/communities"
 assert_eq "rewrite/case-rename-lands-new-case" "_COMMUNITY_Label Guard.md" \
   "$(ls "$cdir" | grep -i '^_COMMUNITY_label guard\.md$')" "dir: [$(ls "$cdir" | tr '\n' ' ')]"
 
+# ================================================================= PART M ===
+# INNOV-403 — graphify's keyless labeler names a community after its hub node
+# (`Button`, `cn`, `map`). Such a label is filler, not a name: a whitespace-free
+# label equal to a member node's label/name (trailing `()` stripped). Whitespace
+# names that match a node (`Match Setup Flow`, a markdown heading) stay named.
+
+echo "--- M. node-name filler labels are not names (INNOV-403) ---"
+
+assert_eq "nodename/witness-unit" \
+  "false false false false true true true" \
+  "$(GUARD_URL="$(to_native "$GUARD")" node --input-type=module -e "
+    const { pathToFileURL } = await import('node:url');
+    const { isNamedLabel } = await import(pathToFileURL(process.env.GUARD_URL).href);
+    console.log([
+      ['Button', [{ label: 'Button' }]],
+      ['cn', [{ label: 'cn()' }]],
+      ['handle()', [{ label: 'handle()' }]],
+      ['Button', [{ label: 'x', name: 'Button' }]],
+      ['Match Setup Flow', [{ label: 'Match Setup Flow' }]],
+      ['Button', []],
+      ['Button', [{ label: 'Badge' }]],
+    ].map(([l, n]) => isNamedLabel(l, n)).join(' '));
+  ")"
+
+# Graph emitters ship `community` as number OR string; headings parse as numbers.
+for cid in 7 '"7"'; do
+  assert_eq "nodename/community-id-$cid-normalized" "0" \
+    "$(GUARD_URL="$(to_native "$GUARD")" CID="$cid" node --input-type=module -e "
+      const { pathToFileURL } = await import('node:url');
+      const { countNamedLabels, communityMembers } = await import(pathToFileURL(process.env.GUARD_URL).href);
+      const g = '{\"nodes\":[{\"id\":\"b\",\"label\":\"Button\",\"community\":' + process.env.CID + '}]}';
+      console.log(countNamedLabels('### Community 7 - \"Button\"\n', communityMembers(g)));
+    ")"
+done
+
+m_graph() { # file
+  cat >"$1" <<'EOF'
+{"nodes":[
+  {"id":"b","label":"Button","community":0,"source_file":"src/ui/button.tsx"},
+  {"id":"b2","label":"ButtonProps","community":0,"source_file":"src/ui/button.tsx"},
+  {"id":"m","label":"Match Setup Flow","community":1,"source_file":"docs/plan.md"},
+  {"id":"m2","label":"Setup Steps","community":1,"source_file":"docs/plan.md"},
+  {"id":"c","label":"cn()","community":2,"source_file":"src/lib/utils.ts"},
+  {"id":"c2","label":"clsx","community":2,"source_file":"src/lib/utils.ts"}
+],"links":[{"source":"b","target":"b2"},{"source":"c","target":"c2"}]}
+EOF
+}
+m_report() { # file
+  {
+    printf '# Graph Report\n\n## Communities\n'
+    printf '### Community 0 - "Button"\nNodes (2): Button, ButtonProps\n\n'
+    printf '### Community 1 - "Match Setup Flow"\nNodes (2): Match Setup Flow, Setup Steps\n\n'
+    printf '### Community 2 - "cn"\nNodes (2): cn(), clsx\n'
+  } >"$1"
+}
+
+for eol in lf crlf; do
+  box="$(mktemp -d "$TMPROOT/boxXXXXXX")"
+  m_graph "$box/graph.json"
+  m_report "$box/incoming.md"
+  crlf_if "$box/incoming.md" "$eol"
+  {
+    printf '# Graph Report\n\n## Communities\n'
+    printf '### Community 0 - "Checkout Flow"\nNodes (2): a, b\n\n'
+    printf '### Community 1 - "Auth Middleware"\nNodes (2): c, d\n'
+  } >"$box/existing.md"
+  crlf_if "$box/existing.md" "$eol"
+  g="$(to_native "$box/graph.json")"
+  assert_eq "nodename/count-with-graph-$eol" "1" \
+    "$(node "$(to_native "$GUARD")" --count "$(to_native "$box/incoming.md")" "$g" 2>&1)"
+  # Negative control: without the graph the filler still counts (old rule).
+  assert_eq "nodename/count-without-graph-$eol" "3" "$(guard_count "$box/incoming.md")"
+  rc=0
+  out="$(node "$(to_native "$GUARD")" --may-replace "$(to_native "$box/existing.md")" "$(to_native "$box/incoming.md")" "$g")" || rc=$?
+  assert_eq "nodename/filler-incoming-may-not-replace-names-$eol" "refuse 2 1 rc=10" "$out rc=$rc"
+  rc=0
+  out="$(node "$(to_native "$GUARD")" --may-replace "$(to_native "$box/existing.md")" "$(to_native "$box/incoming.md")")" || rc=$?
+  assert_eq "nodename/control-without-graph-allows-$eol" "allow 2 3 rc=0" "$out rc=$rc"
+done
+# An incoming graph we were told to use but cannot read is "could not decide".
+printf 'not json' >"$box/bad.json"
+rc=0
+out="$(node "$(to_native "$GUARD")" --may-replace "$(to_native "$box/existing.md")" "$(to_native "$box/incoming.md")" "$(to_native "$box/bad.json")" 2>/dev/null)" || rc=$?
+assert_eq "nodename/unparseable-incoming-graph-fails-closed" "rc=1 out=" "rc=$rc out=$out"
+rc=0
+out="$(node "$(to_native "$GUARD")" --may-replace "$(to_native "$box/existing.md")" "$(to_native "$box/incoming.md")" "$(to_native "$box/nope.json")" 2>/dev/null)" || rc=$?
+assert_eq "nodename/missing-incoming-graph-fails-closed" "rc=1 out=" "rc=$rc out=$out"
+
+# /brain:label: a sidecar `preserved` filler label (volleyball-stats today) is
+# offered for naming again; a whitespace name and an agent-chosen label are kept.
+m_mirror() { # box eol
+  local dir="$1/vault/graphify/demo"
+  mkdir -p "$dir"
+  m_graph "$dir/graph.json"
+  m_report "$dir/demo-GRAPH_REPORT.md"
+  crlf_if "$dir/demo-GRAPH_REPORT.md" "$2"
+  cat >"$dir/.community-labels.json" <<'EOF'
+{"version":2,"repo":"demo","labels":{
+  "0":{"name":"Button","provenance":"preserved"},
+  "1":{"name":"Match Setup Flow","provenance":"preserved"},
+  "2":{"name":"cn","provenance":"agent"}},"anchors":{}}
+EOF
+}
+for eol in lf crlf; do
+  box="$(mktemp -d "$TMPROOT/boxXXXXXX")"
+  m_mirror "$box" "$eol"
+  status="$(run_label "$box" --digest demo)"
+  cp "$box/out.txt" "$box/digest.json"
+  assert_eq "nodename/digest-$eol/filler-not-preserved" "false" \
+    "$(jexpr "$box/digest.json" "'0' in d[0].preserved")" "digest: [$(head -c 600 "$box/digest.json")]"
+  assert_eq "nodename/digest-$eol/filler-offered" "true" \
+    "$(jexpr "$box/digest.json" "'0' in d[0].labels_template")"
+  assert_eq "nodename/digest-$eol/whitespace-name-preserved" "Match Setup Flow" \
+    "$(jexpr "$box/digest.json" "d[0].preserved['1']")"
+  assert_eq "nodename/digest-$eol/agent-label-preserved" "cn" \
+    "$(jexpr "$box/digest.json" "d[0].preserved['2']")"
+  status="$(run_apply "$box" '{"0":"UI Primitives"}')"
+  assert_eq "nodename/apply-$eol/exit-0" "0" "$status" "stderr: [$(cat "$box/err.txt")]"
+  assert_grep "nodename/apply-$eol/filler-renamed" '### Community 0 - "UI Primitives"' "$box/$REPORT_REL"
+  assert_eq "nodename/apply-$eol/sidecar-healed" "agent" "$(jexpr "$box/$SIDECAR_REL" "d.labels['0'].provenance")"
+  # The agent's own `cn` survives being kept: still `agent`, still preserved.
+  assert_eq "nodename/apply-$eol/agent-provenance-kept" "agent" "$(jexpr "$box/$SIDECAR_REL" "d.labels['2'].provenance")"
+  status="$(run_label "$box" --digest demo)"
+  cp "$box/out.txt" "$box/digest.json"
+  assert_eq "nodename/redigest-$eol/agent-label-still-preserved" "cn" \
+    "$(jexpr "$box/digest.json" "d[0].preserved['2']")"
+done
+
 # ================================================================= SUMMARY ==
 echo
 echo "$PASSED passed, $FAILED failed"

@@ -309,6 +309,10 @@ function jaccard(a, b) {
 //                             carries that exact derived string. A hand-edit
 //                             makes it a human label again, and it is preserved.
 //   - anything else         → PRESERVED.
+// INNOV-403: graphify's own node-name filler (`Button`, `cn`) is NOT preserved
+// unless the sidecar says an agent chose that exact name. A `preserved` record
+// carries no authorship (every sidecar-less label becomes one), so it does not
+// protect filler; that is how volleyball-stats froze 12 of them.
 function isPreserved(m, id, existing) {
   // "Is this a name at all?" is the shared question (label-guard.isNamedLabel).
   // "Is that name off-limits?" is this script's own, provenance-aware answer.
@@ -316,10 +320,17 @@ function isPreserved(m, id, existing) {
   // A name for a cluster that no longer exists is not work worth preserving,
   // whatever the sidecar says about who wrote it.
   if (isStale(m, id)) return false;
+  if (!isAgentName(m, id, existing) && !isNamedLabel(existing, m.members.get(id))) return false;
   const rec = m.provenance.get(id);
   if (!rec || rec.provenance !== 'derived') return true;
   return nameKey(rec.name ?? '') !== nameKey(existing);
 }
+
+// Did an agent pick exactly this label for this id (sidecar provenance 'agent')?
+const isAgentName = (m, id, label) => {
+  const rec = m.provenance.get(id);
+  return rec?.provenance === 'agent' && nameKey(rec.name ?? '') === nameKey(label);
+};
 
 // ---- naming inputs -----------------------------------------------------------
 
@@ -709,7 +720,13 @@ if (argv.includes('--apply')) {
   let named = 0, invalid = 0, collided = 0;
   const bySize = [...m.members.keys()].sort((a, b) => m.members.get(b).length - m.members.get(a).length);
   for (const id of bySize) {
-    if (preserved[id] !== undefined) { finalLabels[id] = preserved[id]; origin[id] = 'preserved'; continue; }
+    if (preserved[id] !== undefined) {
+      // An agent's name stays 'agent' when kept, or the next run could not tell it
+      // from graphify filler (isPreserved). A remapped name's record is the old id's.
+      finalLabels[id] = preserved[id];
+      origin[id] = remapped[id] === undefined && isAgentName(m, id, preserved[id]) ? 'agent' : 'preserved';
+      continue;
+    }
     const raw = agent[String(id)];
     const clean = sanitizeLabel(raw);
     if (isNamedLabel(clean)) {
@@ -772,7 +789,7 @@ if (argv.includes('--apply')) {
     provOut.labels[id] = { name: finalLabels[id], provenance: origin[id] };
     if (origin[id] === 'derived') continue;
     const k = nameKey(finalLabels[id]);
-    const prev = origin[id] === 'preserved' ? m.anchors.get(k) : undefined;
+    const prev = preserved[id] !== undefined ? m.anchors.get(k) : undefined;
     if (!prev && origin[id] === 'preserved' && !seedable(m, id, remapped)) continue;
     provOut.anchors[k] = [...(prev ?? new Set(m.members.get(id).map(nodeKey)))].sort();
   }

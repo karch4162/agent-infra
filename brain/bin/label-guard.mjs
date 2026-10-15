@@ -55,7 +55,7 @@
 // allowing a copy into empty space cannot lose a label.
 //
 // CLI (used by sync-graph.sh; pure Node, no deps):
-//   node label-guard.mjs --count <report.md>
+//   node label-guard.mjs --count <report.md> [graph.json]
 //       → one integer line: how many communities that report NAMES. A missing
 //         file prints 0 and exits 0 (it names nothing). A present-but-unreadable
 //         file is an ERROR, exit 1 — see fail-closed above.
@@ -65,7 +65,7 @@
 //         ADVISORY ONLY, always exit 0 — it explains a freeze, it never gates a
 //         copy. See reportIdStaleness (c) below.
 //
-//   node label-guard.mjs --may-replace <existing.md> <incoming.md>
+//   node label-guard.mjs --may-replace <existing.md> <incoming.md> [incoming-graph.json]
 //       → one line `<verdict> <existingNamed> <incomingNamed>`, verdict being
 //         literally `allow` or `refuse`.
 //         exit 0  = allow   (and stdout starts with `allow`)
@@ -107,11 +107,42 @@ export const HEADING_RE = /^### Community (\d+) - "(.+?)"/gm;
 export const DERIVED_LABEL = /^(?:\S*\.[a-z][a-z0-9]{0,4}|\S*-param-\S*)$/;
 export const isDerivedLabel = (label) => typeof label === 'string' && DERIVED_LABEL.test(label.trim());
 
+// A label graphify's keyless labeler took from one of the community's own nodes
+// (`Button`, `cn`, `map`; graphify cluster.py label_communities_by_hub): no
+// whitespace, and equal to a member's label or name once a trailing `()` is
+// stripped from both. On 2026-10-15 this flagged all 53 such labels across the
+// vault's mirrors and none of 180 real names (INNOV-403). Any member, not just
+// the hub: a frozen report drifts from its graph, and the hub moves with it.
+// Whitespace is required to be absent because markdown headings are nodes too,
+// so real names like "Match Setup Flow" equal a member.
+const stripCall = (s) => String(s).trim().replace(/\(\)$/, '');
+export const isNodeNameLabel = (label, nodes) => {
+  if (typeof label !== 'string' || /\s/.test(label.trim()) || !Array.isArray(nodes)) return false;
+  const want = stripCall(label);
+  return nodes.some((n) => [n?.label, n?.name].some((v) => v !== undefined && v !== null && stripCall(v) === want));
+};
+
 // (a) THE definition of "named". A label is named when it is a non-empty string
-// that is neither a `Community N` placeholder nor a path-derived label. Every
-// other question about labels in this codebase is downstream of this one function.
-export const isNamedLabel = (label) =>
-  typeof label === 'string' && label.trim() !== '' && !GENERIC_LABEL.test(label) && !isDerivedLabel(label);
+// that is neither a `Community N` placeholder, a path-derived label, nor (when
+// the community's member nodes are known) one of those nodes' own names. Without
+// nodes the last test cannot run, and the label counts as named: the safe reading
+// for a floor. Every other question about labels here is downstream of this.
+export const isNamedLabel = (label, nodes = []) =>
+  typeof label === 'string' && label.trim() !== '' && !GENERIC_LABEL.test(label) && !isDerivedLabel(label) &&
+  !isNodeNameLabel(label, nodes);
+
+// graph.json text → Map<String(community id), node[]>. Keys are strings because
+// emitters ship `community` as number or string. Throws on unparseable JSON.
+export function communityMembers(graphText) {
+  const out = new Map();
+  for (const n of JSON.parse(graphText)?.nodes ?? []) {
+    if (n?.community === undefined || n?.community === null) continue;
+    const k = String(n.community);
+    if (!out.has(k)) out.set(k, []);
+    out.get(k).push(n);
+  }
+  return out;
+}
 
 // id (number) → label as written. Later headings for the same id win, which is
 // the same last-one-wins reading label-communities has always used.
@@ -122,10 +153,11 @@ export function readReportLabels(text) {
   return out;
 }
 
-// How many communities this report text NAMES.
-export function countNamedLabels(text) {
+// How many communities this report text NAMES. `members` (communityMembers of
+// the graph the report was built with) enables the node-name test.
+export function countNamedLabels(text, members) {
   let n = 0;
-  for (const label of readReportLabels(text).values()) if (isNamedLabel(label)) n++;
+  for (const [id, label] of readReportLabels(text)) if (isNamedLabel(label, members?.get(String(id)))) n++;
   return n;
 }
 
@@ -152,11 +184,26 @@ function loadReport(path) {
   }
 }
 
+// A graph PATH → communityMembers. No path → undefined (text-only count). A path
+// given but missing, unreadable or unparseable THROWS: the caller asked us to
+// judge against it, and a silent text-only fallback would err open.
+function loadMembers(graphPath) {
+  if (graphPath === undefined || graphPath === null || graphPath === '') return undefined;
+  const g = loadReport(graphPath);
+  if (!g.present) throw new Error(`graph not found: ${graphPath}`);
+  try {
+    return communityMembers(g.text);
+  } catch (e) {
+    throw new Error(`cannot parse ${graphPath}: ${e.message}`);
+  }
+}
+
 // Named-label count for a report PATH. Absent file → 0 (it names nothing);
 // unreadable file → throws.
-export function namedLabelCountOf(path) {
+export function namedLabelCountOf(path, graphPath) {
+  const members = loadMembers(graphPath);
   const { present, text } = loadReport(path);
-  return present ? countNamedLabels(text) : 0;
+  return present ? countNamedLabels(text, members) : 0;
 }
 
 // (b) May `incomingPath` overwrite `existingPath`?
@@ -164,12 +211,18 @@ export function namedLabelCountOf(path) {
 // existing one. An equal count (a same-count relabel, or a plain content refresh)
 // still copies; strictly fewer named communities never does.
 // Throws when it cannot tell — callers must read a throw as "refuse".
-export function mayReplaceReport(existingPath, incomingPath) {
+// INNOV-403: node-name filler is discounted on the INCOMING side only, judged
+// against `incomingGraphPath`, the graph built with it. The existing report keeps
+// the text-only count: the graph beside it may have moved since it was frozen, and
+// scoring it against reissued ids could undercount real names (fail open). Filler
+// left in the existing count only raises the floor.
+export function mayReplaceReport(existingPath, incomingPath, incomingGraphPath) {
   const incoming = loadReport(incomingPath);
   if (!incoming.present) throw new Error(`incoming report not found: ${incomingPath}`);
+  const members = loadMembers(incomingGraphPath);
   const existing = loadReport(existingPath);
   const existingNamed = existing.present ? countNamedLabels(existing.text) : 0;
-  const incomingNamed = countNamedLabels(incoming.text);
+  const incomingNamed = countNamedLabels(incoming.text, members);
   return {
     verdict: incomingNamed >= existingNamed ? 'allow' : 'refuse',
     existingNamed,
@@ -236,10 +289,10 @@ if (invokedDirectly) {
   try {
     if (argv[0] === '--count') {
       // Exactly one integer line on stdout, nothing on stderr.
-      console.log(String(namedLabelCountOf(argv[1])));
+      console.log(String(namedLabelCountOf(argv[1], argv[2])));
       process.exit(EXIT_ALLOW);
     } else if (argv[0] === '--may-replace') {
-      const r = mayReplaceReport(argv[1], argv[2]);
+      const r = mayReplaceReport(argv[1], argv[2], argv[3]);
       console.log(`${r.verdict} ${r.existingNamed} ${r.incomingNamed}`);
       process.exit(r.verdict === 'allow' ? EXIT_ALLOW : EXIT_REFUSE);
     } else if (argv[0] === '--stale') {
@@ -250,8 +303,8 @@ if (invokedDirectly) {
       process.exit(EXIT_ALLOW);
     } else {
       console.error(
-        'usage: label-guard.mjs --count <report.md>\n' +
-          '       label-guard.mjs --may-replace <existing-report.md> <incoming-report.md>\n' +
+        'usage: label-guard.mjs --count <report.md> [graph.json]\n' +
+          '       label-guard.mjs --may-replace <existing-report.md> <incoming-report.md> [incoming-graph.json]\n' +
           '       label-guard.mjs --stale <report.md> <graph.json>'
       );
       process.exit(EXIT_ERROR);
