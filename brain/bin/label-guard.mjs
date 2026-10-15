@@ -92,11 +92,26 @@ export const GENERIC_LABEL = /^Community \d+$/;
 // there and generic here. One definition now: generic.)
 export const HEADING_RE = /^### Community (\d+) - "(.+?)"/gm;
 
+// A label graphify derived from a file path rather than a name: a whitespace-free
+// token ending in a file extension (`photo-service.ts`, `(sub-pages)/layout.tsx`,
+// `README.md`) or carrying graphify's `-param-` fold of a `[param]` route
+// segment. On 2026-10-12 a sports-management resync produced 175 of these;
+// counted as named, they outscored 76 real names and the guard let the report
+// overwrite them (INNOV-397). Requiring no whitespace keeps human names like
+// "Offline Sync / Tab Charging"; an extension starts with a letter, so
+// "HTTP/2.0" stays a name too. deriveName's own output
+// (basename sans extension) is deliberately NOT matched: reconcile relies on it
+// counting as named. label-communities' isPathName is a different, stricter
+// question (does a path label still fit its cluster?), so it stays separate.
+// ponytail: shape heuristic; a bare one-word name like "Next.js" reads as a file.
+export const DERIVED_LABEL = /^(?:\S*\.[a-z][a-z0-9]{0,4}|\S*-param-\S*)$/;
+export const isDerivedLabel = (label) => typeof label === 'string' && DERIVED_LABEL.test(label.trim());
+
 // (a) THE definition of "named". A label is named when it is a non-empty string
-// that is not a `Community N` placeholder. Every other question about labels in
-// this codebase is downstream of this one function.
+// that is neither a `Community N` placeholder nor a path-derived label. Every
+// other question about labels in this codebase is downstream of this one function.
 export const isNamedLabel = (label) =>
-  typeof label === 'string' && label.trim() !== '' && !GENERIC_LABEL.test(label);
+  typeof label === 'string' && label.trim() !== '' && !GENERIC_LABEL.test(label) && !isDerivedLabel(label);
 
 // id (number) → label as written. Later headings for the same id win, which is
 // the same last-one-wins reading label-communities has always used.
