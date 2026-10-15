@@ -478,6 +478,31 @@ for variant in absent no-key empty bad-json; do
   fi
 done
 
+# --- 9. status-marked notes are never stale (INNOV-399) ---------------------
+# /brain:verify does not bump last_verified on a note it marks superseded or
+# falsified, so the stale rule must skip them or they sit in the bucket forever.
+# current and a missing status still count (negative control). CRLF throughout.
+BOX="$(mktemp -d "$TMPROOT/boxXXXXXX")"
+VAULT="$BOX/vault"
+mkdir -p "$VAULT/wiki"
+st_note() {
+  printf -- "---\r\nid: $1\r\ntags: [x, y]\r\nlast_verified: 2020-01-01\r\n$2---\r\n# $1\r\nSee [[st-sup]] [[st-fal]] [[st-cur]] [[st-none]].\r\n" >"$VAULT/wiki/$1.md"
+}
+st_note st-sup 'status: superseded\r\n'
+st_note st-fal 'status: "falsified"   # disproven 2026-10\r\n'
+st_note st-cur 'status: current\r\n'
+st_note st-none ''
+( cd "$BOX" && BRAIN_ROOT="$VAULT" node "$FRESH" --json ) >"$BOX/out.json" 2>/dev/null
+( cd "$BOX" && BRAIN_ROOT="$VAULT" node "$FRESH" --stdout ) >"$BOX/out.md" 2>/dev/null
+if node -e 'const a=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).filter(f=>f.kind==="stale").map(f=>f.note).sort();
+  process.exit(a.join()==="wiki/st-cur.md,wiki/st-none.md"?0:1)' "$BOX/out.json" 2>/dev/null \
+  && grep -qF 'Stale notes (last_verified > 45d) (2)' "$BOX/out.md" \
+  && ! grep -qE 'st-(sup|fal)\.md\]\([^)]*\) — last_verified' "$BOX/out.md"; then
+  pass "stale/skips-status-marked"
+else
+  fail "stale/skips-status-marked" "want stale = st-cur + st-none only" "json: [$(cat "$BOX/out.json")]" "md: [$(grep -F 'last_verified' "$BOX/out.md")]"
+fi
+
 # ================================================================= SUMMARY ==
 echo
 echo "$PASSED passed, $FAILED failed"

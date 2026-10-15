@@ -41,7 +41,7 @@ Resolve the vault root as `$BRAIN_ROOT` (else the current project dir / cwd).
    - broken source → the source moved/was deleted; re-anchor `source:` or re-verify the fact?
    - unknown owner → rewrite `owner:` to the author's GitHub handle, or add a genuinely new person to `brain.json`'s `people`.
    - unverifiable source → **never** an edit to the note. Clone the repo or correct `REPOS_DIR`, then re-run.
-   - stale / low confidence → `/brain:verify` re-checks the claim against current code in batch: bumps `last_verified` when it holds, sets `status:` when the code contradicts it.
+   - stale / low confidence → `/brain:verify` re-checks the claim against current code in batch: bumps `last_verified` when it holds, sets `status:` when the code contradicts it (a superseded/falsified note then leaves the stale list).
    - orphan → add an `index.md` line / inbound link, or archive the note?
    - hot.md over budget → offer to prune it now: rewrite "Current focus" to what's actually current, drop prior-session bullets (history is in `logs/`), get it back under ~500 words.
 

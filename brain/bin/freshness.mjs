@@ -7,7 +7,8 @@
 //
 //   1. Dead [[wikilinks]]   — a link target that resolves to no note / stub / report
 //   2. Orphan notes         — a note nothing links to (not in index.md, not linked)
-//   3. Stale last_verified  — frontmatter date older than --stale-days (default 45)
+//   3. Stale last_verified  — frontmatter date older than --stale-days (default 45);
+//                             a superseded/falsified `status:` is never stale
 //   4. Broken source anchors— a `source:` file path that no longer exists on disk
 //   5. hot.md over budget   — the rolling cache exceeds its word budget (accretion)
 //   6. Malformed enums      — `confidence:` not exactly high|medium|low, or a present
@@ -202,8 +203,10 @@ for (const n of parsed) {
     if (!PEOPLE.has(owner)) badOwners.push({ from: rel, owner: owner || null });
   }
 
-  // 3. stale last_verified
-  if (n.fm.last_verified) {
+  // 3. stale last_verified — a superseded/falsified note is never re-verified
+  //    (/brain:verify does not bump it), so it is not stale (INNOV-399).
+  const marked = ['superseded', 'falsified'].includes(enumValue(n.fm.status ?? ''));
+  if (n.fm.last_verified && !marked) {
     const d = new Date(n.fm.last_verified);
     if (!isNaN(d)) {
       const ageDays = Math.floor((today - d) / 86400000);
