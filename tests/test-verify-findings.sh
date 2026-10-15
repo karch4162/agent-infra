@@ -11,6 +11,7 @@
 #   - invalid verdicts refuse the whole batch and write nothing
 #   - prior records whose item left the queue are pruned; this run's are kept
 #   - logs/ (where the file lives) is on the template .saveinclude
+#   - the dead-link brief searches community stubs by old members (INNOV-402)
 #
 # Run:  bash tests/test-verify-findings.sh   (from anywhere; needs node)
 set -uo pipefail
@@ -162,6 +163,15 @@ check "queue/rejudged-dead-link-carried" "$([[ "$(qcount carried wiki/d.md)" == 
 printf -- '---\r\naliases:\r\n  - _COMMUNITY_Other Label\r\n---\r\n# stub\r\n' >"$VAULT/graphify/r/communities/_COMMUNITY_Old Name.md"
 queue
 check "queue/alias-change-requeues-dead-link" "$([[ "$(qcount work wiki/d.md)" == 1 ]]; echo $?)" "q: [$(cat "$TMPROOT/q.txt")]"
+
+# --- 7c. the dead-link brief searches community stubs (INNOV-402) ------------
+# A dead [[_COMMUNITY_*]] link has no stub by name or alias, so only the old
+# stub's members can point at its relabeled successor. Without this the
+# subagent searches wiki/ alone and every stub link comes back `none`.
+BRIEF="$(grep -F '**Dead link:**' "$REPO_ROOT/brain/skills/verify/SKILL.md" | tr -d '\r')"
+for want in 'graphify/*/communities' 'members:' 'stub basename as `replacement`'; do
+  check "skill/dead-link-brief-has:$want" "$([[ "$BRIEF" == *"$want"* ]]; echo $?)" "verify/SKILL.md dead-link brief must carry: $want"
+done
 
 # --- 8. the file is on the save path ------------------------------------------
 check "saveinclude/logs" "$(grep -qx 'logs/' "$REPO_ROOT/brain/templates/saveinclude"; echo $?)" "logs/ missing from brain/templates/saveinclude"
