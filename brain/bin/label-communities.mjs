@@ -405,6 +405,8 @@ function remapNames(m, inPlaceIds, takenNames) {
   for (const { oldId, label } of movable)
     for (const [id, nodes] of m.members) {
       if (inPlaceIds.has(id)) continue; // that id's current name is off-limits
+      // graphify's own name for that cluster is not a name to carry (INNOV-403).
+      if (!isAgentName(m, oldId, label) && !isNamedLabel(label, nodes)) continue;
       const overlap = fit(m, oldId, label, nodes);
       if (overlap >= STALE_OVERLAP) scored.push({ oldId, id, label, overlap });
     }

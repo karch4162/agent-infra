@@ -214,21 +214,28 @@ export function namedLabelCountOf(path, graphPath) {
 // INNOV-403: node-name filler is judged against `incomingGraphPath`, the graph
 // built with the incoming report. The existing report is never scored against a
 // graph: the one beside it may have moved since it was frozen, and reissued ids
-// could undercount real names (fail open). It loses only the labels the incoming
-// report carries verbatim as filler; dropping those loses nothing, since the copy
-// writes the same string back. That keeps a keyless report refreshing from the
-// next keyless build instead of freezing on its own filler.
+// could undercount real names (fail open). It loses only labels the incoming
+// report carries verbatim as filler, matched copy for copy: each incoming filler
+// heading cancels at most one existing heading with the same string. Then k
+// matched of f incoming filler gives `inc - f >= ex - k`, which implies the old
+// `inc >= ex`: this never allows a copy the text-only rule would refuse. It
+// keeps a keyless report refreshing from the next keyless build instead of
+// freezing on its own filler.
 export function mayReplaceReport(existingPath, incomingPath, incomingGraphPath) {
   const incoming = loadReport(incomingPath);
   if (!incoming.present) throw new Error(`incoming report not found: ${incomingPath}`);
   const members = loadMembers(incomingGraphPath);
-  const filler = new Set();
+  const filler = new Map(); // label → incoming filler headings not yet matched
   for (const [id, label] of readReportLabels(incoming.text))
-    if (isNodeNameLabel(label, members?.get(String(id)))) filler.add(label);
+    if (isNodeNameLabel(label, members?.get(String(id)))) filler.set(label, (filler.get(label) ?? 0) + 1);
   const existing = loadReport(existingPath);
   let existingNamed = 0;
   if (existing.present)
-    for (const label of readReportLabels(existing.text).values()) if (isNamedLabel(label) && !filler.has(label)) existingNamed++;
+    for (const label of readReportLabels(existing.text).values()) {
+      if (!isNamedLabel(label)) continue;
+      if (filler.get(label) > 0) filler.set(label, filler.get(label) - 1);
+      else existingNamed++;
+    }
   const incomingNamed = countNamedLabels(incoming.text, members);
   return {
     verdict: incomingNamed >= existingNamed ? 'allow' : 'refuse',

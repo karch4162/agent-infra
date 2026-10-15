@@ -1444,6 +1444,29 @@ for eol in lf crlf; do
   rc=0
   out="$(node "$(to_native "$GUARD")" --may-replace "$(to_native "$box/keyless.md")" "$(to_native "$box/incoming.md")" "$g")" || rc=$?
   assert_eq "nodename/keyless-refreshes-from-keyless-$eol" "allow 1 1 rc=0" "$out rc=$rc"
+  # Shared filler is matched copy for copy: two vault `Button`s against one
+  # incoming `Button` keep one in the floor (a set match would drop both).
+  {
+    printf '# Graph Report
+
+## Communities
+'
+    printf '### Community 1 - "Match Setup Flow"
+Nodes (1): x
+
+'
+    printf '### Community 8 - "Button"
+Nodes (1): y
+
+'
+    printf '### Community 9 - "Button"
+Nodes (1): z
+'
+  } >"$box/dupes.md"
+  crlf_if "$box/dupes.md" "$eol"
+  rc=0
+  out="$(node "$(to_native "$GUARD")" --may-replace "$(to_native "$box/dupes.md")" "$(to_native "$box/incoming.md")" "$g")" || rc=$?
+  assert_eq "nodename/filler-matched-by-multiplicity-$eol" "refuse 2 1 rc=10" "$out rc=$rc"
 done
 # An incoming graph we were told to use but cannot read is "could not decide".
 printf 'not json' >"$box/bad.json"
@@ -1523,6 +1546,18 @@ for eol in lf crlf; do
   status="$(run_label "$box" --digest demo)"
   cp "$box/out.txt" "$box/digest.json"
   assert_eq "nodename/remint-apply-$eol/still-preserved" "cn" "$(jexpr "$box/digest.json" "d[0].preserved['2']")"
+done
+
+# A sidecar-`preserved` filler heading on a re-minted id must not ride the
+# remap back into preservation at its new id.
+for eol in lf crlf; do
+  box="$(mktemp -d "$TMPROOT/boxXXXXXX")"
+  m_remint_mirror "$box" "$eol"
+  sed -i 's/"5":{"name":"cn","provenance":"agent"}/"5":{"name":"cn","provenance":"preserved"}/' "$box/$SIDECAR_REL"
+  status="$(run_label "$box" --digest demo)"
+  cp "$box/out.txt" "$box/digest.json"
+  assert_eq "nodename/remint-filler-$eol/not-preserved" "false"     "$(jexpr "$box/digest.json" "'2' in d[0].preserved")" "digest: [$(head -c 600 "$box/digest.json")]"
+  assert_eq "nodename/remint-filler-$eol/offered" "true" "$(jexpr "$box/digest.json" "'2' in d[0].labels_template")"
 done
 
 # ================================================================= SUMMARY ==
