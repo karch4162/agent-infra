@@ -1488,6 +1488,37 @@ for eol in lf crlf; do
     "$(jexpr "$box/digest.json" "d[0].preserved['2']")"
 done
 
+# The agent's `cn` was written at id 5; a rebuild re-minted its cluster as 2.
+# Both remint paths (--reconcile on sync, --apply's remap) must carry the
+# `agent` record to the new id, or the next run reads it as graphify filler.
+m_remint_mirror() { # box eol
+  m_mirror "$1" "$2"
+  local dir="$1/vault/graphify/demo"
+  sed -i 's/### Community 2 - "cn"/### Community 5 - "cn"/' "$dir/demo-GRAPH_REPORT.md"
+  sed -i 's/"2":{"name":"cn"/"5":{"name":"cn"/' "$dir/.community-labels.json"
+}
+for eol in lf crlf; do
+  box="$(mktemp -d "$TMPROOT/boxXXXXXX")"
+  m_remint_mirror "$box" "$eol"
+  status="$(run_label "$box" --reconcile demo)"
+  assert_eq "nodename/remint-reconcile-$eol/exit-0" "0" "$status" "stderr: [$(cat "$box/err.txt")]"
+  assert_grep "nodename/remint-reconcile-$eol/moved" '### Community 2 - "cn"' "$box/$REPORT_REL"
+  assert_eq "nodename/remint-reconcile-$eol/agent-carried" "agent" \
+    "$(jexpr "$box/$SIDECAR_REL" "d.labels['2'] && d.labels['2'].provenance")"
+  status="$(run_label "$box" --digest demo)"
+  cp "$box/out.txt" "$box/digest.json"
+  assert_eq "nodename/remint-reconcile-$eol/still-preserved" "cn" "$(jexpr "$box/digest.json" "d[0].preserved['2']")"
+
+  box="$(mktemp -d "$TMPROOT/boxXXXXXX")"
+  m_remint_mirror "$box" "$eol"
+  status="$(run_apply "$box" '{"0":"UI Primitives"}')"
+  assert_eq "nodename/remint-apply-$eol/exit-0" "0" "$status" "stderr: [$(cat "$box/err.txt")]"
+  assert_eq "nodename/remint-apply-$eol/agent-carried" "agent" "$(jexpr "$box/$SIDECAR_REL" "d.labels['2'].provenance")"
+  status="$(run_label "$box" --digest demo)"
+  cp "$box/out.txt" "$box/digest.json"
+  assert_eq "nodename/remint-apply-$eol/still-preserved" "cn" "$(jexpr "$box/digest.json" "d[0].preserved['2']")"
+done
+
 # ================================================================= SUMMARY ==
 echo
 echo "$PASSED passed, $FAILED failed"

@@ -724,7 +724,7 @@ if (argv.includes('--apply')) {
       // An agent's name stays 'agent' when kept, or the next run could not tell it
       // from graphify filler (isPreserved). A remapped name's record is the old id's.
       finalLabels[id] = preserved[id];
-      origin[id] = remapped[id] === undefined && isAgentName(m, id, preserved[id]) ? 'agent' : 'preserved';
+      origin[id] = isAgentName(m, remapped[id]?.from ?? id, preserved[id]) ? 'agent' : 'preserved';
       continue;
     }
     const raw = agent[String(id)];
@@ -859,6 +859,13 @@ if (argv.includes('--reconcile')) {
   side.anchors = side.anchors && typeof side.anchors === 'object' ? side.anchors : {};
   let sideChanged = false;
   for (const d of demoted) { side.labels[d.id] = { name: d.to, provenance: 'derived' }; sideChanged = true; }
+  // An agent's name moved to a new id takes its 'agent' record along (INNOV-403):
+  // left on the old id, the next /brain:label would read it as graphify filler.
+  for (const [id, r] of Object.entries(remapped)) {
+    if (!isAgentName(m, r.from, r.label)) continue;
+    side.labels[id] = { name: r.label, provenance: 'agent' };
+    sideChanged = true;
+  }
   for (const [id, label] of Object.entries(preserved)) {
     const k = nameKey(label);
     if (m.anchors.has(k) || side.anchors[k] || !seedable(m, Number(id), remapped)) continue;
