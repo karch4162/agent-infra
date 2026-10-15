@@ -142,6 +142,27 @@ printf '%s
 record
 check "record/keeps-replacement" "$([[ "$(field wiki/d.md 'r.verdict+"|"+r.replacement')" == 'draft|gone-target-draft' ]]; echo $?)" "d: [$(field wiki/d.md 'JSON.stringify(r)')]"
 
+# --- 7b. a dead-link verdict is keyed on the target side too (INNOV-398) ------
+# A relabel regenerates community stubs without touching the linking note; a
+# stored `none` must be re-judged, not carried. Stub written CRLF (vault is autocrlf).
+printf '%s\n' '{"note":"wiki/d.md","kind":"dead-link","target":"Gone Target","verdict":"none","reason":"no candidate"}' \
+  '{"note":"wiki/b.md","kind":"claim","verdict":"cannot-tell","subtype":"anchor-unverifiable","reason":"repo foo not checked out"}' >"$TMPROOT/v.jsonl"
+record
+scan; queue
+check "queue/dead-link-carried-unchanged" "$([[ "$(qcount carried wiki/d.md)" == 1 ]]; echo $?)" "q: [$(cat "$TMPROOT/q.txt")]"
+mkdir -p "$VAULT/graphify/r/communities"
+printf -- '---\r\naliases:\r\n  - _COMMUNITY_Gone Target\r\n---\r\n# stub\r\n' >"$VAULT/graphify/r/communities/_COMMUNITY_Old Name.md"
+queue
+check "queue/relabel-requeues-dead-link" "$([[ "$(qcount work wiki/d.md)" == 1 && "$(qcount carried wiki/d.md)" == 0 ]]; echo $?)" "q: [$(cat "$TMPROOT/q.txt")]"
+check "queue/relabel-keeps-claims-carried" "$([[ "$(qcount carried wiki/b.md)" == 1 ]]; echo $?)" "q: [$(cat "$TMPROOT/q.txt")]"
+record
+queue
+check "queue/rejudged-dead-link-carried" "$([[ "$(qcount carried wiki/d.md)" == 1 ]]; echo $?)" "q: [$(cat "$TMPROOT/q.txt")]"
+# An alias-only change (rename-protected stub, same filename) also re-queues.
+printf -- '---\r\naliases:\r\n  - _COMMUNITY_Other Label\r\n---\r\n# stub\r\n' >"$VAULT/graphify/r/communities/_COMMUNITY_Old Name.md"
+queue
+check "queue/alias-change-requeues-dead-link" "$([[ "$(qcount work wiki/d.md)" == 1 ]]; echo $?)" "q: [$(cat "$TMPROOT/q.txt")]"
+
 # --- 8. the file is on the save path ------------------------------------------
 check "saveinclude/logs" "$(grep -qx 'logs/' "$REPO_ROOT/brain/templates/saveinclude"; echo $?)" "logs/ missing from brain/templates/saveinclude"
 

@@ -17,7 +17,8 @@
 // queue — prints the judgment queue, one JSON object per line. Work items first
 //   (dead links, then claims stale-oldest-first, then low-confidence-only), at most
 //   --max of them (default 25). Then every CARRIED item: one whose stored record
-//   still matches the note's blob and is at most --ttl-days old (default 30); it
+//   still matches the note's blob and is at most --ttl-days old (default 30) and,
+//   for a dead link, whose stored `targets` still matches the vault's; it
 //   carries `"carried": {verdict, subtype, reason, date, pr}` and is not counted
 //   against --max. A carried item needs no subagent.
 //
@@ -35,15 +36,23 @@
 // `git hash-object` stores in an autocrlf vault — computed here, not by spawning
 // git per note. A changed note no longer matches its record, so it is re-checked.
 //
+// A dead-link verdict also depends on what the link could resolve to, which the
+// linking note's blob does not see: /brain:label regenerates community stubs and
+// leaves the note alone (INNOV-398). So a dead-link record also stores `targets`,
+// a hash of every name a link resolves to (wiki note and community stub basenames
+// plus their aliases, the set freshness.mjs builds). Any add, rename or relabel
+// re-judges the vault's dead links; they are the cheapest items in the queue.
+//
 // ponytail: the --ttl-days age is the stand-in for "the reference branch moved
 // too far since the verdict". Checking the ref SHA per record needs a checkout
 // per repo and a git spawn each; add it if TTL proves too blunt.
 //
 // Pure Node, no deps.
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, readdirSync } from 'node:fs';
+import { join, dirname, basename } from 'node:path';
 import { createHash } from 'node:crypto';
+import { fileAliases } from './anchors.mjs';
 
 const FINDINGS = 'logs/verify-findings.json';
 const VERDICTS = {
@@ -57,6 +66,29 @@ function blobOf(vault, note) {
   const text = readFileSync(join(vault, note), 'utf8').replace(/\r\n/g, '\n');
   const body = Buffer.from(text, 'utf8');
   return createHash('sha1').update(`blob ${body.length}\0`).update(body).digest('hex');
+}
+
+function walk(dir, acc = []) {
+  if (!existsSync(dir)) return acc;
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) walk(p, acc);
+    else if (e.name.endsWith('.md')) acc.push(p);
+  }
+  return acc;
+}
+
+// The target side of a dead-link verdict: sorted, so readdir order (which differs
+// between platforms) cannot change the hash.
+function targetsOf(vault) {
+  const g = join(vault, 'graphify');
+  const stubs = existsSync(g) ? readdirSync(g).flatMap((repo) => walk(join(g, repo, 'communities'))) : [];
+  const names = new Set();
+  for (const f of [...walk(join(vault, 'wiki')), ...stubs]) {
+    names.add(basename(f, '.md'));
+    for (const a of fileAliases(readFileSync(f, 'utf8').replace(/\r\n/g, '\n'))) names.add(a);
+  }
+  return createHash('sha1').update([...names].sort().join('\n')).digest('hex');
 }
 
 const keyOf = (r) => `${r.kind}\0${r.note}\0${r.target || ''}`;
@@ -118,10 +150,12 @@ function main(argv) {
     const ttl = Number(val('--ttl-days') ?? 30);
     const now = Date.parse(today());
     const byKey = new Map(loadFindings(vault).map((r) => [keyOf(r), r]));
+    const targets = targetsOf(vault);
     const work = [], carried = [];
     for (const item of queue) {
       const r = byKey.get(keyOf(item));
-      const fresh = r && r.blob === blobOf(vault, item.note) && (now - Date.parse(r.date)) / 864e5 <= ttl;
+      const fresh = r && r.blob === blobOf(vault, item.note) && (now - Date.parse(r.date)) / 864e5 <= ttl &&
+        (item.kind !== 'dead-link' || r.targets === targets);
       if (fresh) carried.push({ ...item, carried: { verdict: r.verdict, subtype: r.subtype, reason: r.reason, date: r.date, pr: r.pr } });
       else work.push(item);
     }
@@ -145,13 +179,14 @@ function main(argv) {
   const date = today();
   const live = new Set(queue.map(keyOf));
   const out = new Map();
+  const targets = targetsOf(vault);
   for (const r of loadFindings(vault)) if (live.has(keyOf(r))) out.set(keyOf(r), r);
   for (const v of fresh) {
     out.set(keyOf(v), {
       note: v.note, kind: v.kind, ...(v.target ? { target: v.target } : {}),
       verdict: v.verdict, ...(v.replacement ? { replacement: v.replacement } : {}), reason: v.reason,
       ...(v.subtype ? { subtype: v.subtype } : {}), ...(v.drift ? { drift: v.drift } : {}),
-      evidence: v.evidence || null, blob: blobOf(vault, v.note), date, pr,
+      evidence: v.evidence || null, blob: blobOf(vault, v.note), ...(v.kind === 'dead-link' ? { targets } : {}), date, pr,
     });
   }
   const records = [...out.values()].sort((a, b) => (keyOf(a) < keyOf(b) ? -1 : 1));
