@@ -413,6 +413,37 @@ else
     "exit: $status" "stderr: [$(cat "$box/err.txt")]"
 fi
 
+# --- 5b. INNOV-403: node-name filler in the incoming report is not a name ---
+# 3 hub labels (`Button`, `cn`, `map`) must not outscore 2 real names. The
+# control runs the same reports with a graph that lacks those nodes.
+nodename_case() { # graph_json -> echoes box
+  local box
+  box="$(new_sandbox)"
+  printf '%s\n' "$1" >"$box/repos/demorepo/graphify-out/graph.json"
+  make_report "$box/$DST_REL" 2 0 "Vault Label"
+  printf '# Graph Report\n\n## Communities\n\n### Community 1 - "Button"\n\n### Community 2 - "cn"\n\n### Community 3 - "map"\n' \
+    >"$box/$SRC_REL"
+  cp "$box/$DST_REL" "$box/dst.before"
+  cp "$box/$SRC_REL" "$box/src.before"
+  echo "$box"
+}
+box="$(nodename_case '{"nodes":[{"id":"b","label":"Button","community":1},{"id":"c","label":"cn()","community":2},{"id":"m","label":"map","community":3}],"links":[]}')"
+status="$(run_sync "$box")"
+assert_files_identical "integration/node-name-filler-does-not-clobber-names" \
+  "$box/dst.before" "$box/$DST_REL"
+box="$(nodename_case '{"nodes":[{"id":"x","label":"other","community":1}],"links":[]}')"
+status="$(run_sync "$box")"
+assert_files_identical "integration/node-name-control-unwitnessed-labels-copy" \
+  "$box/src.before" "$box/$DST_REL"
+# A keyless vault report still refreshes from the next keyless build.
+box="$(nodename_case '{"nodes":[{"id":"b","label":"Button","community":1},{"id":"c","label":"cn()","community":2},{"id":"m","label":"map","community":3}],"links":[]}')"
+cp "$box/$SRC_REL" "$box/$DST_REL"
+printf '\n### Community 4 - "Community 4"\n' >>"$box/$SRC_REL"
+cp "$box/$SRC_REL" "$box/src.before"
+status="$(run_sync "$box")"
+assert_files_identical "integration/node-name-keyless-report-refreshes" \
+  "$box/src.before" "$box/$DST_REL"
+
 # --- 6..8. FAIL CLOSED: a guard that cannot run must PRESERVE the report ----
 # The single most important property of the extraction (INNOV-274). The old bash
 # grep could not fail; a node-backed guard can, and every one of those failures

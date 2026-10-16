@@ -309,6 +309,10 @@ function jaccard(a, b) {
 //                             carries that exact derived string. A hand-edit
 //                             makes it a human label again, and it is preserved.
 //   - anything else         → PRESERVED.
+// INNOV-403: graphify's own node-name filler (`Button`, `cn`) is NOT preserved
+// unless the sidecar says an agent chose that exact name. A `preserved` record
+// carries no authorship (every sidecar-less label becomes one), so it does not
+// protect filler; that is how volleyball-stats froze 12 of them.
 function isPreserved(m, id, existing) {
   // "Is this a name at all?" is the shared question (label-guard.isNamedLabel).
   // "Is that name off-limits?" is this script's own, provenance-aware answer.
@@ -316,10 +320,17 @@ function isPreserved(m, id, existing) {
   // A name for a cluster that no longer exists is not work worth preserving,
   // whatever the sidecar says about who wrote it.
   if (isStale(m, id)) return false;
+  if (!isAgentName(m, id, existing) && !isNamedLabel(existing, m.members.get(id))) return false;
   const rec = m.provenance.get(id);
   if (!rec || rec.provenance !== 'derived') return true;
   return nameKey(rec.name ?? '') !== nameKey(existing);
 }
+
+// Did an agent pick exactly this label for this id (sidecar provenance 'agent')?
+const isAgentName = (m, id, label) => {
+  const rec = m.provenance.get(id);
+  return rec?.provenance === 'agent' && nameKey(rec.name ?? '') === nameKey(label);
+};
 
 // ---- naming inputs -----------------------------------------------------------
 
@@ -394,6 +405,8 @@ function remapNames(m, inPlaceIds, takenNames) {
   for (const { oldId, label } of movable)
     for (const [id, nodes] of m.members) {
       if (inPlaceIds.has(id)) continue; // that id's current name is off-limits
+      // graphify's own name for that cluster is not a name to carry (INNOV-403).
+      if (!isAgentName(m, oldId, label) && !isNamedLabel(label, nodes)) continue;
       const overlap = fit(m, oldId, label, nodes);
       if (overlap >= STALE_OVERLAP) scored.push({ oldId, id, label, overlap });
     }
@@ -709,7 +722,13 @@ if (argv.includes('--apply')) {
   let named = 0, invalid = 0, collided = 0;
   const bySize = [...m.members.keys()].sort((a, b) => m.members.get(b).length - m.members.get(a).length);
   for (const id of bySize) {
-    if (preserved[id] !== undefined) { finalLabels[id] = preserved[id]; origin[id] = 'preserved'; continue; }
+    if (preserved[id] !== undefined) {
+      // An agent's name stays 'agent' when kept, or the next run could not tell it
+      // from graphify filler (isPreserved). A remapped name's record is the old id's.
+      finalLabels[id] = preserved[id];
+      origin[id] = isAgentName(m, remapped[id]?.from ?? id, preserved[id]) ? 'agent' : 'preserved';
+      continue;
+    }
     const raw = agent[String(id)];
     const clean = sanitizeLabel(raw);
     if (isNamedLabel(clean)) {
@@ -772,7 +791,7 @@ if (argv.includes('--apply')) {
     provOut.labels[id] = { name: finalLabels[id], provenance: origin[id] };
     if (origin[id] === 'derived') continue;
     const k = nameKey(finalLabels[id]);
-    const prev = origin[id] === 'preserved' ? m.anchors.get(k) : undefined;
+    const prev = preserved[id] !== undefined ? m.anchors.get(k) : undefined;
     if (!prev && origin[id] === 'preserved' && !seedable(m, id, remapped)) continue;
     provOut.anchors[k] = [...(prev ?? new Set(m.members.get(id).map(nodeKey)))].sort();
   }
@@ -853,6 +872,17 @@ if (argv.includes('--reconcile')) {
   // would leave a derived name with no 'derived' record, i.e. preserved.
   if (sideChanged) { side.version = 2; writeFileSync(p, JSON.stringify(side, null, 2) + '\n', 'utf8'); }
   if (text !== m.report) writeFileSync(m.reportPath, text, 'utf8');
+  // An agent's name moved to a new id takes its 'agent' record along (INNOV-403):
+  // left on the old id, the next /brain:label reads it as graphify filler. Written
+  // AFTER the report: interrupted before this, the moved name is merely re-offered;
+  // the other order would leave an 'agent' row naming a heading not yet moved,
+  // which preserves whatever heading sits there now.
+  const carried = Object.entries(remapped).filter(([, r]) => isAgentName(m, r.from, r.label));
+  if (carried.length) {
+    for (const [id, r] of carried) side.labels[id] = { name: r.label, provenance: 'agent' };
+    side.version = 2;
+    writeFileSync(p, JSON.stringify(side, null, 2) + '\n', 'utf8');
+  }
   for (const [id, r] of Object.entries(remapped)) console.error(`reconcile ${repo}: "${r.label}" moved with its members, community ${r.from} -> ${id}`);
   if (demoted.length)
     console.error(

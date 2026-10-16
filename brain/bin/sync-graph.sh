@@ -253,9 +253,13 @@ LABEL_GUARD="$SCRIPT_DIR/label-guard.mjs"
 # consent here.
 #
 # Always exits 0 itself, so `set -e` cannot turn a refusal into an aborted sync.
-label_guard_verdict() { # existing_report incoming_report
-  local existing="${1:-}" incoming="${2:-}" out="" rc=0 verdict="" have="" want=""
-  out="$(node "$LABEL_GUARD" --may-replace "$existing" "$incoming" 2>/dev/null)" || rc=$?
+#
+# $3 is the graph the incoming report was built with: labels that are just one of
+# their community's own node names (graphify's keyless `Button`, `cn`) do not
+# count as names on the incoming side (INNOV-403).
+label_guard_verdict() { # existing_report incoming_report incoming_graph
+  local existing="${1:-}" incoming="${2:-}" graph="${3:-}" out="" rc=0 verdict="" have="" want=""
+  out="$(node "$LABEL_GUARD" --may-replace "$existing" "$incoming" "$graph" 2>/dev/null)" || rc=$?
   read -r verdict have want <<<"${out:-}" || true
   # Both counts must be plain integers, or we did not understand the answer.
   if [[ ! "$have" =~ ^[0-9]+$ || ! "$want" =~ ^[0-9]+$ ]]; then
@@ -566,7 +570,7 @@ for repo in "${repos[@]}"; do
   if [[ -f "$src/GRAPH_REPORT.md" ]]; then
     guard_verdict=""; existing_named=""; incoming_named=""
     read -r guard_verdict existing_named incoming_named \
-      <<<"$(label_guard_verdict "$dst/$name-GRAPH_REPORT.md" "$src/GRAPH_REPORT.md")" || true
+      <<<"$(label_guard_verdict "$dst/$name-GRAPH_REPORT.md" "$src/GRAPH_REPORT.md" "$src/graph.json")" || true
     if [[ "$guard_verdict" == "allow" ]]; then
       cp "$src/GRAPH_REPORT.md" "$dst/$name-GRAPH_REPORT.md"
       report_copied=1
