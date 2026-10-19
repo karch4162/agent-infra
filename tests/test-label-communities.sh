@@ -1670,6 +1670,35 @@ for eol in lf crlf; do
   assert_eq "wiki-named-$eol/fresh-name-not-derived" "undefined" "$(jexpr "$box/$GO_SIDECAR_REL" "String(d.labels['3'])")"
 done
 
+for eol in lf crlf; do
+  # graphify omitted Alpha's cluster (id 2) and the new id 5 as thin: the
+  # carried name keeps a heading, the uncarried thin cluster stays omitted.
+  box="$(mktemp -d "$TMPROOT/boxXXXXXX")"
+  write_wiki_graph "$box" "$eol" placeholder
+  rep="$box/$GO_REPORT_REL"
+  awk '/^### Community (2|5) /{skip=1; next} /^### |^## /{skip=0} !skip' "$rep" >"$rep.tmp" && mv "$rep.tmp" "$rep"
+  crlf_if "$rep" "$eol" # awk under Git Bash drops the CRs
+  status="$(run_wiki_reconcile "$box")"
+  assert_eq "wiki-thin-$eol/exit-0" "0" "$status" "stderr: [$(cat "$box/err.txt")]"
+  assert_grep "wiki-thin-$eol/carried-thin-name-appended" '### Community 2 - "Alpha"' "$rep" "report: [$(cat "$rep")]"
+  assert_grep "wiki-thin-$eol/beta-still-moved" '### Community 1 - "Beta"' "$rep"
+  assert_not_grep "wiki-thin-$eol/uncarried-thin-stays-omitted" '### Community 5 ' "$rep"
+  crs="$(tr -cd '\r' <"$rep" | wc -c | tr -d ' ')"
+  lines="$(wc -l <"$rep" | tr -d ' ')"
+  assert_eq "wiki-thin-$eol/line-endings-kept" "$([[ $eol == crlf ]] && echo "$lines" || echo 0)" "$crs"
+done
+
+# Emitters ship `community` as a string too: provenance must still land.
+box="$(mktemp -d "$TMPROOT/boxXXXXXX")"
+write_wiki_graph "$box" lf placeholder
+sed -i 's/"community":\([0-9]*\)/"community":"\1"/g' "$box/vault/graphify-out/graph.json"
+status="$(run_wiki_reconcile "$box")"
+assert_eq "wiki-string-ids/exit-0" "0" "$status" "stderr: [$(cat "$box/err.txt")]"
+assert_grep "wiki-string-ids/alpha-follows-its-members-to-2" '### Community 2 - "Alpha"' "$box/$GO_REPORT_REL" \
+  "report: [$(cat "$box/$GO_REPORT_REL")]"
+assert_eq "wiki-string-ids/derived-recorded" "derived" "$(jexpr "$box/$GO_SIDECAR_REL" "d.labels['3']&&d.labels['3'].provenance")" \
+  "sidecar: [$(cat "$box/$GO_SIDECAR_REL" 2>/dev/null)]"
+
 # Failures write nothing: the fresh report stays, no sidecar appears.
 box="$(mktemp -d "$TMPROOT/boxXXXXXX")"
 write_wiki_graph "$box" lf placeholder

@@ -698,12 +698,25 @@ if (argVal('--reconcile') === 'graphify-out') {
     })
     .join('\n');
 
-  // Sidecar, rebuilt for the report just written: 'derived' for this run's
+  // graphify omits thin communities from its report. A carried name whose
+  // cluster went thin still gets a heading, or the name is lost with it; an
+  // uncarried thin cluster stays omitted, as graphify left it.
+  const headed = new Set([...readReportLabels(text).keys()].map(String));
+  const thinCarried = bySize.filter((id) => preserved[id] !== undefined && !headed.has(String(id)));
+  for (const id of thinCarried) headed.add(String(id));
+  const L = thinCarried.length ? ['', ADDITIONAL_HEADER, ''] : [];
+  for (const id of thinCarried) L.push(`### Community ${id} - "${finalLabels[id]}"`, nodesLine(cur.members.get(id)), '');
+  const eol = /\r\n/.test(cur.report) ? '\r\n' : '\n';
+  const out = L.length ? text.replace(/(\r?\n)*$/, eol) + L.join(eol) : text;
+
+  // Sidecar, rebuilt for the report being written: 'derived' for this run's
   // derived names, an agent's record carried with its name, and an anchor per
-  // name — kept if it had one, else the members it was given for now.
+  // name — kept if it had one, else the members it was given for now. Keyed on
+  // the graph's raw ids, which emitters ship as numbers or strings.
   const side = { repo: 'graphify-out', version: 2, labels: {}, anchors: {} };
-  for (const [idStr, label] of Object.entries(finalLabels)) {
-    const id = Number(idStr);
+  for (const id of bySize) {
+    if (!headed.has(String(id))) continue;
+    const label = finalLabels[id];
     const k = nameKey(label);
     if (derivedIds.has(id)) { side.labels[id] = { name: label, provenance: 'derived' }; continue; }
     const from = remapped[id]?.from ?? id;
@@ -711,10 +724,12 @@ if (argVal('--reconcile') === 'graphify-out') {
     if (preserved[id] !== undefined && old.anchors.has(k)) side.anchors[k] = [...old.anchors.get(k)].sort();
     else if (preserved[id] === undefined || seedable(old, id, remapped)) side.anchors[k] = [...new Set(cur.members.get(id).map(nodeKey))].sort();
   }
-  // Sidecar first, as in --reconcile <repo>: interrupted between the two, the
-  // fresh report stays and the next run reconciles again.
+  // Report first, unlike --reconcile <repo>: here the old sidecar describes the
+  // PRE-BUILD report (ids, 'agent' rows), which is what a retry with the same
+  // --existing classifies against. Interrupted between the two, that retry
+  // still sees it; written first, it would describe ids the retry never reads.
+  if (out !== cur.report) writeFileSync(reportPath, out, 'utf8');
   writeFileSync(p, JSON.stringify(side, null, 2) + '\n', 'utf8');
-  if (text !== cur.report) writeFileSync(reportPath, text, 'utf8');
   for (const [id, r] of Object.entries(remapped)) console.error(`reconcile graphify-out: "${r.label}" moved with its members, community ${r.from} -> ${id}`);
   const kept = Object.keys(preserved).length;
   console.error(`reconcile graphify-out: ${kept} name(s) carried from the pre-build report, ${Object.keys(finalLabels).length - kept - derivedIds.size} fresh, ${derivedIds.size} derived`);
