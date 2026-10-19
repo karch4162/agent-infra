@@ -255,6 +255,11 @@ export function mayReplaceReport(existingPath, incomingPath, incomingGraphPath) 
 // must make no obsolescence claim. Ids are compared as strings on both sides:
 // graph emitters have shipped `community` as both number and string, and a
 // silent 3 !== "3" would make every healthy report look obsolete.
+//
+// Id existence only, deliberately: a re-minted id that still exists passes here
+// while its name now sits on another cluster (INNOV-405). Moving names by their
+// members is label-communities.mjs --reconcile's job (fit/jaccard), the one
+// overlap implementation; this check stays an advisory count.
 export function reportIdStaleness(reportText, graphText) {
   const unknown = { known: false, missing: 0, total: 0 };
   let graph;

@@ -186,6 +186,7 @@ REQUIRED=(
   $'graphify/\tbin/sync-graph.sh — the mirrored code graphs, one folder per covered repo'
   $'graphify-out/graph.json\t/brain:save step 5c — the vault-s own wiki concept graph'
   $'graphify-out/GRAPH_REPORT.md\t/brain:save step 5c — the wiki graph report'
+  $'graphify-out/.community-labels.json\t/brain:save step 5c — which wiki graph names were derived, and what each name was given for'
   $'graphify-out/communities/\t/brain:save step 5c — wiki graph community stubs'
 )
 

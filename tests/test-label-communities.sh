@@ -1560,6 +1560,130 @@ for eol in lf crlf; do
   assert_eq "nodename/remint-filler-$eol/offered" "true" "$(jexpr "$box/digest.json" "'2' in d[0].labels_template")"
 done
 
+# ================================================================== PART K5 ==
+# INNOV-405: the vault's own wiki concept graph. Save 5c rebuilds graphify-out/
+# and the graphify skill writes a fresh GRAPH_REPORT.md over the named one: all
+# `Community N` when its Step 5 is skipped (the incident: `refuse 328 0`), or
+# brand-new Step 5 names. `--reconcile graphify-out --existing <pre-build>`
+# carries each old name to the cluster that holds its members now. The vault in
+# these fixtures has no graphify/ dir at all, as a wiki-only vault would not.
+echo "--- K5. --reconcile graphify-out (INNOV-405) ---"
+GO_REPORT_REL="vault/graphify-out/GRAPH_REPORT.md"
+GO_SIDECAR_REL="vault/graphify-out/.community-labels.json"
+LABEL_GUARD="$REPO_ROOT/brain/bin/label-guard.mjs"
+
+# box eol fresh(placeholder|named). Alpha's members now sit at id 2, Beta's at
+# id 1; id 3 (Gamma's id) holds new members; id 5 is new; "tray-pos" left id 8
+# for id 6 and is node-name filler there (a member is called tray-pos), which
+# INNOV-403 never carries.
+write_wiki_graph() {
+  local box="$1" eol="$2" fresh="$3" dir="$1/vault/graphify-out"
+  mkdir -p "$dir"
+  printf '{"nodes":[%s,%s,%s,%s,%s,%s],"links":[]}\n' \
+    "$(seq_nodes 3 b 1 wiki/bnotes.md)" "$(seq_nodes 3 a 2 wiki/anotes.md)" "$(seq_nodes 3 x 3 wiki/x.md)" \
+    "$(seq_nodes 3 y 5 wiki/y.md)" "$(seq_nodes 2 t 6 wiki/t.md)" \
+    '{"id":"tray-pos","label":"tray-pos","community":6,"source_file":"wiki/t.md"}' >"$dir/graph.json"
+  {
+    printf '# Graph Report - wiki  (2026-10-18)\n\n## Community Hubs (Navigation)\n'
+    printf -- '- Alpha\n- Beta\n- Gamma\n- tray-pos\n\n'
+    printf '## Communities (4 total, 0 thin omitted)\n\n'
+    printf '### Community 1 - "Alpha"\nCohesion: 0.5\nNodes (3): a1, a2, a3\n\n'
+    printf '### Community 2 - "Beta"\nCohesion: 0.5\nNodes (3): b1, b2, b3\n\n'
+    printf '### Community 3 - "Gamma"\nCohesion: 0.5\nNodes (3): g1, g2, g3\n\n'
+    printf '### Community 8 - "tray-pos"\nCohesion: 0.5\nNodes (3): t1, t2, tray-pos\n\n'
+    printf '## Suggested Questions\n- What links Alpha and Beta?\n'
+  } >"$box/prev.md"
+  local n1="Community 1" n2="Community 2" n3="Community 3" n5="Community 5" n6="Community 6"
+  if [[ "$fresh" == named ]]; then
+    n1="Beta Things" n2="Alpha Things" n3="Xylophone Notes" n5="Alpha" n6="POS Integration"
+  fi
+  {
+    printf '# Graph Report - wiki  (2026-10-19)\n\n## Community Hubs (Navigation)\n'
+    printf -- '- %s\n' "$n1" "$n2" "$n3" "$n5" "$n6"
+    printf '\n## Communities (5 total, 0 thin omitted)\n\n'
+    printf '### Community 1 - "%s"\nCohesion: 0.5\nNodes (3): b1, b2, b3\n\n' "$n1"
+    printf '### Community 2 - "%s"\nCohesion: 0.5\nNodes (3): a1, a2, a3\n\n' "$n2"
+    printf '### Community 3 - "%s"\nCohesion: 0.5\nNodes (3): x1, x2, x3\n\n' "$n3"
+    printf '### Community 5 - "%s"\nCohesion: 0.5\nNodes (3): y1, y2, y3\n\n' "$n5"
+    printf '### Community 6 - "%s"\nCohesion: 0.5\nNodes (3): t1, t2, tray-pos\n\n' "$n6"
+    printf '## Suggested Questions\n- What links %s and %s?\n' "$n2" "$n1"
+  } >"$dir/GRAPH_REPORT.md"
+  # graphify on Windows writes CRLF, and the vault checkout is autocrlf: both sides.
+  crlf_if "$box/prev.md" "$eol"
+  crlf_if "$dir/GRAPH_REPORT.md" "$eol"
+}
+
+run_wiki_reconcile() { # box
+  run_label "$1" --reconcile graphify-out --existing "$(to_native "$1/prev.md")"
+}
+
+guard_verdict() { # existing incoming graph -> first word of --may-replace
+  node "$(to_native "$LABEL_GUARD")" --may-replace "$(to_native "$1")" "$(to_native "$2")" "$(to_native "$3")" 2>/dev/null | cut -d' ' -f1
+}
+
+for eol in lf crlf; do
+  # --- Step 5 skipped: the incident shape.
+  box="$(mktemp -d "$TMPROOT/boxXXXXXX")"
+  write_wiki_graph "$box" "$eol" placeholder
+  rep="$box/$GO_REPORT_REL"
+  graph="$box/vault/graphify-out/graph.json"
+  assert_eq "wiki-$eol/guard-refuses-the-rebuilt-report" "refuse" "$(guard_verdict "$box/prev.md" "$rep" "$graph")"
+  status="$(run_wiki_reconcile "$box")"
+  assert_eq "wiki-$eol/exit-0" "0" "$status" "stderr: [$(cat "$box/err.txt")]"
+  assert_grep "wiki-$eol/alpha-follows-its-members-to-2" '### Community 2 - "Alpha"' "$rep" "report: [$(cat "$rep")]"
+  assert_grep "wiki-$eol/beta-follows-its-members-to-1" '### Community 1 - "Beta"' "$rep"
+  assert_grep "wiki-$eol/new-cluster-on-gammas-id-derived" '### Community 3 - "x"' "$rep"
+  assert_grep "wiki-$eol/brand-new-id-derived" '### Community 5 - "y"' "$rep"
+  assert_grep "wiki-$eol/filler-not-carried-derived-instead" '### Community 6 - "t"' "$rep"
+  assert_not_grep "wiki-$eol/no-placeholder-left" '"Community ' "$rep"
+  assert_not_grep "wiki-$eol/gamma-gone" 'Gamma' "$rep"
+  assert_not_grep "wiki-$eol/no-orphan-heading" '### Community 8 ' "$rep"
+  assert_grep "wiki-$eol/hub-list-renamed" '- Beta' "$rep"
+  # Every line keeps its CR under crlf, and none gains one under lf.
+  crs="$(tr -cd '\r' <"$rep" | wc -c | tr -d ' ')"
+  lines="$(wc -l <"$rep" | tr -d ' ')"
+  assert_eq "wiki-$eol/line-endings-kept" "$([[ $eol == crlf ]] && echo "$lines" || echo 0)" "$crs"
+  assert_eq "wiki-$eol/derived-recorded" "derived|derived|derived" \
+    "$(jexpr "$box/$GO_SIDECAR_REL" "[d.labels['3'],d.labels['5'],d.labels['6']].map(r=>r&&r.provenance).join('|')")" \
+    "sidecar: [$(cat "$box/$GO_SIDECAR_REL" 2>/dev/null)]"
+  assert_eq "wiki-$eol/carried-names-anchored" "a1,a2,a3|b1,b2,b3" \
+    "$(jexpr "$box/$GO_SIDECAR_REL" "[d.anchors.alpha,d.anchors.beta].map(String).join('|')")"
+  assert_eq "wiki-$eol/guard-now-allows-the-reconciled-report" "allow" "$(guard_verdict "$box/prev.md" "$rep" "$graph")"
+  ( BRAIN_ROOT="$(to_native "$box/vault")" node "$(to_native "$STUBS_MJS")" graphify-out ) >"$box/stubs.out" 2>&1
+  assert_grep "wiki-$eol/alpha-stub-holds-alpha-members" '"a1"' "$box/vault/graphify-out/communities/_COMMUNITY_Alpha.md" \
+    "stubs: [$(ls "$box/vault/graphify-out/communities" 2>/dev/null | tr '\n' ' ')] [$(cat "$box/stubs.out")]"
+
+  # --- Step 5 ran: carried names beat fresh ones, fresh ones fill the rest.
+  box="$(mktemp -d "$TMPROOT/boxXXXXXX")"
+  write_wiki_graph "$box" "$eol" named
+  rep="$box/$GO_REPORT_REL"
+  status="$(run_wiki_reconcile "$box")"
+  assert_eq "wiki-named-$eol/exit-0" "0" "$status" "stderr: [$(cat "$box/err.txt")]"
+  assert_grep "wiki-named-$eol/carried-alpha-beats-fresh" '### Community 2 - "Alpha"' "$rep" "report: [$(cat "$rep")]"
+  assert_grep "wiki-named-$eol/carried-beta-beats-fresh" '### Community 1 - "Beta"' "$rep"
+  assert_grep "wiki-named-$eol/fresh-name-fills-new-cluster" '### Community 3 - "Xylophone Notes"' "$rep"
+  assert_grep "wiki-named-$eol/fresh-name-fills-filler-cluster" '### Community 6 - "POS Integration"' "$rep"
+  # Step 5 called id 5 "Alpha", a name now carried by id 2: derived, not a duplicate.
+  assert_grep "wiki-named-$eol/fresh-name-colliding-with-carried-derived" '### Community 5 - "y"' "$rep"
+  assert_eq "wiki-named-$eol/hub-list-one-pass" "1|1" \
+    "$(printf '%s|%s' "$(grep -c '^- Alpha.\?$' "$rep")" "$(grep -c '^- y.\?$' "$rep")")"
+  assert_eq "wiki-named-$eol/fresh-name-not-derived" "undefined" "$(jexpr "$box/$GO_SIDECAR_REL" "String(d.labels['3'])")"
+done
+
+# Failures write nothing: the fresh report stays, no sidecar appears.
+box="$(mktemp -d "$TMPROOT/boxXXXXXX")"
+write_wiki_graph "$box" lf placeholder
+cp "$box/$GO_REPORT_REL" "$box/report.before"
+status="$(run_label "$box" --reconcile graphify-out)"
+assert_eq "wiki-fail/no-existing-is-usage-error" "1" "$status"
+status="$(run_label "$box" --reconcile graphify-out --existing "$(to_native "$box/missing.md")")"
+assert_ne "wiki-fail/unreadable-existing-non-zero" "0" "$status"
+printf '{"nodes":[' >"$box/vault/graphify-out/graph.json"
+status="$(run_wiki_reconcile "$box")"
+assert_ne "wiki-fail/corrupt-graph-non-zero" "0" "$status"
+assert_files_identical "wiki-fail/report-untouched" "$box/report.before" "$box/$GO_REPORT_REL"
+if [[ -e "$box/$GO_SIDECAR_REL" ]]; then fail "wiki-fail/no-sidecar-written" "found $GO_SIDECAR_REL"; else pass "wiki-fail/no-sidecar-written"; fi
+
 # ================================================================= SUMMARY ==
 echo
 echo "$PASSED passed, $FAILED failed"

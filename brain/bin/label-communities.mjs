@@ -41,6 +41,7 @@
 //   BRAIN_ROOT=<vault> node label-communities.mjs --digest [repo ...] [--top N]
 //   BRAIN_ROOT=<vault> node label-communities.mjs --apply <repo> --labels <file.json> [--force]
 //   BRAIN_ROOT=<vault> node label-communities.mjs --reconcile <repo>
+//   BRAIN_ROOT=<vault> node label-communities.mjs --reconcile graphify-out --existing <pre-build report>
 //
 // --reconcile is the save-time half (sync-graph.sh runs it when it KEEPS the
 // vault report over a rebuilt graph.json): names follow their members to the
@@ -142,8 +143,10 @@ function mirrorNames() {
     .map((d) => d.name);
 }
 
-function readMirror(repo) {
-  const dir = join(VAULT, 'graphify', repo);
+// `at` overrides where the mirror lives and which report text it carries; only
+// the wiki concept graph reconcile uses it (INNOV-405).
+function readMirror(repo, at = {}) {
+  const dir = at.dir ?? join(VAULT, 'graphify', repo);
   const graph = JSON.parse(readFileSync(join(dir, 'graph.json'), 'utf8'));
   const nodes = graph.nodes ?? [];
   const links = graph.links ?? []; // NetworkX node-link: edges live under `links`
@@ -160,8 +163,8 @@ function readMirror(repo) {
     degree.set(l.source, (degree.get(l.source) ?? 0) + 1);
     degree.set(l.target, (degree.get(l.target) ?? 0) + 1);
   }
-  const reportPath = join(dir, `${repo}-GRAPH_REPORT.md`);
-  const report = existsSync(reportPath) ? readFileSync(reportPath, 'utf8') : null;
+  const reportPath = at.reportPath ?? join(dir, `${repo}-GRAPH_REPORT.md`);
+  const report = at.report !== undefined ? at.report : existsSync(reportPath) ? readFileSync(reportPath, 'utf8') : null;
   // id (number) → label as written. Parsed by the shared module so this script
   // and sync-graph.sh cannot disagree about which lines are community headings.
   const reportLabels = report !== null ? readReportLabels(report) : new Map();
@@ -621,6 +624,103 @@ function generateReport(repo, m, finalLabels, date) {
 
 // ---- CLI ---------------------------------------------------------------------
 
+// INNOV-405: the vault's own wiki concept graph. Save 5c rebuilds graphify-out/
+// through the graphify skill, which writes a fresh GRAPH_REPORT.md: its Step 5
+// renames every community from scratch, or, skipped, leaves `Community N`. The
+// pre-build names were thrown away, or kept by hand and bound to whatever
+// cluster now held their re-minted id. Here the PRE-BUILD report (--existing,
+// copied aside before the rebuild) is only the source of names: classify() moves
+// each one with its members, exactly as on a mirror. The FRESH report is the
+// text written: its ids, sizes and sections describe the graph beside it, so no
+// orphan heading survives (there is no /brain:label path for graphify-out to
+// delete them later). A cluster no old name fits takes its Step 5 name, else a
+// derived one. Nothing is written until everything is computed; a failure
+// leaves the fresh report, whose names at least sit on their own clusters.
+if (argVal('--reconcile') === 'graphify-out') {
+  const prevPath = argVal('--existing');
+  if (!prevPath || prevPath.startsWith('--')) {
+    console.error('usage: label-communities.mjs --reconcile graphify-out --existing <pre-build GRAPH_REPORT.md>');
+    process.exit(1);
+  }
+  const dir = join(VAULT, 'graphify-out');
+  const reportPath = join(dir, 'GRAPH_REPORT.md');
+  const cur = readMirror('graphify-out', { dir, reportPath });
+  if (cur.report === null) {
+    console.error(`error reconcile graphify-out: no ${reportPath} — nothing was written.`);
+    process.exit(1);
+  }
+  const old = readMirror('graphify-out', { dir, reportPath, report: readFileSync(prevPath, 'utf8') });
+  const p = join(dir, PROV_FILE);
+  if (existsSync(p)) {
+    let side = null;
+    try { side = JSON.parse(readFileSync(p, 'utf8')); } catch { /* reported below */ }
+    if (side === null || typeof side !== 'object' || Array.isArray(side)) {
+      console.error(`error reconcile graphify-out: ${PROV_FILE} is unreadable — nothing was written. Fix or remove it, then re-run.`);
+      process.exit(3);
+    }
+  }
+
+  const { preserved, remapped } = classify('graphify-out', old);
+  const finalLabels = { ...preserved };
+  const taken = new Set(Object.values(preserved).map(nameKey));
+  const derivedIds = new Set();
+  const bySize = [...cur.members.keys()].sort((a, b) => cur.members.get(b).length - cur.members.get(a).length || a - b);
+  for (const id of bySize) {
+    if (finalLabels[id] !== undefined) continue;
+    const fresh = sanitizeLabel(cur.reportLabels.get(id) ?? '');
+    if (isNamedLabel(fresh, cur.members.get(id)) && !taken.has(nameKey(fresh))) {
+      finalLabels[id] = fresh;
+      taken.add(nameKey(fresh));
+    } else {
+      finalLabels[id] = deriveName(cur.members.get(id), taken);
+      derivedIds.add(id);
+    }
+  }
+
+  // One pass with a lookup, never chained replaceAll: a fresh name can equal
+  // another id's final name, and a chain would rename it twice.
+  const freshToFinal = new Map(); // fresh label → final label of the id it headed
+  for (const [id, label] of cur.reportLabels) if (finalLabels[id] !== undefined && !freshToFinal.has(label)) freshToFinal.set(label, finalLabels[id]);
+  let inHubs = false;
+  const text = cur.report
+    .split('\n')
+    .map((line) => {
+      const body = line.replace(/\r$/, '');
+      const cr = line.slice(body.length);
+      if (/^## /.test(body)) inHubs = /^## Community Hubs/.test(body);
+      const h = /^### Community (\d+) - "(.+?)"(.*)$/.exec(body);
+      if (h && finalLabels[h[1]] !== undefined) return `### Community ${h[1]} - "${finalLabels[h[1]]}"${h[3]}${cr}`;
+      // graphify-out's hub list is plain `- <label>`; mirrors' is links.
+      const hub = inHubs && /^- (.+)$/.exec(body);
+      if (hub && freshToFinal.has(hub[1])) return `- ${freshToFinal.get(hub[1])}${cr}`;
+      return body.replace(/\[\[_COMMUNITY_([^|\]]+)\|([^\]]+)\]\]/g, (whole, target, alias) =>
+        freshToFinal.has(alias) && target === alias ? hubLink(freshToFinal.get(alias)) : whole) + cr;
+    })
+    .join('\n');
+
+  // Sidecar, rebuilt for the report just written: 'derived' for this run's
+  // derived names, an agent's record carried with its name, and an anchor per
+  // name — kept if it had one, else the members it was given for now.
+  const side = { repo: 'graphify-out', version: 2, labels: {}, anchors: {} };
+  for (const [idStr, label] of Object.entries(finalLabels)) {
+    const id = Number(idStr);
+    const k = nameKey(label);
+    if (derivedIds.has(id)) { side.labels[id] = { name: label, provenance: 'derived' }; continue; }
+    const from = remapped[id]?.from ?? id;
+    if (preserved[id] !== undefined && isAgentName(old, from, label)) side.labels[id] = { name: label, provenance: 'agent' };
+    if (preserved[id] !== undefined && old.anchors.has(k)) side.anchors[k] = [...old.anchors.get(k)].sort();
+    else if (preserved[id] === undefined || seedable(old, id, remapped)) side.anchors[k] = [...new Set(cur.members.get(id).map(nodeKey))].sort();
+  }
+  // Sidecar first, as in --reconcile <repo>: interrupted between the two, the
+  // fresh report stays and the next run reconciles again.
+  writeFileSync(p, JSON.stringify(side, null, 2) + '\n', 'utf8');
+  if (text !== cur.report) writeFileSync(reportPath, text, 'utf8');
+  for (const [id, r] of Object.entries(remapped)) console.error(`reconcile graphify-out: "${r.label}" moved with its members, community ${r.from} -> ${id}`);
+  const kept = Object.keys(preserved).length;
+  console.error(`reconcile graphify-out: ${kept} name(s) carried from the pre-build report, ${Object.keys(finalLabels).length - kept - derivedIds.size} fresh, ${derivedIds.size} derived`);
+  process.exit(0);
+}
+
 if (!existsSync(join(VAULT, 'graphify'))) {
   console.error(`error: no graphify/ under '${VAULT}'. Set BRAIN_ROOT or run from the vault.`);
   process.exit(1);
@@ -892,5 +992,5 @@ if (argv.includes('--reconcile')) {
   process.exit(0);
 }
 
-console.error('usage: label-communities.mjs --digest [repo ...] [--top N] | --apply <repo> --labels <file.json> [--force] | --reconcile <repo>');
+console.error('usage: label-communities.mjs --digest [repo ...] [--top N] | --apply <repo> --labels <file.json> [--force] | --reconcile <repo> | --reconcile graphify-out --existing <report.md>');
 process.exit(1);
