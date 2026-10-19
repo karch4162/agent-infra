@@ -635,7 +635,7 @@ function generateReport(repo, m, finalLabels, date) {
 // orphan heading survives (there is no /brain:label path for graphify-out to
 // delete them later). A cluster no old name fits takes its Step 5 name, else a
 // derived one. Nothing is written until everything is computed; on a non-zero
-// exit save 5c restores graphify-out/ from HEAD instead of committing.
+// exit save 5c copies back the pre-build graphify-out/ instead of committing.
 if (argVal('--reconcile') === 'graphify-out') {
   const prevPath = argVal('--existing');
   if (!prevPath || prevPath.startsWith('--')) {
@@ -667,7 +667,7 @@ if (argVal('--reconcile') === 'graphify-out') {
   const bySize = [...cur.members.keys()].sort((a, b) => cur.members.get(b).length - cur.members.get(a).length || a - b);
   for (const id of bySize) {
     if (finalLabels[id] !== undefined) continue;
-    const fresh = sanitizeLabel(cur.reportLabels.get(id) ?? '');
+    const fresh = sanitizeLabel(cur.reportLabels.get(Number(id)) ?? ''); // report ids parse as numbers; graph ids may be strings
     if (isNamedLabel(fresh, cur.members.get(id)) && !taken.has(nameKey(fresh))) {
       finalLabels[id] = fresh;
       taken.add(nameKey(fresh));
@@ -733,7 +733,7 @@ if (argVal('--reconcile') === 'graphify-out') {
   // Report first, unlike --reconcile <repo>: the old sidecar describes the
   // PRE-BUILD report (ids, 'agent' rows), which a retry with the same --existing
   // classifies against. A run killed between the two exits non-zero, and save
-  // 5c then puts graphify-out/ back to HEAD rather than commit either half.
+  // 5c then copies back the pre-build graphify-out/ rather than commit either half.
   if (out !== cur.report) writeFileSync(reportPath, out, 'utf8');
   writeFileSync(p, JSON.stringify(side, null, 2) + '\n', 'utf8');
   for (const [id, r] of Object.entries(remapped)) console.error(`reconcile graphify-out: "${r.label}" moved with its members, community ${r.from} -> ${id}`);

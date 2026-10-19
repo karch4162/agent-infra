@@ -1705,11 +1705,13 @@ assert_eq "wiki-dup-fresh/hub-lines-one-each" "1|1" \
 box="$(mktemp -d "$TMPROOT/boxXXXXXX")"
 write_wiki_graph "$box" lf placeholder
 sed -i 's/"community":\([0-9]*\)/"community":"\1"/g' "$box/vault/graphify-out/graph.json"
+sed -i 's/"Community 3"/"Xylophone Notes"/' "$box/$GO_REPORT_REL" # a Step 5 name must still be found
 status="$(run_wiki_reconcile "$box")"
+assert_grep "wiki-string-ids/fresh-name-found" '### Community 3 - "Xylophone Notes"' "$box/$GO_REPORT_REL"
 assert_eq "wiki-string-ids/exit-0" "0" "$status" "stderr: [$(cat "$box/err.txt")]"
 assert_grep "wiki-string-ids/alpha-follows-its-members-to-2" '### Community 2 - "Alpha"' "$box/$GO_REPORT_REL" \
   "report: [$(cat "$box/$GO_REPORT_REL")]"
-assert_eq "wiki-string-ids/derived-recorded" "derived" "$(jexpr "$box/$GO_SIDECAR_REL" "d.labels['3']&&d.labels['3'].provenance")" \
+assert_eq "wiki-string-ids/derived-recorded" "derived" "$(jexpr "$box/$GO_SIDECAR_REL" "d.labels['5']&&d.labels['5'].provenance")" \
   "sidecar: [$(cat "$box/$GO_SIDECAR_REL" 2>/dev/null)]"
 
 # Failures write nothing: the fresh report stays, no sidecar appears.
