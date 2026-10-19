@@ -30,7 +30,9 @@
 #               are the documented ones).
 # evidence:     remaining args, joined — paths, counts, identifiers ONLY.
 #               NEVER pass secrets or file contents; this script stores its
-#               args verbatim and reads no files itself.
+#               args verbatim and reads no vault files — only its own
+#               ../.claude-plugin/plugin.json, for the plugin_version stamp
+#               ("unknown" when unreadable; INNOV-404).
 #
 # Contract:
 #   ALWAYS exits 0 — a bug-filing helper must never break the calling command.
@@ -86,7 +88,12 @@ if [[ -f "$QUEUE" ]] && grep -qF "\"fingerprint\":\"$FP\"" "$QUEUE" 2>/dev/null;
     skip "queue $QUEUE could not be rewritten"
   fi
 else
-  line="{\"fingerprint\":\"$FP\",\"class\":\"$(json_escape "$CLASS")\",\"repo\":\"$(json_escape "$REPO")\",\"evidence\":\"$(json_escape "$EVIDENCE")\",\"count\":1,\"first_seen\":\"$NOW\",\"last_seen\":\"$NOW\"}"
+  # INNOV-404: stamp the queuing install's version so triage can tell a finding
+  # from a pre-fix install. A repeat keeps the first stamp (the awk above never
+  # touches it).
+  PJ="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/../.claude-plugin/plugin.json"
+  VER="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$PJ" 2>/dev/null | head -1)"
+  line="{\"fingerprint\":\"$FP\",\"class\":\"$(json_escape "$CLASS")\",\"repo\":\"$(json_escape "$REPO")\",\"evidence\":\"$(json_escape "$EVIDENCE")\",\"count\":1,\"first_seen\":\"$NOW\",\"last_seen\":\"$NOW\",\"plugin_version\":\"$(json_escape "${VER:-unknown}")\"}"
   printf '%s\n' "$line" >>"$QUEUE" 2>/dev/null || skip "queue $QUEUE is not writable"
 fi
 
