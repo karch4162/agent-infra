@@ -247,6 +247,58 @@ grep -vi "$PROHIBIT" "$TPL" >"$BOX/stripped.md"
 route_ok "$BOX/stripped.md" && fail "template/negative-control" "check passed with the prohibition removed"   || pass "template/negative-control"
 grep -q 'does \*\*not\*\* name `file-finding.sh`' "$REPO_ROOT/brain/skills/init/SKILL.md"   && pass "init/offers-block-to-existing-vaults"   || fail "init/offers-block-to-existing-vaults" "init must offer the findings block to a CLAUDE.md lacking file-finding.sh"
 
+# --- 10. plugin version stamp (INNOV-404) ---------------------------------
+# Triage of INNOV-400/401 had to rediscover the reporter ran a pre-fix install.
+# Each NEW line records the queuing plugin's version; a repeat keeps the first.
+echo "--- 10. plugin version stamp ---"
+plugin_copy() { # dir version-or-empty [crlf] -> a copy of the script under dir/bin
+  mkdir -p "$1/bin"
+  cp "$SCRIPT" "$1/bin/file-finding.sh"
+  [[ -n "$2" ]] || return 0
+  mkdir -p "$1/.claude-plugin"
+  if [[ "${3:-}" == crlf ]]; then
+    printf '{\r\n  "name": "brain",\r\n  "version": "%s"\r\n}\r\n' "$2" >"$1/.claude-plugin/plugin.json"
+  else
+    printf '{\n  "name": "brain",\n  "version": "%s"\n}\n' "$2" >"$1/.claude-plugin/plugin.json"
+  fi
+}
+run_copy() { # dir args...
+  local d="$1"; shift
+  ( cd "$BOX" || exit 127; unset CLAUDE_PROJECT_DIR
+    env BRAIN_ROOT="$VAULT" bash "$d/bin/file-finding.sh" "$@" ) >"$BOX/out.txt" 2>"$BOX/err.txt"
+  STATUS=$?
+}
+REAL_VER="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/brain/.claude-plugin/plugin.json" | head -1 | tr -d '\r')"
+
+sb_new
+run_ff mis-scoped-graph store-hub "SCOPE-AUDIT: OUT-OF-SCOPE"
+assert_eq "version/exit-0" "0" "$STATUS" "$(evidence "$BOX")"
+assert_contains "version/new-line-stamped" "\"plugin_version\":\"$REAL_VER\"" "$(queue_all)" "$(evidence "$BOX")"
+
+sb_new
+plugin_copy "$BOX/old" "1.0.0"
+plugin_copy "$BOX/new" "2.0.0"
+run_copy "$BOX/old" label-count-regression KDS "incoming names 3, existing 12"
+run_copy "$BOX/new" label-count-regression KDS "incoming names 3, existing 12"
+assert_eq "version/repeat-exit-0" "0" "$STATUS" "$(evidence "$BOX")"
+assert_contains "version/repeat-counted" '"count":2' "$(queue_all)" "$(evidence "$BOX")"
+assert_contains "version/repeat-keeps-original" '"plugin_version":"1.0.0"' "$(queue_all)" \
+  "a repeat must not restamp the line with the newer install's version" "$(evidence "$BOX")"
+assert_not_contains "version/repeat-not-restamped" '2.0.0' "$(queue_all)" "$(evidence "$BOX")"
+
+sb_new
+plugin_copy "$BOX/bare" ""
+run_copy "$BOX/bare" mis-scoped-graph store-hub "SCOPE-AUDIT: OUT-OF-SCOPE"
+assert_eq "version/missing-exit-0" "0" "$STATUS" "$(evidence "$BOX")"
+assert_contains "version/missing-is-unknown" '"plugin_version":"unknown"' "$(queue_all)" "$(evidence "$BOX")"
+
+sb_new
+plugin_copy "$BOX/crlf" "3.4.5" crlf
+run_copy "$BOX/crlf" mis-scoped-graph store-hub "SCOPE-AUDIT: OUT-OF-SCOPE"
+assert_eq "version/crlf-exit-0" "0" "$STATUS" "$(evidence "$BOX")"
+assert_contains "version/crlf-no-cr" '"plugin_version":"3.4.5"' "$(cat "$QUEUE")" \
+  "a CRLF plugin.json must not leak \\r into the stamp" "$(evidence "$BOX")"
+
 # ================================================================= SUMMARY ==
 echo
 echo "$PASSED passed, $FAILED failed"
