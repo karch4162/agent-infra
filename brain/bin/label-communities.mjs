@@ -667,6 +667,7 @@ if (argVal('--reconcile') === 'graphify-out') {
   const bySize = [...cur.members.keys()].sort((a, b) => cur.members.get(b).length - cur.members.get(a).length || a - b);
   for (const id of bySize) {
     if (finalLabels[id] !== undefined) continue;
+    if (!cur.reportLabels.has(Number(id))) continue; // thin, omitted by graphify, and nothing to carry: stays omitted
     const fresh = sanitizeLabel(cur.reportLabels.get(Number(id)) ?? ''); // report ids parse as numbers; graph ids may be strings
     if (isNamedLabel(fresh, cur.members.get(id)) && !taken.has(nameKey(fresh))) {
       finalLabels[id] = fresh;
