@@ -1688,6 +1688,19 @@ for eol in lf crlf; do
   assert_eq "wiki-thin-$eol/line-endings-kept" "$([[ $eol == crlf ]] && echo "$lines" || echo 0)" "$crs"
 done
 
+# Step 5 gave ids 3 and 6 one name: id 3 keeps it, id 6 is derived, and each
+# hub line follows its own id (heading order), not the first match.
+box="$(mktemp -d "$TMPROOT/boxXXXXXX")"
+write_wiki_graph "$box" lf named
+sed -i 's/POS Integration/Xylophone Notes/' "$box/$GO_REPORT_REL"
+status="$(run_wiki_reconcile "$box")"
+assert_eq "wiki-dup-fresh/exit-0" "0" "$status" "stderr: [$(cat "$box/err.txt")]"
+assert_grep "wiki-dup-fresh/first-keeps-name" '### Community 3 - "Xylophone Notes"' "$box/$GO_REPORT_REL" \
+  "report: [$(cat "$box/$GO_REPORT_REL")]"
+assert_grep "wiki-dup-fresh/second-derived" '### Community 6 - "t"' "$box/$GO_REPORT_REL"
+assert_eq "wiki-dup-fresh/hub-lines-one-each" "1|1" \
+  "$(printf '%s|%s' "$(grep -c '^- Xylophone Notes$' "$box/$GO_REPORT_REL")" "$(grep -c '^- t$' "$box/$GO_REPORT_REL")")"
+
 # Emitters ship `community` as a string too: provenance must still land.
 box="$(mktemp -d "$TMPROOT/boxXXXXXX")"
 write_wiki_graph "$box" lf placeholder

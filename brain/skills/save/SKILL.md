@@ -139,8 +139,10 @@ Resolve the vault root as `$BRAIN_ROOT` (else the current project dir / cwd). Al
      - It counts wiki notes added/modified/deleted (per git, via `changed-wiki-notes.sh` and its `--deleted` stream, 1:1) since the last commit that touched `graphify-out/graph.json` — never from `manifest.json`. `CONCEPT_GRAPH_THRESHOLD=<n>` overrides the default 25.
    - **Before the first graphify run of this step, copy the named report aside (INNOV-405).** graphify re-mints community ids on every rebuild and writes a fresh `GRAPH_REPORT.md` over the named one, so without this the names are lost, or bound to whatever cluster now holds their old id. Take the copy before **any** rebuild, including the `rm graphify-out/graph.json` full-build branch and the shrink-guard reruns below, from the working tree (not `HEAD`: a prior save whose commit was refused left its names only there). Keep it outside the vault:
      ```bash
-     PREV_REPORT="$(mktemp)"; cp graphify-out/GRAPH_REPORT.md "$PREV_REPORT" 2>/dev/null || PREV_REPORT=""   # empty = first build, nothing to carry
+     PREV_REPORT=""   # stays empty only on a first build: nothing to carry
+     if [ -f graphify-out/GRAPH_REPORT.md ]; then PREV_REPORT="$(mktemp)" && cp graphify-out/GRAPH_REPORT.md "$PREV_REPORT"; fi
      ```
+     If that `cp` (or `mktemp`) fails, **do not rebuild**: the rebuild would overwrite the only named copy. Report `5c SKIPPED (could not copy GRAPH_REPORT.md aside) — CONCEPT-GRAPH: …` and carry it as an open loop.
    - **Invoke the graphify skill on `wiki/`.** From the vault root, run the skill (`Skill` tool, `skill: "graphify"`) scoped to the `wiki/` folder — **incremental** if a wiki graph already exists, **full** on the first build:
      - **First, if a note was deleted since the graph was built** (`check-concept-graph.sh`'s STALE remedy names the count; or `bash "${CLAUDE_PLUGIN_ROOT}/bin/changed-wiki-notes.sh" --deleted --since "$(git log -1 --format=%H -- graphify-out/graph.json)"` lists anything) → `rm graphify-out/graph.json` (git keeps the committed copy) and take the full-build branch below; **never `--update` when a note was deleted** (INNOV-351, measured on graphify 0.8.46; re-measured on 0.9.79, INNOV-393): the update prunes the deleted notes' nodes in memory, the shrink guard (#479) then refuses the smaller graph, and the update has already saved a manifest without those notes, so a re-run says nothing changed and the phantom nodes stay. The full build re-extracts only notes missing from this machine's semantic cache (`graphify-out/cache/`).
      - If `graphify-out/graph.json` exists → argument `wiki --update` (the `--update` flow; only changed notes re-extract via the semantic cache).
@@ -173,7 +175,12 @@ Resolve the vault root as `$BRAIN_ROOT` (else the current project dir / cwd). Al
      ```bash
      node "${CLAUDE_PLUGIN_ROOT}/bin/label-communities.mjs" --reconcile graphify-out --existing "$PREV_REPORT"
      ```
-     Each pre-build name moves to the cluster that holds its members now (the same membership match `sync-graph.sh` runs for mirrors); a cluster no old name fits keeps graphify's fresh Step 5 name, else gets a derived one. It writes `GRAPH_REPORT.md` and `graphify-out/.community-labels.json`. **On a non-zero exit, relay its line and carry it as an open loop; do not hand-restore the old report** (it would bind old names to re-minted ids). The fresh report is left as graphify wrote it. Once the cause is fixed, re-run the same command with the same `$PREV_REPORT`; if that copy is gone, the pre-build report is the last committed one, `MSYS_NO_PATHCONV=1 git show HEAD:graphify-out/GRAPH_REPORT.md` (the commit that last touched it, until this save commits).
+     Each pre-build name moves to the cluster that holds its members now (the same membership match `sync-graph.sh` runs for mirrors); a cluster no old name fits keeps graphify's fresh Step 5 name, else gets a derived one. It writes `GRAPH_REPORT.md` and `graphify-out/.community-labels.json`. **On a non-zero exit, do not commit this rebuild.** Never put the old report back over the new graph by hand (that binds old names to re-minted ids), and never commit the fresh report (its names replace every carried one, and the next save would carry those). Put the whole committed pre-build state back instead, then relay the reconcile's line and report `5c SKIPPED (name reconcile failed: <its line>) — CONCEPT-GRAPH: …`:
+     ```bash
+     git checkout HEAD -- graphify-out/graph.json graphify-out/GRAPH_REPORT.md graphify-out/manifest.json
+     git checkout HEAD -- graphify-out/.community-labels.json 2>/dev/null || rm -f graphify-out/.community-labels.json
+     ```
+     `manifest.json` goes back too, or the next `--update` thinks the notes are already extracted. The graph is then exactly as behind as before, so the next save's `check-concept-graph.sh` says STALE and 5c runs again (the semantic cache makes that cheap).
    - **Then refresh the wiki graph's community stubs** so its report links resolve:
      ```bash
      node "${CLAUDE_PLUGIN_ROOT}/bin/build-community-notes.mjs" graphify-out

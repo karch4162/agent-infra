@@ -634,8 +634,8 @@ function generateReport(repo, m, finalLabels, date) {
 // text written: its ids, sizes and sections describe the graph beside it, so no
 // orphan heading survives (there is no /brain:label path for graphify-out to
 // delete them later). A cluster no old name fits takes its Step 5 name, else a
-// derived one. Nothing is written until everything is computed; a failure
-// leaves the fresh report, whose names at least sit on their own clusters.
+// derived one. Nothing is written until everything is computed; on a non-zero
+// exit save 5c restores graphify-out/ from HEAD instead of committing.
 if (argVal('--reconcile') === 'graphify-out') {
   const prevPath = argVal('--existing');
   if (!prevPath || prevPath.startsWith('--')) {
@@ -679,8 +679,13 @@ if (argVal('--reconcile') === 'graphify-out') {
 
   // One pass with a lookup, never chained replaceAll: a fresh name can equal
   // another id's final name, and a chain would rename it twice.
-  const freshToFinal = new Map(); // fresh label → final label of the id it headed
-  for (const [id, label] of cur.reportLabels) if (finalLabels[id] !== undefined && !freshToFinal.has(label)) freshToFinal.set(label, finalLabels[id]);
+  // Step 5 can give two clusters one name, so a fresh label maps to the final
+  // labels of every id it headed, in heading order; the hub list (same order)
+  // takes one per line.
+  const freshToFinal = new Map(); // fresh label → final labels of the ids it headed
+  for (const [id, label] of cur.reportLabels)
+    if (finalLabels[id] !== undefined) freshToFinal.set(label, [...(freshToFinal.get(label) ?? []), finalLabels[id]]);
+  const hubQueue = new Map([...freshToFinal].map(([k, v]) => [k, [...v]]));
   let inHubs = false;
   const text = cur.report
     .split('\n')
@@ -692,9 +697,10 @@ if (argVal('--reconcile') === 'graphify-out') {
       if (h && finalLabels[h[1]] !== undefined) return `### Community ${h[1]} - "${finalLabels[h[1]]}"${h[3]}${cr}`;
       // graphify-out's hub list is plain `- <label>`; mirrors' is links.
       const hub = inHubs && /^- (.+)$/.exec(body);
-      if (hub && freshToFinal.has(hub[1])) return `- ${freshToFinal.get(hub[1])}${cr}`;
+      if (hub && hubQueue.get(hub[1])?.length) return `- ${hubQueue.get(hub[1]).shift()}${cr}`;
+      // A link names no id: an ambiguous fresh label is left alone.
       return body.replace(/\[\[_COMMUNITY_([^|\]]+)\|([^\]]+)\]\]/g, (whole, target, alias) =>
-        freshToFinal.has(alias) && target === alias ? hubLink(freshToFinal.get(alias)) : whole) + cr;
+        freshToFinal.get(alias)?.length === 1 && target === alias ? hubLink(freshToFinal.get(alias)[0]) : whole) + cr;
     })
     .join('\n');
 
@@ -724,10 +730,10 @@ if (argVal('--reconcile') === 'graphify-out') {
     if (preserved[id] !== undefined && old.anchors.has(k)) side.anchors[k] = [...old.anchors.get(k)].sort();
     else if (preserved[id] === undefined || seedable(old, id, remapped)) side.anchors[k] = [...new Set(cur.members.get(id).map(nodeKey))].sort();
   }
-  // Report first, unlike --reconcile <repo>: here the old sidecar describes the
-  // PRE-BUILD report (ids, 'agent' rows), which is what a retry with the same
-  // --existing classifies against. Interrupted between the two, that retry
-  // still sees it; written first, it would describe ids the retry never reads.
+  // Report first, unlike --reconcile <repo>: the old sidecar describes the
+  // PRE-BUILD report (ids, 'agent' rows), which a retry with the same --existing
+  // classifies against. A run killed between the two exits non-zero, and save
+  // 5c then puts graphify-out/ back to HEAD rather than commit either half.
   if (out !== cur.report) writeFileSync(reportPath, out, 'utf8');
   writeFileSync(p, JSON.stringify(side, null, 2) + '\n', 'utf8');
   for (const [id, r] of Object.entries(remapped)) console.error(`reconcile graphify-out: "${r.label}" moved with its members, community ${r.from} -> ${id}`);
