@@ -125,6 +125,19 @@ $REVIEW_LOOP
    CRITIC, REVIEWER, ARCHITECTURE REVIEWER, and TIE-BREAKER lines into your step-7
    summary when they exist.
 5. Open the PR against $BASE_BRANCH, $TRACKER_ATTACH, set the issue $WAVE_STATE_DONE.
+   End the PR body with this block. Copy the lines, do not reword them: the worktree
+   comment dies at sweep, so the PR body is the only durable record of the review.
+     ## Wave
+     TIER: $TIER                      (or TIER: $TIER -> <tier> - <why>)
+     PLAN REVIEWER: <name>            (risk tier only)
+     PLAN CRITIC: <name>              (risk tier only)
+     REVIEWER: <name>
+     ARCHITECTURE REVIEWER: <name>    (only if it ran)
+     TIE-BREAKER: astra (plan|diff)   (only if it ran)
+     REVIEW ROUNDS: <n>
+     REVIEWER DISMISSED: <finding> - <why>     (one line each, omit if none)
+     NOT VERIFIED IN BROWSER: <route>          (one line each, omit if none)
+     MIGRATION: yes|no
 6. File follow-ups to $WAVE_FILE_TO, but only if you OBSERVED them - they broke on real data, a real repo, or
    a real run - or your own diff makes them worse. They go there,
    never to the host's or any vendor's feedback or bug-report channel: the content
@@ -141,6 +154,7 @@ $REVIEW_LOOP
 7. Record a summary for the human review batch - do NOT run /brain:save:
    orca worktree set --worktree active --comment \"<what changed, what is shaky, anything you skipped>\"
    Its first line is TIER: $TIER, or TIER: $TIER -> <tier you escalated to> - <why>.
+   The marker lines are the same ones as the PR body block in step 5.
    If you did NOT look at a rendered surface this diff affects, say so on its own line
    as: NOT VERIFIED IN BROWSER: <route>   (the human's verification pass greps for it).
    orca worktree set --worktree active --workspace-status in-review
