@@ -57,7 +57,8 @@ PY
 done
 
 # --- wait / gate / merge loop -----------------------------------------------
-export RUN STATE WAVE_HOME MAIN_CHECKOUT BASE_BRANCH WAVE_BASE
+export RUN STATE WAVE_HOME MAIN_CHECKOUT BASE_BRANCH WAVE_BASE WAVE_TRACKER
+export WAVE_STATE_HELD="${WAVE_STATE_HELD:-In Review}"
 python - <<'PY'
 import json, os, re, subprocess, sys, time
 RUN, STATE, WAVE, MAIN = (os.environ[k] for k in ('RUN','STATE','WAVE_HOME','MAIN_CHECKOUT'))
@@ -178,6 +179,8 @@ def settle(d):
         if v['status'] == 'held':
             gh('pr', 'edit', str(pr), '--add-label', 'wave-held')
             oj('orchestration', 'worker-retain', '--dispatch', v['dispatch'])
+            if os.environ.get('WAVE_TRACKER') == 'linear':   # the worker already set it Done (step 5); a held PR is not done
+                sh('orca', 'linear', 'status', 'set', k, '--to', os.environ['WAVE_STATE_HELD'], '--json')
 
 take_lock()
 d = load(); reconcile(d); save(d)
