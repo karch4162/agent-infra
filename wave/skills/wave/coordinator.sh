@@ -73,6 +73,32 @@ def oj(*args):  # orca --json -> result
     return json.loads(out).get('result', {})
 def gh(*args): return sh('gh', *args, cwd=MAIN)
 def load(): return json.load(open(STATE))
+LOCK = STATE + '.lock'
+def pid_alive(pid):
+    if os.name != 'nt':
+        try: os.kill(pid, 0); return True
+        except OSError: return False
+    import ctypes  # os.kill(pid, 0) TERMINATES on Windows; ask the kernel instead
+    k = ctypes.windll.kernel32; h = k.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h: return False
+    code = ctypes.c_ulong(); k.GetExitCodeProcess(h, ctypes.byref(code)); k.CloseHandle(h)
+    return code.value == 259   # STILL_ACTIVE
+def take_lock():
+    # Killing the bash wrapper orphans this python loop (2026-10-22: two loops on one Run,
+    # the stale one overwrote the state file every tick). One loop per Run, enforced here.
+    if os.path.exists(LOCK):
+        try: other = int(open(LOCK).read().strip() or 0)
+        except ValueError: other = 0
+        if other and other != os.getpid() and pid_alive(other):
+            sys.exit(f"another coordinator loop (pid {other}) is alive on {RUN}; kill it first: {LOCK}")
+    open(LOCK, 'w').write(str(os.getpid()))
+def reconcile(d):
+    # --resume trusts GitHub, not the file: a merge that happened under a lost loop is still a merge.
+    for k, v in d['issues'].items():
+        if v['status'] in ('running', 'done'):
+            pr = pr_number(v)
+            if pr and json.loads(gh('pr', 'view', str(pr), '--json', 'state')).get('state') == 'MERGED':
+                v.update(status='merged', pr=pr); log(k, f'PR #{pr} already merged; reconciled')
 def save(d): json.dump(d, open(STATE, 'w'), indent=1)
 def log(*a): print(time.strftime('%H:%M:%S'), *a, flush=True)
 
@@ -153,12 +179,14 @@ def settle(d):
             gh('pr', 'edit', str(pr), '--add-label', 'wave-held')
             oj('orchestration', 'worker-retain', '--dispatch', v['dispatch'])
 
-d = load()
+take_lock()
+d = load(); reconcile(d); save(d)
 while any(v['status'] in ('running', 'done') for v in d['issues'].values()):
     if any(v['status'] == 'running' for v in d['issues'].values()): consume(d)
     settle(d); save(d)
     if all(v['status'] == 'done' for v in d['issues'].values() if v['status'] in ('running','done')): time.sleep(60)  # CI pending
 save(d)
+os.remove(LOCK)
 log('workers settled:', {k: v['status'] for k, v in d['issues'].items()})
 PY
 
