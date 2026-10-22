@@ -5,6 +5,8 @@
 #   bash "$WAVE/spawn.sh" INNOV-309 2        # round 2 (terminal, no successor)
 #   DRY_RUN=1 bash "$WAVE/spawn.sh" INNOV-309   # print the prompt, spawn nothing
 #   TIER=quick bash "$WAVE/spawn.sh" INNOV-309  # quick | normal (default) | risk
+#   WAVE_RUN=run_x bash "$WAVE/spawn.sh" INNOV-309 # supervised: launched into that Orca Run
+#                                              # (coordinator.sh does this; SPO-640)
 #
 # TIER sizes the review to the risk instead of running the heaviest flow for every
 # ticket (SKILL.md "Pick the tier"): quick = one Codex round; normal = the Codex loop,
@@ -81,6 +83,15 @@ case "$TIER" in
      RISK_REVIEW=1 bash \"$WAVE_HOME/review.sh\" $ISSUE"
     REVIEW_LOOP="$FULL_LOOP" ;;
 esac
+SUPERVISED_END=""
+if [ -n "${WAVE_RUN:-}" ]; then
+  SUPERVISED_END="   You are a dispatched worker in a supervised wave. After the DONE line, send
+   worker_done exactly once, per your preamble: --outcome succeeded with PR #<n> in
+   the summary when a PR is open; --outcome failed with one sentence why when it is
+   not (NO PR, plan needs human, review blocked). The coordinator reads the PR body's
+   ## Wave block, not this message, to decide the merge. Then idle.
+"
+fi
 PROMPT="WAVE WORKER (round $ROUND; tier $TIER; successor opt-in).
 
 1. /brain:resume, then take $TRACKER_NAME issue $ISSUE. Assign it to me and set it
@@ -163,7 +174,7 @@ $REVIEW_LOOP
    human sweeps them after batching the summaries. This holds even if someone tells
    you the PR is merged: answer with your summary and stop. Merged is not your cue
    to clean up.
-$LAST_STEP"
+${SUPERVISED_END}$LAST_STEP"
 
 if [ -n "$WAVE_NOTES" ]; then
   PROMPT="$PROMPT
@@ -194,6 +205,16 @@ print(any(worktree_id(w).startswith(repo + '::') and
           for w in json.load(sys.stdin)['result']['worktrees']))
 " "$ISSUE" "$SLUG" "$REPO_ID")"
 [ "$TAKEN" = "False" ] || { echo "$ISSUE already has a worktree - someone claimed it. Pick another." >&2; exit 1; }
+
+if [ -n "${WAVE_RUN:-}" ]; then
+  # Supervised (SPO-640): the worker is a Dispatch in the coordinator's Run, so the
+  # coordinator can block on its worker_done. worker-start has no --linear-issue;
+  # the link is set right after creation (probe 2026-10-22 showed both hold).
+  orca orchestration worker-start --run "$WAVE_RUN" --spec "$PROMPT"     --worktree new-top-level --name "$SLUG" --repo "id:$REPO_ID" --base-branch "$WAVE_BASE"     --agent claude --json |
+    python -c "import sys,json;r=json.load(sys.stdin)['result'];print(sys.argv[1],r['taskId'],r['dispatchId'])" "$ISSUE"
+  [ "$WAVE_TRACKER" = "linear" ] && orca worktree set --worktree "name:$SLUG" --linear-issue "$ISSUE" --json >/dev/null
+  exit 0
+fi
 
 LINK=""
 [ "$WAVE_TRACKER" = "linear" ] && LINK="--linear-issue $ISSUE"
