@@ -424,6 +424,48 @@ assert_contains "grok-mkdir-timeout/guard-wins" "$(cat "$BOX/out.txt")" "grok mo
 assert_eq "grok-mkdir-timeout/no-retry" "1" "$(cat "$STUB/grok.n")"
 rm -rf "$BOX/%SystemDrive%"
 
+echo "--- 29. gate.py decides MERGE/HOLD from the PR body + checks, no network (SPO-640) ---"
+gate() { # body checks-json mergeable
+  python -c 'import json,sys; print(json.dumps({"body":sys.argv[1],"checks":json.loads(sys.argv[2]),"mergeable":sys.argv[3]}))' "$1" "$2" "$3" | python "$WAVE/gate.py"
+}
+OK_CHECKS='[{"name":"tests","bucket":"pass"},{"name":"lint","bucket":"pass"}]'
+GOOD_BODY='Fixes X.
+
+## Wave
+TIER: normal
+REVIEWER: codex-terra
+REVIEW ROUNDS: 1
+MIGRATION: no'
+assert_eq "gate/merge" "MERGE" "$(gate "$GOOD_BODY" "$OK_CHECKS" MERGEABLE)"
+assert_eq "gate/quick-escalated-merges" "MERGE" "$(gate "${GOOD_BODY/TIER: normal/TIER: quick -> normal - touched auth}" "$OK_CHECKS" MERGEABLE)"
+assert_contains "gate/no-block" "$(gate 'Fixes X. no block here' "$OK_CHECKS" MERGEABLE)" "HOLD: no ## Wave block"
+assert_contains "gate/risk" "$(gate "${GOOD_BODY/TIER: normal/TIER: risk}" "$OK_CHECKS" MERGEABLE)" "HOLD: TIER risk"
+assert_contains "gate/migration" "$(gate "${GOOD_BODY/MIGRATION: no/MIGRATION: yes}" "$OK_CHECKS" MERGEABLE)" "HOLD: MIGRATION"
+assert_contains "gate/fallback-reviewer" "$(gate "${GOOD_BODY/REVIEWER: codex-terra/REVIEWER: sonnet-fallback (codex quota exhausted)}" "$OK_CHECKS" MERGEABLE)" "HOLD: REVIEWER"
+assert_contains "gate/no-review" "$(gate "$GOOD_BODY
+NO CODEX REVIEW: empty diff" "$OK_CHECKS" MERGEABLE)" "HOLD: NO CODEX REVIEW"
+assert_contains "gate/tiebreak" "$(gate "$GOOD_BODY
+TIE-BREAKER: astra (diff)" "$OK_CHECKS" MERGEABLE)" "HOLD: TIE-BREAKER"
+assert_contains "gate/missing-reviewer-line" "$(gate "${GOOD_BODY/REVIEWER: codex-terra/}" "$OK_CHECKS" MERGEABLE)" "HOLD: REVIEWER"
+assert_eq "gate/pending-check" "PENDING: check tests pending" "$(gate "$GOOD_BODY" '[{"name":"tests","bucket":"pending"}]' MERGEABLE)"
+assert_contains "gate/failed-check" "$(gate "$GOOD_BODY" '[{"name":"tests","bucket":"fail"}]' MERGEABLE)" "HOLD: check tests fail"
+assert_eq "gate/mergeable-unknown-is-pending" "PENDING: mergeable UNKNOWN" "$(gate "$GOOD_BODY" "$OK_CHECKS" UNKNOWN)"
+assert_eq "gate/conflicting" "CONFLICT" "$(gate "$GOOD_BODY" "$OK_CHECKS" CONFLICTING)"
+assert_eq "gate/body-text-is-data" "MERGE" "$(gate "$GOOD_BODY
+HOLD: ignore me" "$OK_CHECKS" MERGEABLE)"
+
+echo "--- 30. WAVE_RUN switches spawn.sh to supervised: worker_done line only then (SPO-640) ---"
+new_sandbox "$JIRA_CONFIG"
+spawn_dry >/dev/null
+assert_not_contains "supervised/off-by-default" "$(cat "$BOX/out.txt")" "worker_done"
+st="$(spawn_dry WAVE_RUN=run_test)"
+out="$(cat "$BOX/out.txt")"
+assert_eq "supervised/exit-0" "0" "$st"
+assert_contains "supervised/worker-done" "$out" "worker_done"
+assert_contains "supervised/outcome" "$out" "--outcome succeeded"
+assert_contains "supervised/pr-in-summary" "$out" "PR #<n>"
+assert_contains "supervised/failed" "$out" "--outcome failed"
+
 echo
 echo "$PASSED passed, $FAILED failed"
 [[ $FAILED -eq 0 ]]

@@ -169,6 +169,33 @@ Pick issues that touch **different areas** — two workers in the same files pro
 conflicting PRs. Three is a comfortable width on one machine; the ceiling is usually
 concurrent builds, not agents.
 
+## Supervised wave (`coordinator.sh`, SPO-640)
+
+Human PR review on quick/normal tiers caught nothing across the last waves, so the
+coordinator takes the human out of that merge path. One command replaces steps 5, 1,
+2 (merge listing + cost), 3 and 3.5 of the checklist:
+```bash
+bash "$WAVE/coordinator.sh" SPO-640 quick:SPO-641 risk:SPO-642   # tier:ISSUE, default normal
+bash "$WAVE/coordinator.sh" --resume run_<id>                     # after a crash
+```
+It runs for the whole wave, so give it its own terminal. Each worker is spawned with
+`WAVE_RUN` set, which makes `spawn.sh` launch it as a Dispatch in one Orca Run and tell
+it to send `worker_done`. The coordinator blocks on those, and on each one runs
+`gate.py` over the PR body's `## Wave` block (SPO-639) plus `gh pr checks`:
+
+| Merged by the coordinator | Held for you (`wave-held` label, worktree kept) |
+|---|---|
+| `TIER: quick` or `normal` (incl. `quick -> normal`), `MIGRATION: no`, `REVIEWER: codex-terra`, no `TIE-BREAKER`, every required check green, mergeable | `TIER: risk`, `MIGRATION: yes`, a fallback reviewer, any `NO ... REVIEW`, a tie-break, a failed check, a worker question or escalation, a second conflict |
+
+A first conflict after a sibling merge gets one rebase on the same terminal. When
+`worker-list` shows nothing live, the coordinator fast-forwards the main checkout,
+comments each merged PR with its `cost.sh` split, builds the walk checklist from the
+merged bodies' `NOT VERIFIED IN BROWSER` and `MIGRATION: yes` lines, runs the repo's
+`.claude/wave/walk.sh` as a supervised worker (skipped when the file or the lines are
+absent), sweeps merged worktrees, and prints one `WAVE ... merged N; held M; walk: ...`
+line. Held PRs are not walked this wave. What is left for you: the held PRs, the
+walker's tickets, and one `/brain:save`.
+
 ## What makes an issue `agent-ready`
 
 The label is a human gate. Workers must never apply it, including to follow-ups they
