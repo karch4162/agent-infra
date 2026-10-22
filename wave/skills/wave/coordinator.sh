@@ -15,6 +15,9 @@
 # reviewer, a tie-break, a worker question. Those PRs get the wave-held label.
 # The walk (step 3.5) runs only when worker-list shows nothing live: the walker owns
 # the shared database, and that ordering is the whole safety argument.
+# Known limits (v1): a worker that dies without worker_done leaves the loop waiting
+# (resolve it with worker-stop/abandon per the Orca recovery reference, then --resume);
+# an issue held on a question stays held after the human answers (merge it by hand).
 # Bash 3.2-safe: every map lives in the state JSON, handled by python.
 set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -83,7 +86,10 @@ def pr_number(v):
             return w['linkedPR']['number']
 def gate(pr):
     view = json.loads(gh('pr', 'view', str(pr), '--json', 'body,mergeable'))
-    checks = json.loads(gh('pr', 'checks', str(pr), '--required', '--json', 'name,bucket') or '[]')
+    # not --required: repos without required checks (sports-management) get a text
+    # error there, not JSON. gate.py treats an empty list as PENDING, never MERGE.
+    out = gh('pr', 'checks', str(pr), '--json', 'name,bucket')
+    checks = json.loads(out) if out.lstrip().startswith('[') else []
     inp = json.dumps({'body': view.get('body', ''), 'checks': checks, 'mergeable': view.get('mergeable')})
     return subprocess.run([sys.executable, os.path.join(WAVE, 'gate.py')], input=inp, capture_output=True, text=True).stdout.strip()
 
@@ -94,10 +100,13 @@ def consume(d):
         k = by_dispatch(d, p.get('dispatchId'), p.get('taskId'))
         if not k: log('message for unknown dispatch', m.get('type'), p); continue
         v = d['issues'][k]
+        if v['status'] != 'running':
+            log('ignoring', m['type'], 'for', k, 'already', v['status']); continue   # replay-safe
         if m['type'] == 'worker_done':
             n = re.search(r'PR #(\d+)', m.get('body') or '')
             v['pr'] = int(n.group(1)) if n else v['pr']
             v['status'] = 'done' if p.get('outcome') == 'succeeded' else 'held'
+            v['doneAt'] = time.time()
             if v['status'] == 'held': v['reason'] = 'worker failed: ' + (m.get('body') or '')[:160]
         else:  # question or escalation: the coordinator never guesses for a worker
             v['status'] = 'held'; v['reason'] = f"{m['type']} needs human: " + (m.get('body') or '')[:160]
@@ -134,7 +143,8 @@ def settle(d):
             else:
                 v['status'], v['reason'] = 'held', 'CONFLICT; rebase redispatch failed'
         elif verdict.startswith('PENDING'):
-            pass
+            if time.time() - v.get('doneAt', time.time()) > 30 * 60:
+                v['status'], v['reason'] = 'held', verdict + ' for 30 min'
         else:
             v['status'], v['reason'] = 'held', verdict.replace('CONFLICT', 'CONFLICT after one rebase')
         if v['status'] == 'held':
@@ -163,7 +173,11 @@ if [ -n "$MERGED" ]; then
   # cost split before any sweep: cost.sh reads the worktrees
   for ISSUE in $MERGED; do
     PR="$(python -c "import sys,json;print(json.load(open(sys.argv[1]))['issues'][sys.argv[2]]['pr'])" "$STATE" "$ISSUE")"
-    COST="$(cd "$MAIN_CHECKOUT" && bash "$WAVE_HOME/cost.sh" "$ISSUE" 2>/dev/null)"
+    WT="$(orca worktree list --json | python -c "
+import sys,json; s=sys.stdin.read(); ws=json.loads(s[s.index('{'):])['result']['worktrees']
+print(next((w['path'] for w in ws if w.get('displayName')==sys.argv[1]), ''))" "$(tr 'A-Z' 'a-z' <<< "$ISSUE")")"
+    # cost.sh derives the workspace dir from its cwd's toplevel; from the main checkout it finds nothing
+    COST="$( [ -d "$WT" ] && cd "$WT" && bash "$WAVE_HOME/cost.sh" "$ISSUE" 2>/dev/null)"
     [ -n "$COST" ] && (cd "$MAIN_CHECKOUT" && gh pr comment "$PR" --body "$(printf '## Wave cost\n```\n%s\n```' "$COST")" >/dev/null)
   done
 fi

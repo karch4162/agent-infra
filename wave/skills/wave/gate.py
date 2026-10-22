@@ -47,7 +47,10 @@ def decide(d):
             return "HOLD: %s" % k
     if "TIE-BREAKER" in block:
         return "HOLD: TIE-BREAKER ran; a human reads conflicting reviews"
-    for c in d.get("checks") or []:
+    checks = d.get("checks") or []
+    if not checks:
+        return "PENDING: no checks reported"   # green nothing is not green
+    for c in checks:
         b = c.get("bucket")
         if b in ("fail", "cancel"):
             return "HOLD: check %s %s" % (c.get("name"), b)

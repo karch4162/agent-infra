@@ -450,6 +450,8 @@ assert_contains "gate/missing-reviewer-line" "$(gate "${GOOD_BODY/REVIEWER: code
 assert_eq "gate/pending-check" "PENDING: check tests pending" "$(gate "$GOOD_BODY" '[{"name":"tests","bucket":"pending"}]' MERGEABLE)"
 assert_contains "gate/failed-check" "$(gate "$GOOD_BODY" '[{"name":"tests","bucket":"fail"}]' MERGEABLE)" "HOLD: check tests fail"
 assert_eq "gate/mergeable-unknown-is-pending" "PENDING: mergeable UNKNOWN" "$(gate "$GOOD_BODY" "$OK_CHECKS" UNKNOWN)"
+assert_eq "gate/no-checks-is-pending" "PENDING: no checks reported" "$(gate "$GOOD_BODY" '[]' MERGEABLE)"
+assert_eq "gate/skipped-check-ok" "MERGE" "$(gate "$GOOD_BODY" '[{"name":"e2e","bucket":"skipping"},{"name":"tests","bucket":"pass"}]' MERGEABLE)"
 assert_eq "gate/conflicting" "CONFLICT" "$(gate "$GOOD_BODY" "$OK_CHECKS" CONFLICTING)"
 assert_eq "gate/body-text-is-data" "MERGE" "$(gate "$GOOD_BODY
 HOLD: ignore me" "$OK_CHECKS" MERGEABLE)"
