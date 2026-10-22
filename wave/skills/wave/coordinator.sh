@@ -97,6 +97,8 @@ def consume(d):
     r = oj('orchestration', 'check', '--run', RUN, '--wait', '--types', 'worker_done,escalation,question', '--timeout-ms', '120000')
     for m in r.get('messages', []):
         p = json.loads(m.get('payload') or '{}')
+        if m.get('type') not in ('worker_done', 'question', 'escalation'):
+            continue   # heartbeats ride in the same FIFO batch (--types is only the wake condition)
         k = by_dispatch(d, p.get('dispatchId'), p.get('taskId'))
         if not k: log('message for unknown dispatch', m.get('type'), p); continue
         v = d['issues'][k]
