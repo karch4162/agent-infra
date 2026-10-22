@@ -109,7 +109,9 @@ git log --merges --format='%s' <last-save-sha>..HEAD | grep -o '#[0-9]*' | tr -d
 ```
 
 Lines to look for, from the plan review (`spawn.sh` step 1.5, risk tier) and the
-pre-PR review (step 4.5):
+pre-PR review (step 4.5). Since SPO-639 they are also the `## Wave` block at the end of
+every worker PR body (step 5), so they outlive the sweep and `gh pr view --json body`
+answers "how often did Grok or Astra change an outcome" without a worktree:
 `TIER: <tier>` opens every summary; `TIER: quick -> normal` means a quick ticket hit a
 risk trigger, so the label was too optimistic. `PLAN REVIEWER: codex-terra` and
 `PLAN CRITIC: grok` confirm a risk-tier plan was reviewed before code; `PLAN DISMISSED:`

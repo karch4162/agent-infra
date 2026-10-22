@@ -178,6 +178,23 @@ st="$(spawn_dry TIER=huge)"
 assert_eq "tier-bad/exit-1" "1" "$st"
 assert_contains "tier-bad/names-tiers" "$(cat "$BOX/out.txt")" "quick, normal, or risk"
 
+echo "--- 13. the PR body carries the review markers (SPO-639): the worktree comment dies at sweep ---"
+st="$(spawn_dry TIER=risk)"
+out="$(cat "$BOX/out.txt")"
+assert_eq "pr-markers/exit-0" "0" "$st"
+assert_contains "pr-markers/block" "$out" "## Wave"
+for m in "TIER:" "PLAN REVIEWER:" "PLAN CRITIC:" "REVIEWER:" "ARCHITECTURE REVIEWER:" "TIE-BREAKER:" "REVIEW ROUNDS:" "REVIEWER DISMISSED:" "NOT VERIFIED IN BROWSER:" "MIGRATION:"; do
+  assert_contains "pr-markers/$m" "$(sed -n '/## Wave/,/^6\. /p' <<<"$out")" "$m"
+done
+pr_line="$(grep -n '^5. Open the PR' <<<"$out" | cut -d: -f1)"
+blk_line="$(grep -n '## Wave' <<<"$out" | head -1 | cut -d: -f1)"
+sum_line="$(grep -n '^7. Record a summary' <<<"$out" | cut -d: -f1)"
+if [[ -n "$pr_line" && -n "$blk_line" && -n "$sum_line" && "$pr_line" -lt "$blk_line" && "$blk_line" -lt "$sum_line" ]]; then
+  pass "pr-markers/in-step-5"
+else
+  fail "pr-markers/in-step-5" "pr [$pr_line] block [$blk_line] summary [$sum_line]"
+fi
+
 echo "--- 13. plan-review and tiebreak --plan refuse without their inputs ---"
 out="$(cd "$BOX" && bash "$WAVE/plan-review.sh" ABC-7 2>&1)"; st=$?
 assert_eq "plan-review-no-plan/exit-1" "1" "$st"
