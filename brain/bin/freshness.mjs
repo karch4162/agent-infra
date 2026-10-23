@@ -592,4 +592,5 @@ if (TO_JSON) {
       (unverifiableSources.length ? ` (+${unverifiableSources.length} unverifiable, no checkout)` : '')
   );
 }
-process.exit(0);
+// No process.exit(0) here: a piped stdout is async on macOS and exiting before
+// it drains cuts --json at 64 KiB (INNOV-409). Falling off the end exits 0.
