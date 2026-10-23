@@ -29,6 +29,8 @@
 # <ref>) and absent on disk. check-concept-graph.sh sums both streams, since a
 # deleted note leaves a phantom node in the graph. The two streams never overlap:
 # a rename is its new path in the default stream and never a deletion here.
+# Neither stream lists the meta notes (log.md, hot.md, index.md; INNOV-408): they
+# are never extracted, so they are never work and never staleness.
 set -euo pipefail
 
 VAULT="${BRAIN_ROOT:-${CLAUDE_PROJECT_DIR:-$PWD}}"
@@ -104,6 +106,10 @@ emit() {
     p="${p#"$PREFIX"}"
   fi
   [[ "$p" == wiki/*.md ]] || return 0
+  # Meta notes never enter the concept graph (INNOV-408), so they are neither 5c
+  # work nor staleness. Mirrors META_NOTES in wiki-meta.mjs (basename, any depth);
+  # tests/test-changed-wiki-notes.sh fails if the two drift.
+  case "${p##*/}" in index.md|hot.md|log.md) return 0 ;; esac
   if [[ $DELETED -eq 1 ]]; then
     [[ -f "$VAULT/$p" ]] && return 0
   else

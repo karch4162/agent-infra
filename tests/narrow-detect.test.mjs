@@ -132,3 +132,71 @@ test('no detect file => SKIPPED, not a crash', (t) => {
   assert.equal(r.status, 0);
   assert.match(r.stdout, /SKIPPED - no detect file/);
 });
+
+// INNOV-408: wiki/log.md, hot.md and index.md never enter the concept graph.
+// They change on every save, so extracting them is a fixed cost per save.
+function withMeta(t, { eol = '\n' } = {}) {
+  const v = vault(t, { notes: 4, dirty: 1, eol });
+  const meta = ['log.md', 'hot.md', 'index.md'].map((n) => join(v.root, 'wiki', n));
+  for (const p of meta) writeFileSync(p, ['# meta', 'seed', ''].join(eol));
+  git(v.root, 'add', '-A');
+  git(v.root, 'commit', '-qm', 'meta');
+  // The graph was built before the meta notes changed: commit it, then edit them.
+  writeFileSync(join(v.root, 'graphify-out/graph.json'), '{"nodes":[1],"links":[]}');
+  git(v.root, 'commit', '-qam', 'graph');
+  for (const p of [...meta.slice(0, 2), ...v.changed]) writeFileSync(p, ['# x', 'edited again', ''].join(eol));
+  const d = readDetect(v.root);
+  d.files.document = [...v.paths, ...meta];
+  d.all_files.document = [...v.paths, ...meta];
+  writeFileSync(detectPath(v.root), JSON.stringify(d));
+  return { ...v, meta };
+}
+
+test('--update: changed log.md + hot.md + one real note => only the real note is left', (t) => {
+  const { root, changed, meta } = withMeta(t);
+  const r = run(root);
+  assert.equal(r.status, 0);
+  const d = readDetect(root);
+  assert.deepEqual(d.files.document, changed);
+  for (const p of meta) assert.ok(!d.files.document.includes(p), `${p} must not be extracted`);
+  assert.equal(d.all_files.document.length, 7);
+});
+
+test('--update: CRLF vault drops the meta notes the same way', (t) => {
+  const { root, changed } = withMeta(t, { eol: '\r\n' });
+  run(root);
+  assert.deepEqual(readDetect(root).files.document, changed);
+});
+
+test('--full: drops only the meta notes, no git narrowing', (t) => {
+  const { root, paths } = withMeta(t);
+  const r = spawnSync('node', [SCRIPT, '--vault', root, '--full'], { encoding: 'utf8' });
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /^DETECT-NARROW: OK - full build, dropped 3 meta note\(s\), 4 file\(s\) left/);
+  const d = readDetect(root);
+  assert.deepEqual(d.files.document, paths);
+  assert.equal(d.total_files, 4);
+});
+
+test('--full: a note whose name only ends in log.md is a real note and stays', (t) => {
+  const { root, paths } = vault(t, { notes: 2, dirty: 0 });
+  const nested = join(root, 'wiki', 'area', 'notes-log.md');
+  const d = readDetect(root);
+  d.files.document = [...paths, nested];
+  writeFileSync(detectPath(root), JSON.stringify(d));
+  const r = spawnSync('node', [SCRIPT, '--vault', root, '--full'], { encoding: 'utf8' });
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /^DETECT-NARROW: OK - full build, dropped 0 meta note\(s\), 3 file\(s\) left/);
+  assert.deepEqual(readDetect(root).files.document, [...paths, nested]);
+});
+
+test('SKIPPED still drops the meta notes: git trust gates narrowing, not the exclusion', (t) => {
+  const { root, paths, meta } = withMeta(t);
+  rmSync(join(root, '.git'), { recursive: true, force: true });
+  const r = run(root);
+  assert.match(r.stdout, /^DETECT-NARROW: SKIPPED - .*not a git repo/);
+  assert.match(r.stdout, /dropped 3 meta note\(s\)/);
+  const d = readDetect(root);
+  assert.deepEqual(d.files.document, paths);
+  for (const p of meta) assert.ok(!d.files.document.includes(p));
+});

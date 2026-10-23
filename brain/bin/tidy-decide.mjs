@@ -50,6 +50,7 @@ import { readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, basename, posix, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { buildAnchorContext, classifyAnchors, parseFrontmatter } from './anchors.mjs';
+import { isMetaNote } from './wiki-meta.mjs';
 
 const readJson = (f) => JSON.parse(readFileSync(f, 'utf8'));
 const readLines = (f) => readFileSync(f, 'utf8').split(/\r?\n/).filter((l) => l.trim()).map((l) => JSON.parse(l));
@@ -144,7 +145,7 @@ function anchorQuestions(vault, scan, verify) {
     (f.kind === 'unverifiable-source' && (f.reason === 'unknown' || f.reason === 'gitignored'))).map((f) => f.note));
   for (const file of walk(join(vault, 'wiki'))) {
     const rel = posix.relative(vault.replace(/\\/g, '/'), file.replace(/\\/g, '/'));
-    if (isDraft(rel) || ['index.md', 'hot.md', 'log.md'].includes(basename(rel))) continue;
+    if (isDraft(rel) || isMetaNote(rel)) continue;
     const text = readFileSync(file, 'utf8');
     const fm = parseFrontmatter(text);
     if (!fm.id && !fm.last_verified) continue; // not a note (freshness: no-frontmatter)
