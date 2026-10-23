@@ -649,6 +649,18 @@ add_notes "$VAULT" after 3
 run_guard "$GUARD" CONCEPT_GRAPH_THRESHOLD=3
 assert_contains "meta/not-in-last-save-count" "5 document(s) behind, was 2 at last save" \
   "$(first_line "$BOX/err.txt")" "$(evidence "$BOX")"
+# Only meta notes before the save: the filter matches nothing and still reads 0.
+new_vault
+printf '# log\n' >"$VAULT/wiki/log.md"
+git_commit_all "$VAULT" "meta note"
+printf '{"nodes":[1]}\n' >"$VAULT/graphify-out/graph.json"
+git_commit_all "$VAULT" "graph built"
+printf 'appended\n' >>"$VAULT/wiki/log.md"
+save_commit "$VAULT" s1
+add_notes "$VAULT" after 4
+run_guard "$GUARD" CONCEPT_GRAPH_THRESHOLD=3
+assert_contains "meta/only-meta-before-save-reads-0" "4 document(s) behind, was 0 at last save" \
+  "$(first_line "$BOX/err.txt")" "$(evidence "$BOX")"
 
 # --- 14. save step 5c contract (INNOV-300) ------------------------------------
 # The fixture for the 2026-09-14 incident: a PM's refresh hit graphify's shrink
