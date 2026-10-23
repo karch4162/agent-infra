@@ -121,8 +121,9 @@ if [[ -z "$SAVE" ]]; then
 elif git -C "$VAULT" merge-base --is-ancestor "$SAVE" "$LAST" 2>/dev/null; then
   WAS="was 0 at last save"
 else
+  # Meta notes are not staleness (INNOV-408), the same set changed-wiki-notes.sh drops.
   M="$(git -C "$VAULT" -c core.quotepath=false diff --name-only -M "$LAST" "$SAVE" -- wiki 2>/dev/null \
-    | grep -c '\.md$' | tr -d '[:space:]')"
+    | grep -Ev '(^|/)(index|hot|log)\.md$' | grep -c '\.md$' | tr -d '[:space:]')"
   WAS="was ${M:-0} at last save"
 fi
 

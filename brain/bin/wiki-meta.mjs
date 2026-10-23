@@ -5,9 +5,9 @@
 // (INNOV-408: log.md is append-only, so it changed on every save and cost a full
 // re-extract each time).
 //
-// One set for every caller. changed-wiki-notes.sh mirrors it in bash (a `case`
-// in emit()); tests/test-changed-wiki-notes.sh reads this file to keep the two
-// in step.
+// One set for every caller. Bash mirrors it twice: changed-wiki-notes.sh (a
+// `case` in emit(), checked against this file by tests/test-changed-wiki-notes.sh)
+// and check-concept-graph.sh's last-save count (tests/test-concept-graph-staleness.sh).
 export const META_NOTES = new Set(['index.md', 'hot.md', 'log.md']);
 
 // Matched on the basename, at any depth, as freshness always has.
