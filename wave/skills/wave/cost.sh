@@ -5,14 +5,19 @@
 # Worker numbers come from ~/.claude/projects/<worktree>/*.jsonl; review numbers from
 # the "tokens used" lines Codex leaves in .wave-review.*.err / .wave-plan-review.*.err.
 # Grok prints no token count, so it is not listed.
+# Worktree paths come from Orca: it does not put them next to the main checkout (INNOV-406).
 set -uo pipefail
-WS="$(dirname "$(git rev-parse --show-toplevel)")"
+WORKTREES="$(orca worktree list --json 2>/dev/null)"
+RC=0
 for ISSUE in "$@"; do
-  WT="$WS/$(tr 'A-Z' 'a-z' <<< "$ISSUE")"
-  python - "$ISSUE" "$(cygpath -w "$WT" 2>/dev/null || echo "$WT")" "$WT" <<'PY'
+  WT="$(printf '%s' "$WORKTREES" | python -c "
+import sys,json; s=sys.stdin.read(); ws=json.loads(s[s.index('{'):])['result']['worktrees']
+print(next((w['path'] for w in ws if w.get('displayName')==sys.argv[1]), ''))" "$(tr 'A-Z' 'a-z' <<< "$ISSUE")" 2>/dev/null)"
+  [ -n "$WT" ] || { echo "no worktree found for $ISSUE" >&2; RC=1; continue; }
+  python - "$ISSUE" "$WT" <<'PY'
 import json,sys,os,glob,re,collections
-issue,wt_win,wt=sys.argv[1:4]
-proj=os.path.expanduser('~/.claude/projects/'+wt_win.replace(':','-').replace('/','-').replace(chr(92),'-'))
+issue,wt=sys.argv[1:3]
+proj=os.path.expanduser('~/.claude/projects/'+wt.replace(':','-').replace('/','-').replace(chr(92),'-'))
 per=collections.defaultdict(collections.Counter)
 for f in glob.glob(proj+'/*.jsonl'):
     for line in open(f,encoding='utf-8',errors='ignore'):
@@ -33,3 +38,4 @@ for err in sorted(glob.glob(os.path.join(wt,'.wave-review.*.err'))+glob.glob(os.
     print(f"  {stage:39}total={used/1e3:.0f}k")
 PY
 done
+exit "$RC"

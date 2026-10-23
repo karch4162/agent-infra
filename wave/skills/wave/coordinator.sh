@@ -206,11 +206,7 @@ if [ -n "$MERGED" ]; then
   # cost split before any sweep: cost.sh reads the worktrees
   for ISSUE in $MERGED; do
     PR="$(python -c "import sys,json;print(json.load(open(sys.argv[1]))['issues'][sys.argv[2]]['pr'])" "$STATE" "$ISSUE")"
-    WT="$(orca worktree list --json | python -c "
-import sys,json; s=sys.stdin.read(); ws=json.loads(s[s.index('{'):])['result']['worktrees']
-print(next((w['path'] for w in ws if w.get('displayName')==sys.argv[1]), ''))" "$(tr 'A-Z' 'a-z' <<< "$ISSUE")")"
-    # cost.sh derives the workspace dir from its cwd's toplevel; from the main checkout it finds nothing
-    COST="$( [ -d "$WT" ] && cd "$WT" && bash "$WAVE_HOME/cost.sh" "$ISSUE" 2>/dev/null)"
+    COST="$(bash "$WAVE_HOME/cost.sh" "$ISSUE" 2>/dev/null)"
     [ -n "$COST" ] && (cd "$MAIN_CHECKOUT" && gh pr comment "$PR" --body "$(printf '## Wave cost\n```\n%s\n```' "$COST")" >/dev/null)
   done
 fi

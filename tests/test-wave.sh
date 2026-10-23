@@ -468,6 +468,30 @@ assert_contains "supervised/outcome" "$out" "--outcome succeeded"
 assert_contains "supervised/pr-in-summary" "$out" "PR #<n>"
 assert_contains "supervised/failed" "$out" "--outcome failed"
 
+echo "--- 31. cost.sh finds worktrees via Orca, not the checkout's parent dir (INNOV-406) ---"
+new_sandbox ""
+COSTBOX="$(mktemp -d "$TMPROOT/costXXXXXX")"
+mkdir -p "$COSTBOX/bin" "$COSTBOX/elsewhere/abc-7" "$COSTBOX/home/.claude/projects"
+WTP="$(cygpath -m "$COSTBOX/elsewhere/abc-7" 2>/dev/null || echo "$COSTBOX/elsewhere/abc-7")"
+printf 'tokens used\n12,345\n' >"$COSTBOX/elsewhere/abc-7/.wave-review.codex-terra.err"
+PROJ="$COSTBOX/home/.claude/projects/$(printf '%s' "$WTP" | tr ':/\\' '---')"
+mkdir -p "$PROJ"
+printf '{"message":{"model":"claude-x","usage":{"cache_read_input_tokens":2000000,"cache_creation_input_tokens":3000,"output_tokens":4000}}}\r\n' >"$PROJ/s.jsonl"
+cat >"$COSTBOX/bin/orca" <<EOF
+#!/bin/sh
+printf '%s' '{"result":{"worktrees":[{"displayName":"abc-7","path":"$WTP"}]}}'
+EOF
+chmod +x "$COSTBOX/bin/orca"
+cost_run() { (cd "$BOX" && PATH="$COSTBOX/bin:$PATH" HOME="$COSTBOX/home" USERPROFILE="$(cygpath -w "$COSTBOX/home" 2>/dev/null || echo "$COSTBOX/home")" bash "$WAVE/cost.sh" "$@") 2>&1; }
+out="$(cost_run ABC-7)"
+assert_contains "cost/worker-line" "$out" "worker claude-x"
+assert_contains "cost/cache-read" "$out" "cache_read=2.0M"
+assert_contains "cost/review-line" "$out" "review.codex-terra"
+assert_contains "cost/review-total" "$out" "total=12k"
+out="$(cost_run ABC-8)"
+assert_contains "cost/missing-says-so" "$out" "no worktree found for ABC-8"
+assert_eq "cost/missing-exit-1" "1" "$(cost_run ABC-8 >/dev/null; echo $?)"
+
 echo
 echo "$PASSED passed, $FAILED failed"
 [[ $FAILED -eq 0 ]]
