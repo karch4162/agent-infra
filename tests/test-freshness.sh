@@ -503,6 +503,30 @@ else
   fail "stale/skips-status-marked" "want stale = st-cur + st-none only" "json: [$(cat "$BOX/out.json")]" "md: [$(grep -F 'last_verified' "$BOX/out.md")]"
 fi
 
+# --- 10. --json and --stdout survive an async stdout pipe (INNOV-409) --------
+# On macOS a piped stdout is async: process.exit() right after the write cut
+# --json at the 64 KiB pipe buffer. Linux and Windows pipes are sync, so a shim
+# defers every stdout write a tick to give each runner the macOS semantics.
+# Negative control: put process.exit(0) back and both outputs come out empty.
+BOX="$(mktemp -d "$TMPROOT/boxXXXXXX")"
+VAULT="$BOX/vault"
+mkdir -p "$VAULT/wiki"
+printf -- '---\r\ntags: [x, y]\r\n---\r\n# A\r\nSee [[gone-a]] and [[gone-b]].\r\n' >"$VAULT/wiki/a.md"
+printf '%s\n' 'const w = process.stdout.write.bind(process.stdout);' \
+  'process.stdout.write = (c, e, cb) => { setImmediate(() => w(c, e, cb)); return true; };' >"$BOX/async-stdout.cjs"
+( cd "$BOX" && BRAIN_ROOT="$VAULT" node --require "$BOX/async-stdout.cjs" "$FRESH" --json ) >"$BOX/out.json" 2>/dev/null
+( cd "$BOX" && BRAIN_ROOT="$VAULT" node --require "$BOX/async-stdout.cjs" "$FRESH" --stdout ) >"$BOX/out.md" 2>/dev/null
+if [[ "$(jcount "$BOX/out.json" dead-link)" == "2" ]]; then
+  pass "async-stdout/json-complete"
+else
+  fail "async-stdout/json-complete" "want 2 dead-link findings" "got: [$(head -c 300 "$BOX/out.json")]"
+fi
+if grep -qF 'gone-b' "$BOX/out.md"; then
+  pass "async-stdout/markdown-complete"
+else
+  fail "async-stdout/markdown-complete" "got: [$(head -c 300 "$BOX/out.md")]"
+fi
+
 # ================================================================= SUMMARY ==
 echo
 echo "$PASSED passed, $FAILED failed"
