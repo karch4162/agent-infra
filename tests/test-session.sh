@@ -364,6 +364,13 @@ assert_eq "autobranch/unfetched-origin-collision-exit-0" "0" "$STATUS" "$(eviden
 assert_eq "autobranch/unfetched-origin-collision-suffixed" "brain/save-$(today)-2" "$(cur_branch)" "$(evidence)"
 assert_eq "autobranch/unfetched-origin-refs-untouched" "" \
   "$(git -C "$VAULT" for-each-ref refs/remotes 2>/dev/null)" "$(evidence)"
+# An unreachable origin degrades to the local refs; it never refuses the start.
+sb_new "main"
+GH_PATH="$GH_NONE"
+git -C "$VAULT" remote add origin "$BOX/does-not-exist.git"
+run_session --start save
+assert_eq "autobranch/unreachable-origin-exit-0" "0" "$STATUS" "$(evidence)"
+assert_eq "autobranch/unreachable-origin-bare-name" "brain/save-$(today)" "$(cur_branch)" "$(evidence)"
 
 echo "--- C. concurrency: the 2026-08-05 incident ---"
 
