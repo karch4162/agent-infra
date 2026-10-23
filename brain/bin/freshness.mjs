@@ -39,6 +39,7 @@ import { join, basename, relative } from 'node:path';
 // check-anchors.mjs — see brain/bin/anchors.mjs. Two implementations of one
 // resolver is the defect, not the convenience.
 import { buildAnchorContext, classifyAnchors, parseFrontmatter, noteTags, enumValue, stripComment, malformedEnums, fileAliases } from './anchors.mjs';
+import { isMetaNote } from './wiki-meta.mjs';
 
 const argv = process.argv.slice(2);
 const argVal = (flag) => (argv.indexOf(flag) >= 0 ? argv[argv.indexOf(flag) + 1] : undefined);
@@ -104,11 +105,10 @@ const mdNoteLinks = (t) =>
     .map((p) => basename(p, '.md'));
 const allLinks = (t) => [...wikilinks(t), ...mdNoteLinks(t)];
 
-const META_FILES = new Set(['index.md', 'hot.md', 'log.md']);
 const wikiFiles = walk(join(VAULT, 'wiki'));
 // Notes = every wiki/*.md except the catalog/cache/log files and any freshness report.
 const notes = wikiFiles.filter(
-  (f) => !META_FILES.has(basename(f)) && !basename(f).startsWith('freshness-')
+  (f) => !isMetaNote(f) && !basename(f).startsWith('freshness-')
 );
 
 // Valid link targets: note basenames + community stubs + per-repo graph reports.
@@ -246,8 +246,8 @@ for (const n of parsed) {
 
 // ---- hot.md word budget --------------------------------------------------------
 // hot.md is a *rolling* cache: /brain:save must replace stale bullets, not append.
-// A vault where saves accrete "prior session" bullets balloons the file, and every
-// save re-extracts it into the wiki concept graph — so bloat taxes every session.
+// A vault where saves accrete "prior session" bullets balloons the file, and
+// /brain:resume reads it first every session — so bloat taxes every session.
 const hotBloat = [];
 {
   const hotPath = join(VAULT, 'wiki', 'hot.md');
@@ -303,7 +303,7 @@ for (const f of allFiles) {
 components.sort((a, b) => b.length - a.length);
 const isKnowledge = (f) => {
   const r = relative(VAULT, f).replace(/\\/g, '/');
-  return r.startsWith('wiki/') && !META_FILES.has(basename(f));
+  return r.startsWith('wiki/') && !isMetaNote(f);
 };
 // The "main" component is the largest one that actually contains a wiki note —
 // NOT simply the largest. A graph mirror can out-size the wiki (400+ community

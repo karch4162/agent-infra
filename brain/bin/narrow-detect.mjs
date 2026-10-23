@@ -38,58 +38,89 @@
 // the plugin, NOT inside the vault, so it cannot derive the vault from its own
 // location.
 //
+// THE META NOTES NEVER GO THROUGH (INNOV-408). wiki/log.md, hot.md and index.md
+// (wiki-meta.mjs) are not concepts, and log.md is append-only, so it changed on
+// every save and cost a full re-extract each time. They are dropped from `files`
+// on every run, SKIPPED included: git trust gates the narrowing, not this. A full
+// build has no git list to narrow to, so it runs with --full, which drops the
+// meta notes and nothing else. --update and full builds then extract the same set.
+//
 // Usage:
 //   BRAIN_ROOT=<vault> node narrow-detect.mjs                  # narrow in place
 //   node narrow-detect.mjs --vault <path>
 //   node narrow-detect.mjs --detect <path/to/.graphify_detect.json>
 //   node narrow-detect.mjs --dry-run                           # report, write nothing
+//   node narrow-detect.mjs --full                              # full build: drop meta notes only
 //
 // Contract (save/SKILL.md step 5c and tests/narrow-detect.test.mjs depend on it):
 //   exit 0 => first line "DETECT-NARROW: OK - narrowed N -> M file(s) ..."
 //             the detect file now lists exactly the git-changed notes.
+//   exit 0 => first line "DETECT-NARROW: OK - full build, dropped N meta note(s), M file(s) left"
+//             (--full) graphify's list minus the meta notes.
 //   exit 0 => first line "DETECT-NARROW: SKIPPED - <reason>"
-//             nothing was written; graphify's own list stands. Never silent.
+//             no narrowing; graphify's own list stands, minus the meta notes
+//             (a second line says so when any were dropped). Never silent.
 //   exit 2 => usage error or the detect file is unreadable/not JSON.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMetaNote } from './wiki-meta.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
 function usage(msg) {
   if (msg) console.error(`error: ${msg}`);
-  console.error(`usage: narrow-detect.mjs [--vault <path>] [--detect <path>] [--dry-run]`);
+  console.error(`usage: narrow-detect.mjs [--vault <path>] [--detect <path>] [--dry-run] [--full]`);
   process.exit(2);
 }
 
 let vault = process.env.BRAIN_ROOT || process.env.CLAUDE_PROJECT_DIR || process.cwd();
 let detectPath = '';
 let dryRun = false;
+let full = false;
 for (let i = 2; i < process.argv.length; i++) {
   const a = process.argv[i];
   if (a === '--vault') vault = process.argv[++i] ?? usage('--vault requires a path');
   else if (a === '--detect') detectPath = process.argv[++i] ?? usage('--detect requires a path');
   else if (a === '--dry-run') dryRun = true;
+  else if (a === '--full') full = true;
   else if (a === '-h' || a === '--help') usage();
   else usage(`unknown argument '${a}'`);
 }
 vault = resolve(vault);
 if (!detectPath) detectPath = resolve(vault, 'graphify-out/.graphify_detect.json');
 
-const skip = (reason) => {
-  console.log(`DETECT-NARROW: SKIPPED - ${reason}`);
-  process.exit(0);
-};
-
 // Compare paths as absolute with one separator spelling. ponytail: exact match,
 // so a case-different spelling of the same file on Windows reads as "no match"
 // and lands on the SKIPPED guard below rather than on a wrong narrowing.
 const key = (p) => resolve(vault, p).split('\\').join('/');
 
-if (!existsSync(detectPath)) skip(`no detect file at '${detectPath}' (graphify has not run its detect step)`);
+// Only entries under the vault's wiki/ are ours to judge; anything else graphify
+// put in the list stays, so this can never quietly drop an input we don't model.
+const WIKI = key('wiki') + '/';
+const mine = (p) => key(p).startsWith(WIKI);
 
 let detect;
+let metaDropped = 0;
+const count = (files) => Object.values(files).reduce((n, l) => n + (Array.isArray(l) ? l.length : 0), 0);
+const write = () => {
+  if (dryRun) return;
+  detect.total_files = count(detect.files);
+  writeFileSync(detectPath, JSON.stringify(detect), 'utf8');
+};
+
+const skip = (reason) => {
+  console.log(`DETECT-NARROW: SKIPPED - ${reason}`);
+  if (metaDropped) {
+    write();
+    console.log(`  dropped ${metaDropped} meta note(s) (wiki-meta.mjs) from the extract list${dryRun ? ' (dry run, nothing written)' : ''}.`);
+  }
+  process.exit(0);
+};
+
+if (!existsSync(detectPath)) skip(`no detect file at '${detectPath}' (graphify has not run its detect step)`);
+
 try {
   detect = JSON.parse(readFileSync(detectPath, 'utf8'));
 } catch (e) {
@@ -98,6 +129,21 @@ try {
 }
 const files = detect.files;
 if (!files || typeof files !== 'object') skip(`'${detectPath}' has no 'files' map — nothing to narrow`);
+
+// --- the meta notes, on every path -------------------------------------------
+for (const [cat, entries] of Object.entries(files)) {
+  if (!Array.isArray(entries)) continue;
+  const kept = entries.filter((p) => !(mine(p) && isMetaNote(p)));
+  metaDropped += entries.length - kept.length;
+  files[cat] = kept;
+}
+
+if (full) {
+  if (metaDropped) write();
+  console.log(`DETECT-NARROW: OK - full build, dropped ${metaDropped} meta note(s), ${count(files)} file(s) left` +
+    `${dryRun && metaDropped ? ' (dry run, nothing written)' : ''}`);
+  process.exit(0);
+}
 
 // --- the git list, or a refusal ---------------------------------------------
 const git = (...args) => spawnSync('git', ['-C', vault, ...args], { encoding: 'utf8' });
@@ -132,11 +178,6 @@ const changed = new Set(
 );
 
 // --- narrow ------------------------------------------------------------------
-// Only entries under the vault's wiki/ are ours to judge; anything else graphify
-// put in the list stays, so this can never quietly drop an input we don't model.
-const WIKI = key('wiki') + '/';
-const mine = (p) => key(p).startsWith(WIKI);
-
 let before = 0;
 let after = 0;
 let dropped = 0;
@@ -155,18 +196,15 @@ for (const [cat, entries] of Object.entries(files)) {
 if (changed.size > 0 && dropped === before && before > 0)
   skip(`${changed.size} git-changed note(s) matched none of the ${before} detect entries (path spellings disagree) — leaving graphify's list alone`);
 
-if (dropped === 0) {
+if (dropped === 0 && metaDropped === 0) {
   console.log(`DETECT-NARROW: OK - nothing to narrow, graphify's ${before} file(s) already match git`);
   process.exit(0);
 }
 
-if (!dryRun) {
-  detect.files = narrowed;
-  detect.total_files = after;
-  writeFileSync(detectPath, JSON.stringify(detect), 'utf8');
-}
+detect.files = narrowed;
+write();
 console.log(
-  `DETECT-NARROW: OK - narrowed ${before} -> ${after} file(s) per git since ${last.slice(0, 12)}` +
+  `DETECT-NARROW: OK - narrowed ${before + metaDropped} -> ${after} file(s) per git since ${last.slice(0, 12)}` +
     `${dryRun ? ' (dry run, nothing written)' : ''}`,
 );
 if (after === 0) console.log(`  git reports no wiki note changed since the graph was built — nothing to re-extract.`);

@@ -452,6 +452,38 @@ else
   fi
 fi
 
+# ------------------------------------------------- meta notes (INNOV-408) --
+# wiki/log.md, hot.md and index.md never enter the concept graph, so neither
+# stream lists them: not as a 5c work item, not as staleness. The names come
+# from brain/bin/wiki-meta.mjs, so a name added there and not to the bash mirror
+# fails here. CRLF content too: the vault is autocrlf.
+echo "--- meta notes ---"
+META="$(cd "$REPO_ROOT" && node --input-type=module -e "import { META_NOTES } from './brain/bin/wiki-meta.mjs'; console.log([...META_NOTES].join(' '))")"
+if [[ -z "$META" ]]; then
+  fail "meta/names-read" "could not read META_NOTES from brain/bin/wiki-meta.mjs"
+else
+  pass "meta/names-read"
+fi
+new_vault
+for n in $META; do printf '# meta\r\nseed\r\n' >"$VAULT/wiki/$n"; done
+mkdir -p "$VAULT/wiki/area"
+git_commit_all "$VAULT" "meta notes"
+ref="$(git -C "$VAULT" rev-parse HEAD)"
+for n in $META; do printf 'appended\r\n' >>"$VAULT/wiki/$n"; done
+printf '# one changed\n' >>"$VAULT/wiki/one.md"
+status="$(run_cwn --since "$ref")"
+assert_eq "meta/changed-not-listed" "wiki/one.md" "$(cat "$BOX/out.txt")"
+git_commit_all "$VAULT" "edit meta"
+status="$(run_cwn --since "$ref")"
+assert_eq "meta/committed-not-listed" "wiki/one.md" "$(cat "$BOX/out.txt")"
+for n in $META; do rm -f "$VAULT/wiki/$n"; done
+status="$(run_cwn --deleted --since "$ref")"
+assert_eq "meta/deleted-not-listed" "" "$(cat "$BOX/out.txt")"
+# Negative control: a real note that merely ends in log.md is still listed.
+printf '# x\n' >"$VAULT/wiki/area/release-log.md"
+status="$(run_cwn)"
+assert_eq "meta/lookalike-still-listed" "wiki/area/release-log.md" "$(cat "$BOX/out.txt")"
+
 # ================================================================= SUMMARY ==
 echo
 echo "$PASSED passed, $FAILED failed"

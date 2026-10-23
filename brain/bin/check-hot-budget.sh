@@ -2,9 +2,9 @@
 # check-hot-budget.sh — enforce the wiki/hot.md word budget MECHANICALLY.
 #
 # wiki/hot.md is the rolling session cache: /brain:resume reads it FIRST every
-# session and /brain:save step 5c re-extracts it into the wiki concept graph on
-# every save. Every word over budget is therefore a tax on every future session
-# and every future save. The budget was documented as a HARD ~500 words and was
+# session, and every save rewrites it. Every word over budget is therefore a tax
+# on every future session. (5c no longer extracts it into the concept graph,
+# INNOV-408.) The budget was documented as a HARD ~500 words and was
 # enforced only by prose ("run wc -w after each edit and keep cutting") — it
 # shipped at 709 words twice in a single session. Prose drifts; a script holds.
 # So this script owns the budget: it measures, it REPORTS the number on every
@@ -86,7 +86,7 @@ OVER=$(( WORDS - BUDGET ))
 {
   echo "HOT-BUDGET: OVER - wiki/hot.md is $WORDS words (budget $BUDGET, $OVER over)"
   echo "  wiki/hot.md is a rolling cache, not a log: /brain:resume reads it first every"
-  echo "  session and every save re-extracts it, so the overage is paid again and again."
+  echo "  session, so the overage is paid again and again."
   echo "  Remedy: delete the stalest bullets — anything that wouldn't change what the"
   echo "  next session does — then re-run:"
   echo "    BRAIN_ROOT=\"$VAULT\" bash check-hot-budget.sh"

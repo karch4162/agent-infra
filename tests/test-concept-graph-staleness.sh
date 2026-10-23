@@ -613,6 +613,27 @@ fi
 assert_contains "remedy/decline-needs-reason" "reason" "$(tr '\n' ' ' <"$BOX/err.txt")" \
   "$(evidence "$BOX")"
 
+# --- 13b. meta notes are never staleness (INNOV-408) -------------------------
+# 5c never extracts wiki/log.md, hot.md or index.md, so editing them every save
+# must not read as the graph falling behind. One real note is the control.
+echo "--- 13b. meta notes ---"
+new_vault
+printf '# log\r\n' >"$VAULT/wiki/log.md"
+printf '# hot\r\n' >"$VAULT/wiki/hot.md"
+printf '# index\r\n' >"$VAULT/wiki/index.md"
+git_commit_all "$VAULT" "meta notes"
+printf '{"nodes":[1]}\n' >"$VAULT/graphify-out/graph.json"
+git_commit_all "$VAULT" "graph built"
+printf 'appended\r\n' | tee -a "$VAULT/wiki/log.md" "$VAULT/wiki/hot.md" >>"$VAULT/wiki/index.md"
+printf 'edited\n' >>"$VAULT/wiki/one.md"
+run_guard "$GUARD"
+assert_contains "meta/not-staleness" "OK - 1 document(s) behind" "$(first_line "$BOX/out.txt")" \
+  "$(evidence "$BOX")"
+rm -f "$VAULT/wiki/log.md" "$VAULT/wiki/hot.md"
+run_guard "$GUARD"
+assert_contains "meta/deleted-not-staleness" "OK - 1 document(s) behind" "$(first_line "$BOX/out.txt")" \
+  "$(evidence "$BOX")"
+
 # --- 14. save step 5c contract (INNOV-300) ------------------------------------
 # The fixture for the 2026-09-14 incident: a PM's refresh hit graphify's shrink
 # guard, the skill said nothing, her agent proposed an already-ruled-out
@@ -625,11 +646,14 @@ for want in \
   '5c SKIPPED (<reason>) — CONCEPT-GRAPH: STALE - N document(s) behind, was M at last save' \
   'CONCEPT-GRAPH: BLOCKED - graphify not installed, run /brain:init' \
   'refused to shrink' \
-  '`log.md`, `hot.md` and `index.md` each in its own chunk' \
+  '5c never extracts those three meta notes' \
+  'narrow-detect.mjs" --full' \
+  'INNOV-408 migration, --force' \
+  'never `--update --force`' \
   'Never `--force`' \
   'Do not propose any other workaround' \
   'changed-wiki-notes.sh" --deleted --since' \
-  'the only case where `--force` is right' \
+  'the only other case where `--force` is right' \
   'build_merge' \
   'DETECT-NARROW:' \
   'never `--update` when a note was deleted'; do
@@ -638,7 +662,8 @@ for want in \
 done
 for gone in \
   'Deliberately skipping the refresh stays allowed' \
-  'WARN only — it blocks nothing'; do
+  'WARN only — it blocks nothing' \
+  'each in its own chunk'; do
   if [[ "$STEP5C" == *"$gone"* ]]; then
     fail "save-5c/lacks:$gone" "step 5c still presents the refresh as optional"
   else
