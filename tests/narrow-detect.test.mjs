@@ -184,7 +184,9 @@ test('--full: a note whose name only ends in log.md is a real note and stays', (
   const d = readDetect(root);
   d.files.document = [...paths, nested];
   writeFileSync(detectPath(root), JSON.stringify(d));
-  spawnSync('node', [SCRIPT, '--vault', root, '--full'], { encoding: 'utf8' });
+  const r = spawnSync('node', [SCRIPT, '--vault', root, '--full'], { encoding: 'utf8' });
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /^DETECT-NARROW: OK - full build, dropped 0 meta note\(s\), 3 file\(s\) left/);
   assert.deepEqual(readDetect(root).files.document, [...paths, nested]);
 });
 
