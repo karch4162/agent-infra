@@ -344,6 +344,34 @@ assert_eq "autobranch/remote-collision-exit-0" "0" "$STATUS" "$(evidence)"
 assert_eq "autobranch/remote-collision-suffixed" "brain/save-$(today)-2" "$(cur_branch)" "$(evidence)"
 assert_eq "autobranch/remote-collision-pin-matches" "  pin: brain/save-$(today)-2:$(head_sha)" "$(nth_line "$BOX/out.txt" 2)" "$(evidence)"
 
+# --- 6c. ...even when this checkout never fetched it (INNOV-410) -----------
+# /brain:save starts its session before check-freshness fetches, so the other
+# author's branch is on origin but not in refs/remotes yet. The name must still be
+# taken. Negative control: the same origin without that branch keeps the bare name.
+sb_new "main"
+GH_PATH="$GH_NONE"
+git clone -q --bare "$VAULT" "$BOX/origin.git" >/dev/null 2>&1
+git -C "$VAULT" remote add origin "$BOX/origin.git"
+run_session --start save
+assert_eq "autobranch/unfetched-origin-free-name-kept" "brain/save-$(today)" "$(cur_branch)" "$(evidence)"
+sb_new "main"
+GH_PATH="$GH_NONE"
+git clone -q --bare "$VAULT" "$BOX/origin.git" >/dev/null 2>&1
+git -C "$BOX/origin.git" branch "brain/save-$(today)" main >/dev/null 2>&1
+git -C "$VAULT" remote add origin "$BOX/origin.git"
+run_session --start save
+assert_eq "autobranch/unfetched-origin-collision-exit-0" "0" "$STATUS" "$(evidence)"
+assert_eq "autobranch/unfetched-origin-collision-suffixed" "brain/save-$(today)-2" "$(cur_branch)" "$(evidence)"
+assert_eq "autobranch/unfetched-origin-refs-untouched" "" \
+  "$(git -C "$VAULT" for-each-ref refs/remotes 2>/dev/null)" "$(evidence)"
+# An unreachable origin degrades to the local refs; it never refuses the start.
+sb_new "main"
+GH_PATH="$GH_NONE"
+git -C "$VAULT" remote add origin "$BOX/does-not-exist.git"
+run_session --start save
+assert_eq "autobranch/unreachable-origin-exit-0" "0" "$STATUS" "$(evidence)"
+assert_eq "autobranch/unreachable-origin-bare-name" "brain/save-$(today)" "$(cur_branch)" "$(evidence)"
+
 echo "--- C. concurrency: the 2026-08-05 incident ---"
 
 # --- 7. protected branch + a live foreign session => REFUSE ---------------

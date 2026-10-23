@@ -662,10 +662,29 @@ if branch_is_protected "$CUR_BRANCH"; then
   NEW_BRANCH="brain/$SLUG-$DATE_TAG"
   n=2
   # A name taken only on origin is taken too: it is another author's PR branch, and
-  # reusing it pushes onto their PR (INNOV-333). ponytail: only as fresh as the last
-  # fetch (resume's `git fetch --prune`); vault-commit's open-PR guard is the backstop.
+  # reusing it pushes onto their PR (INNOV-333). refs/remotes is only as fresh as the
+  # last fetch, and /brain:save starts before check-freshness fetches (INNOV-410), so
+  # ask origin itself, bounded to ~10s (background job + poll, as in
+  # check-plugin-version.sh: no timeout(1) on macOS). A failed or slow probe falls
+  # back to the local refs; vault-commit's open-PR guard is the backstop.
+  REMOTE_HEADS=""
+  heads_file="$(mktemp 2>/dev/null || echo "$VAULT/.git/brain-ls-remote.$$")"
+  GIT_TERMINAL_PROMPT=0 git -C "$VAULT" ls-remote --heads origin >"$heads_file" 2>/dev/null </dev/null &
+  ls_pid=$!
+  tick=0
+  while kill -0 "$ls_pid" 2>/dev/null && [[ $tick -lt 50 ]]; do
+    tick=$((tick + 1)); sleep 0.2
+  done
+  if kill -0 "$ls_pid" 2>/dev/null; then
+    kill "$ls_pid" 2>/dev/null
+    wait "$ls_pid" 2>/dev/null
+  elif wait "$ls_pid" 2>/dev/null; then
+    REMOTE_HEADS="$(cut -f2 "$heads_file")"
+  fi
+  rm -f "$heads_file"
   while git -C "$VAULT" rev-parse --verify --quiet "refs/heads/$NEW_BRANCH" >/dev/null 2>&1 ||
-    git -C "$VAULT" rev-parse --verify --quiet "refs/remotes/origin/$NEW_BRANCH" >/dev/null 2>&1; do
+    git -C "$VAULT" rev-parse --verify --quiet "refs/remotes/origin/$NEW_BRANCH" >/dev/null 2>&1 ||
+    printf '%s\n' "$REMOTE_HEADS" | grep -qxF "refs/heads/$NEW_BRANCH"; do
     NEW_BRANCH="brain/$SLUG-$DATE_TAG-$n"
     n=$((n + 1))
   done
