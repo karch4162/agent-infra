@@ -22,6 +22,10 @@ Written to be handed to an agent verbatim.
 > - This requires a **local machine with the Claude Code CLI**. It cannot be done from a
 >   remote/headless Claude session — `/plugin` installs don't exist there.
 
+**No GitHub account is required.** The plugin installs from a public repo, and a vault is just a
+folder on disk. GitHub only comes in when you want to share or back up the vault, or the project
+you're pointing the brain at is a private repo — see **Optional — GitHub access**.
+
 **Platform status:** macOS (Apple Silicon) is verified end-to-end on a fresh machine, 2026-07-24.
 Windows and Linux commands are correct-by-documentation but **not yet run end-to-end** — if one
 diverges, that's a doc bug worth reporting, not something to improvise around.
@@ -38,19 +42,17 @@ echo "claude : $(command -v claude || echo MISSING)"
 echo "uv     : $(command -v uv     || echo MISSING)"
 echo "node   : $(node --version 2>/dev/null || echo MISSING)"
 echo "git    : $(command -v git    || echo MISSING)"
-echo "gh     : $(command -v gh     || echo MISSING)"
-echo "gh auth: $(gh auth status >/dev/null 2>&1 && echo OK || echo 'NOT LOGGED IN')"
 echo "plugin : $(claude plugin list 2>/dev/null | grep -A2 brain@agent-infra | grep -i scope || echo 'NOT INSTALLED')"
 ```
 
-*(Windows PowerShell: check each with `Get-Command claude`, `node --version`, `gh auth status`, etc.)*
+*(Windows PowerShell: check each with `Get-Command claude`, `node --version`, `git --version`, etc.)*
 
 Then route:
 
 | Profile | What you'll find | Do |
 |---|---|---|
 | **Fresh machine** (non-engineering role, nothing installed) | most rows `MISSING` | All of Parts 1–4, in order. |
-| **Existing developer machine** | `git`, `node`, often `gh` present | Skip what's present. You almost certainly still need **Part 2** (the plugin) and **3.1** (`uv`) — `uv` is not a common pre-existing tool. Confirm `gh auth` is actually logged in, not just installed. |
+| **Existing developer machine** | `git`, `node` present | Skip what's present. You almost certainly still need **Part 2** (the plugin) and **3.1** (`uv`) — `uv` is not a common pre-existing tool. |
 | **Partially set up** | `plugin` row shows `Scope: project` | Go straight to **Part 2** — that's a real defect, see the callout there. |
 
 **[STOP]** If `node` is present but below **v18**, ask before upgrading — on a developer's machine
@@ -87,11 +89,11 @@ Restart the terminal, then run `claude`.
 **Use the CLI form, not the interactive `/plugin` picker.**
 
 ```bash
-claude plugin marketplace add https://github.com/vendsy/agent-infra.git --scope user
+claude plugin marketplace add https://github.com/karch4162/agent-infra.git --scope user
 claude plugin install brain@agent-infra --scope user
 ```
 
-Restart Claude Code (or `/reload-plugins` in-session).
+The repo is public, so this needs no GitHub login. Restart Claude Code (or `/reload-plugins` in-session).
 
 > **Scope is the single biggest source of lost time in this rollout.**
 > - **user scope** — loads on every `claude` launch from any directory. `/brain:*` always exists.
@@ -121,8 +123,8 @@ the two commands above. **Don't fall back to the interactive picker** — that's
 
 ## Part 3 — What the plugin needs before it can take over
 
-Three things the plugin can't provide for itself: a runtime, GitHub access, and the repos on disk.
-Skip anything Part 0 showed as already present.
+Things the plugin can't provide for itself: a runtime, git, and two folders on disk. Skip anything
+Part 0 showed as already present.
 
 ### 3.1 — `uv`
 
@@ -147,14 +149,87 @@ Needed for the plugin's scripts and hooks.
 > be scripted and the human has to type their password. Nothing here needs it. Install it only as a
 > separate, deliberate decision to have a general package manager.
 
-**Checkpoint 3.1–3.2** — `uv --version` and `node --version` (≥ v18) both print. Restart the terminal
-first if either isn't found; both installers modify `PATH`.
+### 3.3 — git
 
-### 3.3 — GitHub access
+The vault is a git repo even when it never leaves the machine: `init` runs `git init`, and every
+save is a commit. Git is needed locally; a GitHub account is not.
+
+| Platform | Command |
+|---|---|
+| macOS | `xcode-select --install` — **[HUMAN]** click **Install** in the dialog. |
+| Windows | `winget install Git.Git` |
+| Linux | your distro's `git` package |
+
+**Checkpoint 3.1–3.3** — `uv --version`, `node --version` (≥ v18) and `git --version` all print.
+Restart the terminal first if one isn't found; the installers modify `PATH`.
+
+### 3.4 — The vault folder and the project, as siblings
+
+The brain needs two folders in the **same parent folder** (e.g. `~/Projects/`) — the sibling
+layout is what the plugin's `REPOS_DIR` resolution assumes:
+
+- **The vault** — where the brain stores its notes and graphs. Either:
+  - **an existing vault** — a team vault or a personal one like `personal-brain`, cloned or copied
+    into the parent folder (cloning a private one needs **Optional — GitHub access** first); or
+  - **a new, empty folder**, e.g. `~/Projects/my-brain`. `init` scaffolds it and runs `git init`.
+- **The project** — the code repo the brain should cover, already on disk.
+
+```bash
+mkdir -p ~/Projects/my-brain     # only for a new vault
+```
+
+*(Windows: `C:\Users\<you>\Projects\...`.)*
+
+**[STOP]** A team vault and a personal vault must not be mixed up — work code synced into a
+personal brain is a governance problem. If it isn't obvious which vault this project belongs in, ask.
+
+**Checkpoint 3.4** — both folders exist under the same parent.
+
+---
+
+## Part 4 — The handoff
+
+Start Claude Code **from inside the project checkout**:
+
+```bash
+cd ~/Projects/<project>
+claude
+```
+
+Then:
+
+```
+/brain:init
+```
+
+When it asks for the vault, pick it from the list, or choose **register a new vault** the first time
+and give it the vault folder's path from 3.4.
+
+> **[STOP] The directory guard.** `init` wires *whatever directory you are standing in*. Run it
+> somewhere that isn't a git repo — a bare terminal in `~` is the common case — and it prompts:
+> *"cwd isn't a git repo — cd to a project first / init here anyway / chat."*
+>
+> Choose **cd to a project first** and give it the project path. **Never choose "init
+> here anyway"** unless the human has explicitly said they want a vault scaffolded against that
+> exact directory. Choosing it in `~` scaffolds against their entire home folder.
+
+**Checkpoint 4 — this is the end of this guide.** `/brain:*` commands are available and `init`
+completed without error.
+
+**Hand off now.** The plugin owns everything from here: what `init` set up, how to verify it, daily
+workflow, and troubleshooting all live in the **plugin's README**. Point the human there. Don't
+answer post-handoff setup questions from this document.
+
+---
+
+## Optional — GitHub access
+
+Needed only to **share or back up the vault** (give it a GitHub remote), to clone an existing
+vault or a project that lives in a **private** repo, or for saves to land on the vault's `main`
+automatically — that landing step needs an `origin` remote and `gh`.
 
 **A genuinely fresh machine has no `gh`, no SSH keys, and no git credentials — `git clone` on a
-private repo fails outright.** This is the step most likely to be already done on a developer's
-machine and guaranteed *not* to be on anyone else's.
+private repo fails outright.**
 
 Install `gh` without Homebrew, from the release binary:
 
@@ -184,71 +259,31 @@ Wire it as git's credential helper so `clone`/`pull`/`push` just work:
 git config --global credential.helper "!gh auth git-credential"
 ```
 
-**Checkpoint 3.3** — `gh auth status` shows them logged in to github.com.
-
-**[STOP]** If they can't see `vendsy/product-standards` or `vendsy/tray-brain`, that's a
-**permissions** problem, not a setup problem — human access to `product-standards` comes from
-`product-team` membership on GitHub. Report it; don't work around it.
-
-### 3.4 — Clone the repos as siblings
-
+To back up a new vault, create an empty **private** repo and point the vault at it:
 ```bash
-git clone https://github.com/vendsy/tray-brain.git        ~/Projects/tray-brain
-git clone https://github.com/vendsy/product-standards.git ~/Projects/product-standards
+cd ~/Projects/my-brain
+gh repo create <you>/my-brain --private --source . --push
 ```
 
-*(Windows: `C:\Users\<you>\Projects\...`.)* Keep both in the **same parent folder** — the sibling
-layout is what the plugin's `REPOS_DIR` resolution assumes.
+**Checkpoint** — `gh auth status` shows them logged in to github.com.
 
-**Checkpoint 3.4** — both directories exist and contain files.
-
----
-
-## Part 4 — The handoff
-
-Start Claude Code **from inside the `product-standards` checkout**:
-
-```bash
-cd ~/Projects/product-standards
-claude
-```
-
-Then:
-
-```
-/brain:init
-```
-
-Pick the **tray-brain** vault when prompted.
-
-> **[STOP] The directory guard.** `init` wires *whatever directory you are standing in*. Run it
-> somewhere that isn't a git repo — a bare terminal in `~` is the common case — and it prompts:
-> *"cwd isn't a git repo — cd to a project first / init here anyway / chat."*
->
-> Choose **cd to a project first** and give it the `product-standards` path. **Never choose "init
-> here anyway"** unless the human has explicitly said they want a vault scaffolded against that
-> exact directory. Choosing it in `~` scaffolds against their entire home folder.
-
-**Checkpoint 4 — this is the end of this guide.** `/brain:*` commands are available and `init`
-completed without error.
-
-**Hand off now.** The plugin owns everything from here: what `init` set up, how to verify it, daily
-workflow, and troubleshooting all live in the **plugin's README**. Point the human there. Don't
-answer post-handoff setup questions from this document.
+**[STOP]** If they can't see a private repo they were told to clone, that's a **permissions**
+problem, not a setup problem — access comes from the repo's owner or org. Report it; don't work
+around it.
 
 ---
 
 ## Optional — a launcher
 
 Not required, and not the plugin's concern. It removes the last way to trip the Part 4 guard by
-always starting `claude` in the right directory.
+always starting `claude` in the right directory. Replace `<project>` with the project folder name.
 
 **macOS:**
 ```bash
 cat > ~/Desktop/"Start Brain.command" <<'EOF'
 #!/bin/zsh
 source ~/.zshrc 2>/dev/null
-cd ~/Projects/product-standards || { echo "product-standards folder not found"; exec zsh; }
+cd ~/Projects/<project> || { echo "<project> folder not found"; exec zsh; }
 exec claude
 EOF
 chmod +x ~/Desktop/"Start Brain.command"
@@ -258,7 +293,7 @@ chmod +x ~/Desktop/"Start Brain.command"
 **Windows** — save as `Start Brain.bat` on the Desktop:
 ```bat
 @echo off
-cd /d "%USERPROFILE%\Projects\product-standards" || exit /b 1
+cd /d "%USERPROFILE%\Projects\<project>" || exit /b 1
 claude
 ```
 
@@ -273,7 +308,7 @@ Anything after `/brain:init` belongs to the plugin's own troubleshooting, not he
 | `EACCES` on `npm install -g` | global `node_modules` not user-writable | Native installer (Part 1). Don't `sudo`. |
 | `/brain:*` "Unknown command" | project-scope install, or session not restarted | Restart. Then `claude plugin list` — if `Scope: project`, re-run Part 2. |
 | Works in one repo only | project-scope install | Re-run Part 2 with `--scope user`. |
-| `git clone` fails on a private repo | no GitHub auth on a fresh machine | Part 3.3. |
-| Homebrew wants a password | Homebrew requires interactive sudo | Skip it — 3.3 uses the release binary. |
+| `git clone` fails on a private repo | no GitHub auth on a fresh machine | **Optional — GitHub access**. |
+| Homebrew wants a password | Homebrew requires interactive sudo | Skip it — nothing here needs it. |
 | "cwd isn't a git repo" prompt | ran `init` outside a repo | **cd to a project first**. Never "init here anyway". |
 | `graphify` looks like a private package | the PyPI name is **`graphifyy`** (double-y); single-y 404s | It's public. `/brain:init` installs it — let the plugin do it. |
