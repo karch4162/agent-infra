@@ -10,7 +10,7 @@ multi-vault registry. Packaged so it installs in one command instead of the hand
 
 **Setting up from scratch?** [docs/onboarding-from-scratch.md](docs/onboarding-from-scratch.md) walks a
 fresh machine (Claude Code, uv, Node, git, the marketplace) up to the point where `/brain:init` takes over.
-It is written so you can hand it to an agent verbatim.
+It is written so you can hand it to an agent verbatim. Tray users: follow the same guide with the [Tray users](docs/onboarding-from-scratch.md#tray-users) changes.
 
 **Dependency direction (§16.1):** the brain is infrastructure; orchestrators (e.g. `ai-agent-manager`)
 are *consumers* that depend on it, never the reverse.

@@ -26,6 +26,24 @@ Written to be handed to an agent verbatim.
 folder on disk. GitHub only comes in when you want to share or back up the vault, or the project
 you're pointing the brain at is a private repo — see **Optional — GitHub access**.
 
+## Tray users
+
+Same guide, four differences. Tray installs from the **`vendsy/agent-infra` mirror**, not the public
+repo — that keeps Tray's install source under Tray's org.
+
+1. Do **Optional — GitHub access** right after Part 1. The mirror, vault and project are all private.
+   **[STOP]** If they can't see `vendsy/agent-infra`, `vendsy/tray-brain` or `vendsy/product-standards`,
+   that's a permissions problem — access comes from `product-team` membership. Report it.
+2. **Part 2:** add the marketplace from the mirror instead:
+   `claude plugin marketplace add https://github.com/vendsy/agent-infra.git --scope user`
+   (the install line, `brain@agent-infra`, is unchanged).
+3. **3.4:** clone the team vault and the project as siblings:
+   ```bash
+   git clone https://github.com/vendsy/tray-brain.git        ~/Projects/tray-brain
+   git clone https://github.com/vendsy/product-standards.git ~/Projects/product-standards
+   ```
+4. **Part 4:** run `/brain:init` from `~/Projects/product-standards` and pick the **tray-brain** vault.
+
 **Platform status:** macOS (Apple Silicon) is verified end-to-end on a fresh machine, 2026-07-24.
 Windows and Linux commands are correct-by-documentation but **not yet run end-to-end** — if one
 diverges, that's a doc bug worth reporting, not something to improvise around.
@@ -93,7 +111,7 @@ claude plugin marketplace add https://github.com/karch4162/agent-infra.git --sco
 claude plugin install brain@agent-infra --scope user
 ```
 
-The repo is public, so this needs no GitHub login. Restart Claude Code (or `/reload-plugins` in-session).
+The repo is public, so this needs no GitHub login. **Tray users:** use the mirror URL from **Tray users** instead. Restart Claude Code (or `/reload-plugins` in-session).
 
 > **Scope is the single biggest source of lost time in this rollout.**
 > - **user scope** — loads on every `claude` launch from any directory. `/brain:*` always exists.
