@@ -9,7 +9,7 @@ multi-vault registry. Packaged so it installs in one command instead of the hand
 `settings.json` hook + `~/.claude/skills/` + hand-written query rule the pilot runs today.
 
 **Setting up from scratch?** [docs/onboarding-from-scratch.md](docs/onboarding-from-scratch.md) walks a
-fresh machine (Claude Code, uv, Node, git, the marketplace) up to the point where `init` takes over.
+fresh machine (Claude Code, uv, Node, git, the marketplace) up to the point where `/brain:init` takes over.
 It is written so you can hand it to an agent verbatim.
 
 **Dependency direction (§16.1):** the brain is infrastructure; orchestrators (e.g. `ai-agent-manager`)

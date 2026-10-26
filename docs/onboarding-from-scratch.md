@@ -1,9 +1,9 @@
 # Machine setup — getting to the point where the brain plugin takes over
 
-**Scope: everything *before* `/tray-brain:init`. Nothing after it.**
+**Scope: everything *before* `/brain:init`. Nothing after it.**
 
-Once `/tray-brain:init` runs, the **tray-brain plugin owns the rest** — installing graphify,
-registering the `/graphify` skill, binding the vault, recording graph scope, and every `/tray-brain:*`
+Once `/brain:init` runs, the **brain plugin owns the rest** — installing graphify,
+registering the `/graphify` skill, binding the vault, recording graph scope, and every `/brain:*`
 workflow from there on. That's documented in the plugin's own README, which is the authority. This
 guide deliberately stops at the handoff and does not restate, wrap, or second-guess any of it.
 
@@ -17,7 +17,7 @@ Written to be handed to an agent verbatim.
 > - **[HUMAN]** — the person at the keyboard must act (browser login, password prompt, double-click).
 >   Stop, tell them exactly what to do, wait for confirmation.
 > - **[STOP]** — a decision where guessing causes damage. Ask; don't pick.
-> - **Do not go past Part 4.** When `/tray-brain:init` completes, hand off to the plugin README and
+> - **Do not go past Part 4.** When `/brain:init` completes, hand off to the plugin README and
 >   stop. Setup questions beyond that point are not this guide's job.
 > - This requires a **local machine with the Claude Code CLI**. It cannot be done from a
 >   remote/headless Claude session — `/plugin` installs don't exist there.
@@ -40,7 +40,7 @@ echo "node   : $(node --version 2>/dev/null || echo MISSING)"
 echo "git    : $(command -v git    || echo MISSING)"
 echo "gh     : $(command -v gh     || echo MISSING)"
 echo "gh auth: $(gh auth status >/dev/null 2>&1 && echo OK || echo 'NOT LOGGED IN')"
-echo "plugin : $(claude plugin list 2>/dev/null | grep -A2 tray-brain | grep -i scope || echo 'NOT INSTALLED')"
+echo "plugin : $(claude plugin list 2>/dev/null | grep -A2 brain@agent-infra | grep -i scope || echo 'NOT INSTALLED')"
 ```
 
 *(Windows PowerShell: check each with `Get-Command claude`, `node --version`, `gh auth status`, etc.)*
@@ -87,34 +87,34 @@ Restart the terminal, then run `claude`.
 **Use the CLI form, not the interactive `/plugin` picker.**
 
 ```bash
-claude plugin marketplace add https://github.com/vendsy/tray-brain-plugin.git --scope user
-claude plugin install tray-brain@tray-brain-marketplace --scope user
+claude plugin marketplace add https://github.com/vendsy/agent-infra.git --scope user
+claude plugin install brain@agent-infra --scope user
 ```
 
 Restart Claude Code (or `/reload-plugins` in-session).
 
 > **Scope is the single biggest source of lost time in this rollout.**
-> - **user scope** — loads on every `claude` launch from any directory. `/tray-brain:*` always exists.
+> - **user scope** — loads on every `claude` launch from any directory. `/brain:*` always exists.
 > - **project scope** — config lands in `<project>/.claude/settings.json` and loads **only** inside
->   that one repo. `/tray-brain:init` won't exist anywhere else.
+>   that one repo. `/brain:init` won't exist anywhere else.
 >
 > The interactive picker can land you at project scope depending on how you navigate it. The CLI
 > form with an explicit `--scope user` cannot. Two separate people hit "the command doesn't exist"
 > or "I have to `cd` first" — both were project-scope installs.
 >
-> Use the full `plugin@marketplace` id: bare `/plugin install tray-brain` is ambiguous once more
+> Use the full `plugin@marketplace` id: bare `/plugin install brain` is ambiguous once more
 > than one marketplace is configured.
 
 **Checkpoint 2** — `claude plugin list`. **`Scope: user` is the line that matters:**
 
 ```
-tray-brain@tray-brain-marketplace
-  Version: 0.2.5
+brain@agent-infra
+  Version: 0.15.3
   Scope: user
   Status: ✔ enabled
 ```
 
-If it says `Scope: project`, or `/tray-brain:*` is still "Unknown command" after a restart, re-run
+If it says `Scope: project`, or `/brain:*` is still "Unknown command" after a restart, re-run
 the two commands above. **Don't fall back to the interactive picker** — that's the cause, not the fix.
 
 ---
@@ -216,7 +216,7 @@ claude
 Then:
 
 ```
-/tray-brain:init
+/brain:init
 ```
 
 Pick the **tray-brain** vault when prompted.
@@ -229,7 +229,7 @@ Pick the **tray-brain** vault when prompted.
 > here anyway"** unless the human has explicitly said they want a vault scaffolded against that
 > exact directory. Choosing it in `~` scaffolds against their entire home folder.
 
-**Checkpoint 4 — this is the end of this guide.** `/tray-brain:*` commands are available and `init`
+**Checkpoint 4 — this is the end of this guide.** `/brain:*` commands are available and `init`
 completed without error.
 
 **Hand off now.** The plugin owns everything from here: what `init` set up, how to verify it, daily
@@ -266,14 +266,14 @@ claude
 
 ## Troubleshooting — pre-handoff only
 
-Anything after `/tray-brain:init` belongs to the plugin's own troubleshooting, not here.
+Anything after `/brain:init` belongs to the plugin's own troubleshooting, not here.
 
 | Symptom | Cause | Fix |
 |---|---|---|
 | `EACCES` on `npm install -g` | global `node_modules` not user-writable | Native installer (Part 1). Don't `sudo`. |
-| `/tray-brain:*` "Unknown command" | project-scope install, or session not restarted | Restart. Then `claude plugin list` — if `Scope: project`, re-run Part 2. |
+| `/brain:*` "Unknown command" | project-scope install, or session not restarted | Restart. Then `claude plugin list` — if `Scope: project`, re-run Part 2. |
 | Works in one repo only | project-scope install | Re-run Part 2 with `--scope user`. |
 | `git clone` fails on a private repo | no GitHub auth on a fresh machine | Part 3.3. |
 | Homebrew wants a password | Homebrew requires interactive sudo | Skip it — 3.3 uses the release binary. |
 | "cwd isn't a git repo" prompt | ran `init` outside a repo | **cd to a project first**. Never "init here anyway". |
-| `graphify` looks like a private package | the PyPI name is **`graphifyy`** (double-y); single-y 404s | It's public. `/tray-brain:init` installs it — let the plugin do it. |
+| `graphify` looks like a private package | the PyPI name is **`graphifyy`** (double-y); single-y 404s | It's public. `/brain:init` installs it — let the plugin do it. |
