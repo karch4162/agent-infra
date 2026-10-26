@@ -37,6 +37,13 @@
 # Any other conflicted path (logs/, graphify/, a trusted note) leaves the PR
 # open and the default branch untouched.
 #
+# NO ORIGIN (INNOV-411). A local-only vault has nowhere to push and no PR, so the
+# save lands by fast-forwarding the local default branch to this branch's tip —
+# the same .saveinclude and brain.json gates, judged against that branch's
+# committed copies. Only the ref moves (update-ref, compare-and-swap): no commit
+# lands on the default branch, which is never the checked-out branch here. A
+# default branch this save does not contain is SKIPPED, never merged.
+#
 # Usage:
 #   BRAIN_ROOT=<vault> bash land-save.sh [--title "save: <date> — <slug>"]
 #
@@ -44,6 +51,7 @@
 # 0 — landing is never allowed to fail a save; exit 1 is a usage error only.
 # The first line on stdout is one of:
 #   LAND: MERGED #<n>
+#   LAND: MERGED (local) - <what moved>  (no origin: the default branch was fast-forwarded)
 #   LAND: LEFT OPEN [#<n>] - <reason>
 #   LAND: SKIPPED - <reason>          (nothing was pushed)
 #   LAND: HOT - <what to do>          (nothing was pushed)
@@ -93,12 +101,15 @@ case "$BRANCH" in
        "  Only save PRs land automatically. Promote, ingest, verify, tidy and revise" \
        "  PRs carry trusted knowledge, and their review is the governance gate." ;;
 esac
-g remote get-url origin >/dev/null 2>&1 ||
-  skip "no 'origin' remote; the save stays a local commit on '$BRANCH'"
-command -v gh >/dev/null 2>&1 ||
-  skip "gh is not installed; the save stays a local commit on '$BRANCH'"
-(cd "$VAULT" && gh auth status >/dev/null 2>&1) ||
-  skip "gh is not authenticated (gh auth status); the save stays a local commit on '$BRANCH'"
+LOCAL=""
+if ! g remote get-url origin >/dev/null 2>&1; then
+  LOCAL=1
+else
+  command -v gh >/dev/null 2>&1 ||
+    skip "gh is not installed; the save stays a local commit on '$BRANCH'"
+  (cd "$VAULT" && gh auth status >/dev/null 2>&1) ||
+    skip "gh is not authenticated (gh auth status); the save stays a local commit on '$BRANCH'"
+fi
 
 # The ticket's own incident: a post-commit index sync that did not land. Never
 # publish on top of it, and never run the reset here — it is safe only for the
@@ -119,21 +130,37 @@ if ! g diff --cached --quiet HEAD 2>/dev/null; then
 fi
 
 # --- 2. where are we landing? -------------------------------------------------
-g fetch -q origin 2>/dev/null ||
-  skip "could not fetch origin (offline?); the save stays a local commit on '$BRANCH'"
-DEFAULT="$(detect_default_branch)"
-if [[ -z "$DEFAULT" ]]; then
-  for cand in main master; do
-    if g rev-parse -q --verify "refs/remotes/origin/$cand" >/dev/null 2>&1; then DEFAULT="$cand"; break; fi
-  done
+# ON names the base in messages: origin/<default>, or '<default>' with no origin.
+if [[ -n "$LOCAL" ]]; then
+  # The same answer reap-branches.sh (step 6b) gives: detection, then main/master.
+  DEFAULT="$(detect_default_branch)"
+  if [[ -z "$DEFAULT" ]]; then
+    for cand in main master; do
+      if g show-ref --verify --quiet "refs/heads/$cand"; then DEFAULT="$cand"; break; fi
+    done
+  fi
+  [[ -n "$DEFAULT" ]] && g show-ref --verify --quiet "refs/heads/$DEFAULT" ||
+    skip "no 'origin' remote, and no local default branch (main/master); the save stays a local commit on '$BRANCH'"
+  BASE="refs/heads/$DEFAULT"
+  ON="'$DEFAULT'"
+else
+  g fetch -q origin 2>/dev/null ||
+    skip "could not fetch origin (offline?); the save stays a local commit on '$BRANCH'"
+  DEFAULT="$(detect_default_branch)"
+  if [[ -z "$DEFAULT" ]]; then
+    for cand in main master; do
+      if g rev-parse -q --verify "refs/remotes/origin/$cand" >/dev/null 2>&1; then DEFAULT="$cand"; break; fi
+    done
+  fi
+  [[ -n "$DEFAULT" ]] && g rev-parse -q --verify "refs/remotes/origin/$DEFAULT" >/dev/null 2>&1 ||
+    skip "could not resolve origin's default branch"
+  BASE="refs/remotes/origin/$DEFAULT"
+  ON="origin/$DEFAULT"
 fi
-[[ -n "$DEFAULT" ]] && g rev-parse -q --verify "refs/remotes/origin/$DEFAULT" >/dev/null 2>&1 ||
-  skip "could not resolve origin's default branch"
-BASE="refs/remotes/origin/$DEFAULT"
 HEAD_SHA="$(g rev-parse HEAD)"
 ACK="$(g rev-parse --path-format=absolute --git-path brain-land-hot)"
 [[ "$(g rev-list --count "$BASE..HEAD" 2>/dev/null)" -gt 0 ]] ||
-  skip "nothing to land: '$BRANCH' has no commit that origin/$DEFAULT lacks"
+  skip "nothing to land: '$BRANCH' has no commit that $ON lacks"
 
 # --- 3. scope: origin's committed .saveinclude is the publish policy ----------
 # Not the working tree's copy: a locally widened allowlist must not become a
@@ -147,7 +174,7 @@ load_policy() { # loads ALLOW from origin/<default>'s .saveinclude as fetched NO
     allowlist_load "$TMP/policy" && [[ ${#ALLOW[@]} -gt 0 ]]
 }
 load_policy ||
-  skip "origin/$DEFAULT has no committed .saveinclude with entries, so nothing may be published"
+  skip "$ON has no committed .saveinclude with entries, so nothing may be published"
 outside_scope() { # tip — prints each changed path the policy does not allow
   local p
   while IFS= read -r -d '' p; do
@@ -156,7 +183,7 @@ outside_scope() { # tip — prints each changed path the policy does not allow
 }
 bad="$(outside_scope HEAD)"
 [[ -z "$bad" ]] ||
-  skip "'$BRANCH' carries path(s) outside origin/$DEFAULT's .saveinclude: $(printf '%s' "$bad" | tr '\n' ' ')" \
+  skip "'$BRANCH' carries path(s) outside $ON's .saveinclude: $(printf '%s' "$bad" | tr '\n' ' ')" \
     "  Nothing was pushed. Session output lands automatically; anything else goes" \
     "  through a reviewed PR ([[promote]])."
 # The content gate vault-commit.sh applied at commit time (INNOV-297), re-run
@@ -176,11 +203,25 @@ governance() { # tip — check-governance.mjs's output; non-zero when it refuses
     BRAIN_ROOT="$VAULT" node "$BIN_DIR/check-governance.mjs" --policy "$BASE" --tree "$1" 2>&1
 }
 gov="$(governance HEAD)" ||
-  skip "'$BRANCH' breaks origin/$DEFAULT's brain.json policy" \
+  skip "'$BRANCH' breaks $ON's brain.json policy" \
     "$(printf '%s\n' "$gov" | sed 's/^/    /')" \
     "  Nothing was pushed."
 
-# --- 4. merge, if origin moved ------------------------------------------------
+# --- 4. no origin: fast-forward the local default branch, and stop -----------
+if [[ -n "$LOCAL" ]]; then
+  OLD="$(g rev-parse "$BASE")"
+  g merge-base --is-ancestor "$OLD" HEAD ||
+    skip "no 'origin' remote, and '$DEFAULT' has commit(s) '$BRANCH' lacks; nothing was moved"       "  Something landed on '$DEFAULT' since this save branched. Reconcile by hand"       "  (merge '$DEFAULT' into '$BRANCH'), then re-run land-save."
+  # A branch checked out in another worktree must not move under that worktree.
+  ! g worktree list --porcelain 2>/dev/null | grep -qxF "branch $BASE" ||
+    skip "'$DEFAULT' is checked out in another worktree; nothing was moved"
+  g update-ref -m "land-save: fast-forward to $BRANCH" "$BASE" "$HEAD_SHA" "$OLD" 2>/dev/null ||
+    skip "could not fast-forward '$DEFAULT' (it moved meanwhile?); nothing was moved"
+  rm -f "$ACK"
+  say "MERGED (local) - fast-forwarded '$DEFAULT' to '$BRANCH'"     "  No 'origin' remote, so nothing was pushed; '$BRANCH' is now in '$DEFAULT', so step 6b reaps it."
+fi
+
+# --- 4b. merge, if origin moved -----------------------------------------------
 open_pr() {
   (cd "$VAULT" && gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number' 2>/dev/null) |
     tr -dc '0-9'

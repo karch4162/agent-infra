@@ -11,7 +11,9 @@
 # log.md (union) and hot.md (HOT, then a fold through write-hot.sh lands it, and a
 # hot.md that moved again re-HOTs); a conflict outside the known paths is LEFT
 # OPEN with origin's default untouched; graphify-out/ keeps origin's whole tree;
-# no remote / no gh auth / a non-save branch / an out-of-sync index / a path
+# no remote fast-forwards the local default branch (INNOV-411), but a moved
+# default or an out-of-scope path is SKIPPED with nothing moved; no gh auth / a
+# non-save branch / an out-of-sync index / a path
 # outside origin's .saveinclude, or content origin's brain.json now denies
 # (INNOV-297), are SKIPPED with nothing pushed; a moved remote
 # branch is never overwritten; a blocked merge is LEFT OPEN; a dirty trusted note
@@ -353,15 +355,54 @@ assert_eq "graph/origin-only-file-kept" "yes" "$(origin_has graphify-out/communi
 assert_eq "graph/mine-only-not-mixed-in" "no" "$(origin_has graphify-out/communities/mine-only.md)"
 assert_eq "graph/log-landed" "yes" "$(origin_has logs/2026-10-06-mine.md)"
 
-echo "--- 5. no remote / gh unauthenticated: SKIPPED, nothing changes ---"
+for CRLF in 0 1; do
+echo "--- 5. [crlf$CRLF] no remote: the local default branch is fast-forwarded; reap then deletes the branch (INNOV-411) ---"
 new_sandbox
 save_in "$VAULT" mine
 git -C "$VAULT" remote remove origin
+wr "$VAULT/wiki/area/note.md" 'trusted note, edited, uncommitted'
 head_before="$(git -C "$VAULT" rev-parse HEAD)"
 run_land
-assert_eq "noremote/exit-0" "0" "$ST" "$OUT"
-assert_contains "noremote/skipped" "$(first)" "LAND: SKIPPED"
-assert_eq "noremote/head-intact" "$head_before" "$(git -C "$VAULT" rev-parse HEAD)"
+assert_eq "noremote[$CRLF]/exit-0" "0" "$ST" "$OUT"
+assert_eq "noremote[$CRLF]/verdict" "LAND: MERGED (local) - fast-forwarded 'main' to 'brain/save-2026-10-06'" "$(first)" "$OUT"
+assert_eq "noremote[$CRLF]/main-is-the-save" "$head_before" "$(git -C "$VAULT" rev-parse main)"
+assert_eq "noremote[$CRLF]/still-on-branch" "brain/save-2026-10-06" "$(git -C "$VAULT" rev-parse --abbrev-ref HEAD)"
+assert_contains "noremote[$CRLF]/dirty-note-untouched" "$(git -C "$VAULT" status --porcelain)" "wiki/area/note.md"
+assert_eq "noremote[$CRLF]/no-pr-calls" "0" "$(grep -c '^pr ' "$GH_LOG" || true)"
+reap_out="$(PATH="$STUB:$PATH" GH_LOG="$GH_LOG" GH_STATE="$GH_STATE" BRAIN_ROOT="$VAULT" bash "$BIN/reap-branches.sh" 2>&1)"
+assert_contains "noremote[$CRLF]/reap-deletes-it" "$reap_out" "deleted 1 merged brain/* branch(es)"
+assert_eq "noremote[$CRLF]/reap-left-on-main" "main" "$(git -C "$VAULT" rev-parse --abbrev-ref HEAD)"
+assert_eq "noremote[$CRLF]/note-still-dirty" "trusted note, edited, uncommitted" "$(tr -d '\r' <"$VAULT/wiki/area/note.md")"
+done
+CRLF=0
+
+echo "--- 5b. no remote, the local default branch moved: SKIPPED, nothing moves ---"
+new_sandbox
+git -C "$VAULT" remote remove origin
+save_in "$VAULT" mine
+git -C "$VAULT" checkout -q main
+wr "$VAULT/logs/2026-10-06-direct.md" 'committed on main by hand'
+git -C "$VAULT" add -A; git -C "$VAULT" commit -q -m direct
+git -C "$VAULT" checkout -q brain/save-2026-10-06
+main_before="$(git -C "$VAULT" rev-parse main)"
+run_land
+assert_contains "noremote-diverged/skipped" "$(first)" "LAND: SKIPPED"
+assert_contains "noremote-diverged/says-why" "$(first)" "'main' has commit(s) 'brain/save-2026-10-06' lacks"
+assert_eq "noremote-diverged/main-unmoved" "$main_before" "$(git -C "$VAULT" rev-parse main)"
+
+echo "--- 5c. no remote, a path outside main's .saveinclude: SKIPPED, nothing moves ---"
+new_sandbox
+git -C "$VAULT" remote remove origin
+save_in "$VAULT" mine
+wr "$VAULT/wiki/area/note.md" 'trusted edit on a save branch'
+git -C "$VAULT" commit -qam "sneak a trusted note"
+main_before="$(git -C "$VAULT" rev-parse main)"
+run_land
+assert_contains "noremote-scope/skipped" "$(first)" "LAND: SKIPPED"
+assert_contains "noremote-scope/names-path" "$(first)" "wiki/area/note.md"
+assert_eq "noremote-scope/main-unmoved" "$main_before" "$(git -C "$VAULT" rev-parse main)"
+
+echo "--- 5d. gh unauthenticated (with an origin): SKIPPED, nothing pushed ---"
 new_sandbox
 save_in "$VAULT" mine
 GH_AUTH_RC=1 run_land
