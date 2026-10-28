@@ -7,7 +7,7 @@ description: "Turn /brain:verify's saved could-not-tell evidence into approved b
 
 ## Portable hosts and URL-backed vaults
 
-In Codex, Grok Build, Grok Bot, or a project using a .brain/config.json binding, read [the shared workflow](../../references/portable.md) first and use its matching command flow. It supplies neutral configuration, isolated sessions, and host-specific adaptations. For legacy Claude projects, the workflow below remains supported.
+In Codex, GitHub Copilot CLI, Grok Build, Grok Bot, or a project using a .brain/config.json binding, read [the shared workflow](../../references/portable.md) first and use its matching command flow. It supplies neutral configuration, isolated sessions, and host-specific adaptations. For legacy Claude projects, the workflow below remains supported.
 
 
 Companion to `/brain:verify`. Verify never edits a trusted note's body, so a note that is right in substance but cites a moved line (`line-drift`) or makes one wrong secondary claim (`side-claim`) stays wrong, and stays stale, because verify will not bump a note whose body cites the wrong thing. Revise reads verify's saved evidence from `logs/verify-findings.json`, proposes the smallest body edit for each, applies only what a person approves, re-checks the note against code, and ships one PR.

@@ -1,6 +1,6 @@
 # Shared Brain workflows
 
-Use this reference in Codex, Grok Build, Grok Bot, or any host using a project `.brain/config.json` binding. Claude Code projects without that binding can continue using the existing skill body. The portable command implementations own configuration and mechanical save operations; do not combine their save preparation with the legacy save's pin/write/commit sequence.
+Use this reference in Codex, GitHub Copilot CLI, Grok Build, Grok Bot, or any host using a project `.brain/config.json` binding. Claude Code projects without that binding can continue using the existing skill body. The portable command implementations own configuration and mechanical save operations; do not combine their save preparation with the legacy save's pin/write/commit sequence.
 
 ## Runtime and location
 
@@ -53,7 +53,7 @@ For doctor, inspect `capabilities`, `status`, `graph status`, the neutral regist
 
 ## Transcript import
 
-Run `harvest --provider claude|codex|grok|grok-bot --input FILE --repo CANONICAL_NAME`. Use the host's explicitly identified transcript/export path. Claude and Codex JSONL readers accept known message envelopes and drop reasoning/tool payloads; their native storage formats may change. Grok and Grok Bot use this portable JSON export until a native transcript contract is verified:
+Run `harvest --provider claude|codex|copilot|grok|grok-bot --input FILE --repo CANONICAL_NAME`. Use the host's explicitly identified transcript/export path. Claude, Codex and Copilot (`~/.copilot/session-state/<id>/events.jsonl`; its `agentStop` hook passes that path as `transcriptPath`) JSONL readers accept known message envelopes and drop reasoning/tool payloads; their native storage formats may change. Grok and Grok Bot use this portable JSON export until a native transcript contract is verified:
 
 ```json
 {"version":1,"sessionId":"stable-id","turns":[{"role":"user","text":"Question"},{"role":"assistant","text":"Answer"}]}
@@ -65,5 +65,6 @@ Only export user-visible conversation text. Digests remain under gitignored `cha
 
 - Claude Code: existing marketplace and hook compatibility are retained.
 - Codex: `.codex-plugin/plugin.json` packages these same skills. Use its native plugin installation flow; no Claude setup is required for portable commands.
+- GitHub Copilot CLI: `copilot plugin marketplace add karch4162/agent-infra` then `copilot plugin install brain@agent-infra`. Skills are model-invoked (no `/brain:*` commands) and Copilot does not expand `${CLAUDE_PLUGIN_ROOT}` inside skill bodies, so always use this portable flow; its shell tool is PowerShell on Windows. The graph nudge is a `sessionStart` hook in the generated `com.github.copilot/hooks/hooks.json` (Copilot's preToolUse cannot return context).
 - Grok Build: load this plugin through its documented Claude-plugin compatibility or `--plugin-dir`. The hook normalizes both field-name styles; verify actual context delivery in a live session. If the host does not deliver hook context, rely on the explicit query rule in the skill/instruction file.
 - Grok Bot: install the source/runtime on its cloud computer and enable the shared skill instructions using its supported private-skill flow. Bind a URL-backed vault there. CLI operation is the baseline; native hook and plugin-import parity are not assumed.

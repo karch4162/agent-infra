@@ -7,7 +7,7 @@ description: "Guided draft→trusted promotion: triage wiki/_drafts/ (keep / mer
 
 ## Portable hosts and URL-backed vaults
 
-In Codex, Grok Build, Grok Bot, or a project using a .brain/config.json binding, read [the shared workflow](../../references/portable.md) first and use its matching command flow. It supplies neutral configuration, isolated sessions, and host-specific adaptations. For legacy Claude projects, the workflow below remains supported.
+In Codex, GitHub Copilot CLI, Grok Build, Grok Bot, or a project using a .brain/config.json binding, read [the shared workflow](../../references/portable.md) first and use its matching command flow. It supplies neutral configuration, isolated sessions, and host-specific adaptations. For legacy Claude projects, the workflow below remains supported.
 
 
 Companion to `/brain:wiki-ingest` (which creates drafts) and `/brain:freshness` (which flags rot). Ingest fills `wiki/_drafts/`; promote is the review gate that empties it. It automates the mechanical toil of the README's "Promoting a draft → trusted" flow while **keeping the human as the gate**: nothing moves without a per-draft decision, and trusted-note changes ship as a PR — the PR *is* the promotion.

@@ -7,7 +7,7 @@ description: "Distill harvested Claude Code session digests (chats/) into DRAFT 
 
 ## Portable hosts and URL-backed vaults
 
-In Codex, Grok Build, Grok Bot, or a project using a .brain/config.json binding, read [the shared workflow](../../references/portable.md) first and use its matching command flow. It supplies neutral configuration, isolated sessions, and host-specific adaptations. For legacy Claude projects, the workflow below remains supported.
+In Codex, GitHub Copilot CLI, Grok Build, Grok Bot, or a project using a .brain/config.json binding, read [the shared workflow](../../references/portable.md) first and use its matching command flow. It supplies neutral configuration, isolated sessions, and host-specific adaptations. For legacy Claude projects, the workflow below remains supported.
 
 
 Turns raw harvested session digests into atomic **draft** wiki notes. This is the distill half of the harvest pipeline; the mechanical copy half is `${CLAUDE_PLUGIN_ROOT}/bin/harvest-chats.mjs`. Per POC §8 governance, **auto-ingested knowledge is never written straight into trusted `wiki/` areas** — it lands as drafts in `wiki/_drafts/` and is promoted only by review.
