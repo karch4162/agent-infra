@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/graph-before-grep.mjs\" --event session-start",
+        "timeoutSec": 10
+      }
+    ]
+  }
+}

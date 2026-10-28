@@ -7,7 +7,7 @@ description: "Turn ONE named wiki-graph community into a synthesis DRAFT (a clai
 
 ## Portable hosts and URL-backed vaults
 
-In Codex, Grok Build, Grok Bot, or a project using a .brain/config.json binding, read [the shared workflow](../../references/portable.md) first and use its matching command flow. It supplies neutral configuration, isolated sessions, and host-specific adaptations. For legacy Claude projects, the workflow below remains supported.
+In Codex, GitHub Copilot CLI, Grok Build, Grok Bot, or a project using a .brain/config.json binding, read [the shared workflow](../../references/portable.md) first and use its matching command flow. It supplies neutral configuration, isolated sessions, and host-specific adaptations. For legacy Claude projects, the workflow below remains supported.
 
 
 The wiki concept graph already clusters notes (graphify Louvain), `/brain:label` already names the clusters, and `bin/build-community-notes.mjs` already writes a stub per community in `graphify-out/communities/`. A stub is a table of contents. This skill turns one into an **argument**: what the cluster collectively shows, every principle linked to the member notes that support it.

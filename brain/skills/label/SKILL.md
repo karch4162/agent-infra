@@ -7,7 +7,7 @@ description: "Name a graph mirror's communities vault-side — no repo checkout,
 
 ## Portable hosts and URL-backed vaults
 
-In Codex, Grok Build, Grok Bot, or a project using a .brain/config.json binding, read [the shared workflow](../../references/portable.md) first and use its matching command flow. It supplies neutral configuration, isolated sessions, and host-specific adaptations. For legacy Claude projects, the workflow below remains supported.
+In Codex, GitHub Copilot CLI, Grok Build, Grok Bot, or a project using a .brain/config.json binding, read [the shared workflow](../../references/portable.md) first and use its matching command flow. It supplies neutral configuration, isolated sessions, and host-specific adaptations. For legacy Claude projects, the workflow below remains supported.
 
 
 Fixes the two freshness findings **"Graph mirrors never labeled (no community report)"** and **"all-generic community labels"** without touching any repo checkout. A mirror's `graph.json` carries every node's `community` id, member labels, and `source_file` — naming a cluster is a pure function of that data. The mirror is self-sufficient.

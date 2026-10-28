@@ -7,7 +7,7 @@ description: "Apply the mechanical tier of a freshness report as one reviewed ba
 
 ## Portable hosts and URL-backed vaults
 
-In Codex, Grok Build, Grok Bot, or a project using a .brain/config.json binding, read [the shared workflow](../../references/portable.md) first and use its matching command flow. It supplies neutral configuration, isolated sessions, and host-specific adaptations. For legacy Claude projects, the workflow below remains supported.
+In Codex, GitHub Copilot CLI, Grok Build, Grok Bot, or a project using a .brain/config.json binding, read [the shared workflow](../../references/portable.md) first and use its matching command flow. It supplies neutral configuration, isolated sessions, and host-specific adaptations. For legacy Claude projects, the workflow below remains supported.
 
 
 Companion to `/brain:freshness`. Freshness produces the review queue; tidy turns the **mechanical, non-destructive** subset into one proposed batch, gets a single approval, and applies it. Per POC §8 the human stays in the loop — tidy just moves the gate from "85 individual decisions" to "one review of a diff."

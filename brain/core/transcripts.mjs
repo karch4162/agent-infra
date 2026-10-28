@@ -5,7 +5,7 @@ import { digest, git } from './runtime.mjs';
 const textBlocks = content => typeof content === 'string' ? content : Array.isArray(content)
   ? content.filter(b => ['text', 'input_text', 'output_text'].includes(b?.type) && typeof b.text === 'string').map(b => b.text).join('\n\n') : '';
 export function normalizeTranscript(provider, input) {
-  if (!['claude', 'codex', 'grok', 'grok-bot', 'normalized'].includes(provider)) throw new Error('Unsupported transcript provider.');
+  if (!['claude', 'codex', 'copilot', 'grok', 'grok-bot', 'normalized'].includes(provider)) throw new Error('Unsupported transcript provider.');
   let sessionId = null; const turns = [];
   const add = (role, text) => {
     if (!['user', 'assistant'].includes(role) || typeof text !== 'string' || !text.trim()) return;
@@ -15,9 +15,13 @@ export function normalizeTranscript(provider, input) {
   if (!Array.isArray(input) && input?.version === 1 && Array.isArray(input.turns)) {
     sessionId = input.sessionId;
     for (const turn of input.turns) add(turn.role, turn.text);
-  } else if (Array.isArray(input) && ['claude', 'codex'].includes(provider)) {
+  } else if (Array.isArray(input) && ['claude', 'codex', 'copilot'].includes(provider)) {
     for (const event of input) {
-      if (provider === 'claude') {
+      if (provider === 'copilot') {
+        // ~/.copilot/session-state/<id>/events.jsonl; `content` is the user-visible text, `transformedContent` embeds host reminders.
+        if (event.type === 'session.start') sessionId ||= event.data?.sessionId;
+        if (['user.message', 'assistant.message'].includes(event.type)) add(event.type.split('.')[0], event.data?.content);
+      } else if (provider === 'claude') {
         sessionId ||= event.sessionId;
         if (['user', 'assistant'].includes(event.type)) add(event.message?.role, textBlocks(event.message?.content));
       } else {

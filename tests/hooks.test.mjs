@@ -20,6 +20,25 @@ test('hook recognizes Claude, Codex and Grok events without conflating repos', t
   assert.match(call({ cwd: roots[0], sessionId: randomUUID(), toolName: 'Bash', toolInput: { command: 'rg hello' } }), /graph-before-grep/);
   assert.equal(call({ cwd: roots[0], session_id: randomUUID(), tool_name: 'Grep', tool_input: { path: roots[0] + '-outside' } }), '');
 });
+test('Copilot sessionStart run gates on the payload cwd and returns top-level additionalContext (INNOV-413)', t => {
+  const base = mkdtempSync(join(tmpdir(), 'brain-hooks-'));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const repo = join(base, 'repo');
+  mkdirSync(join(repo, 'graphify-out'), { recursive: true }); writeFileSync(join(repo, 'graphify-out/graph.json'), '{}');
+  // The process cwd is the plugin dir on Copilot; only the payload cwd may count.
+  const call = input => spawnSync(process.execPath, [hook, '--event', 'session-start'], { cwd: base, input: JSON.stringify(input), encoding: 'utf8' }).stdout;
+  const id = randomUUID();
+  const out = JSON.parse(call({ sessionId: id, cwd: repo, source: 'new' }));
+  assert.match(out.additionalContext, /graph-before-grep/);
+  assert.equal(out.hookSpecificOutput, undefined);
+  assert.equal(call({ sessionId: id, cwd: repo, source: 'new' }), '', 'once per session');
+  assert.equal(call({ sessionId: randomUUID(), cwd: join(base, 'bare'), source: 'new' }), '', 'silent without a graph');
+  const copilot = JSON.parse(readFileSync(fileURLToPath(new URL('../brain/com.github.copilot/hooks/hooks.json', import.meta.url)), 'utf8'));
+  const [entry] = copilot.hooks.sessionStart;
+  assert.match(entry.bash, /graph-before-grep\.mjs" --event session-start/);
+  assert.equal(entry.command, undefined, 'command runs under PowerShell on Windows');
+  assert.equal(copilot.hooks.preToolUse, undefined, 'Copilot preToolUse cannot return context');
+});
 test('reminder bounds caller lists and leads with exact-name commands (INNOV-356)', t => {
   const root = mkdtempSync(join(tmpdir(), 'brain-hooks-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));

@@ -20,7 +20,10 @@
 // or are advisory (stale). Even fresh, a caller list is only a minimum: graphify
 // does not resolve types (INNOV-356).
 //
-// Registered via this plugin's hooks/hooks.json (matcher "Grep|Bash"). The
+// Registered via this plugin's hooks/hooks.json (matcher "Grep|Bash"). Copilot CLI
+// runs it with `--event session-start` instead (INNOV-413): its preToolUse cannot
+// return context and its hook cwd is the plugin dir, so the gate uses the payload cwd
+// and the reminder is returned as top-level additionalContext on sessionStart. The
 // `graphify-out/graph.json` presence test is the frozen detection contract that
 // consumers (e.g. ai-agent-manager) also read — do not change it without a
 // Track B handshake (POC §17.1).
@@ -51,15 +54,18 @@ try {
   process.exit(0); // malformed payload → stay out of the way
 }
 
+const sessionStart = process.argv[process.argv.indexOf('--event') + 1] === 'session-start';
 const toolInput = input.tool_input || input.toolInput || {};
 const cwd = resolve(toolInput.workdir || input.cwd || input.workspaceRoot || process.cwd());
 const rawToolName = input.tool_name || input.toolName || '';
 const toolName = /^(Bash|bash|exec_command|shell_command|shell)$/.test(rawToolName) ? 'Bash'
   : /^(Grep|grep)$/.test(rawToolName) ? 'Grep' : rawToolName;
 
-// Only care about text-search tools.
-let isSearch = false;
-if (toolName === 'Grep') {
+// Only care about text-search tools (a sessionStart run has no tool: nudge once up front).
+let isSearch = sessionStart;
+if (sessionStart) {
+  // nothing to inspect
+} else if (toolName === 'Grep') {
   isSearch = true;
 } else if (toolName === 'Bash') {
   const cmd = String(toolInput.command || toolInput.cmd || '');
@@ -143,7 +149,7 @@ const reminder =
   'search raw. (Non-blocking.)';
 
 process.stdout.write(
-  JSON.stringify({
+  JSON.stringify(sessionStart ? { additionalContext: reminder } : {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       additionalContext: reminder,

@@ -22,7 +22,7 @@ try {
   if (command === 'init') result = initVault(options);
   else if (command === 'capabilities') result = { version: 1, pluginRoot, storage: 'local-git', runtime: { node: process.version, platform: process.platform },
     workflows: ['URL-vaults', 'isolated-sessions', 'save', 'context', 'graph-inputs', 'maintenance', 'publish'],
-    hosts: { claude: 'skills-and-hooks', codex: 'skills-and-hooks', grok: 'skills-and-hook-input-normalization', 'grok-bot': 'terminal-and-skills' },
+    hosts: { claude: 'skills-and-hooks', codex: 'skills-and-hooks', copilot: 'skills-and-session-start-hook', grok: 'skills-and-hook-input-normalization', 'grok-bot': 'terminal-and-skills' },
     extraction: 'Use the installed graphify skill in the host session; no automatic API fallback.',
     limitations: ['Host installation and hook delivery require live validation.', 'Grok Bot uses its own cloud checkout.', 'Semantic graph builds and trusted-note promotion remain agent workflows.'] };
   else if (command === 'graph') {
