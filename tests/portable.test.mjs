@@ -195,3 +195,34 @@ test('resume reports the harvest backlog, omits it when empty, and survives a fa
   assert.equal(broken.state, 'context');
   assert.equal('backlog' in broken, false);
 });
+
+test('graph build without --session commits the mirror on a managed session branch and leaves the base clean (INNOV-415)', t => {
+  const f = fixture(t);
+  const bound = f.run('init', '--vault', pathToFileURL(f.remote).href); assert.equal(bound.exit, 0, JSON.stringify(bound));
+  const base = bound.vault.path; // the clone under BRAIN_HOME, not the fixture source
+  mkdirSync(join(f.project, 'src')); writeFileSync(join(f.project, 'src/a.js'), 'export const a = 1;'); writeFileSync(join(f.project, '.gitignore'), 'graphify-out/\n.graphifyignore\n');
+  git(f.project, 'init', '-b', 'main'); git(f.project, 'add', '.'); git(f.project, 'commit', '-m', 'seed');
+  const fake = join(f.dir, 'fake-graphify.mjs');
+  writeFileSync(fake, `import { mkdirSync, writeFileSync } from 'node:fs';
+if (process.argv[2] === '--version') { console.log('graphify 0.0.0-fake'); process.exit(0); }
+mkdirSync('graphify-out', { recursive: true });
+writeFileSync('graphify-out/graph.json', JSON.stringify({ nodes: [{ id: 'a', label: 'a', source_file: 'src/a.js', community: 0 }], links: [] }));`);
+  const env = { BRAIN_GRAPHIFY: JSON.stringify([process.execPath, fake]) };
+  const built = f.run('graph', 'build', '--root', f.project, '--stack', 'node-ts', env);
+  assert.equal(built.state, 'built', JSON.stringify(built));
+  assert.equal(built.sync.state, 'synced', built.sync.output);
+  assert.equal(built.commit.state, 'committed', built.commit.output);
+  assert.match(built.session.id, /^[0-9a-f-]{36}$/); assert.match(built.session.branch, /^brain\/session-/);
+  assert.equal(git(base, 'status', '--porcelain'), '', 'base checkout untouched');
+  assert.match(git(base, 'branch', '--list', 'brain/session-*'), /brain\/session-/);
+  assert.match(git(built.session.path, 'log', '-1', '--format=%s'), /graph mirror/);
+  assert.ok(existsSync(join(built.session.path, 'graphify/project/graph.json')));
+  assert.equal(git(built.session.path, 'status', '--porcelain'), '', 'nothing left uncommitted in the worktree');
+  // The returned id carries the conversation into the save.
+  assert.equal(f.run('save', 'prepare', '--session', built.session.id).state, 'prepared');
+  // A dirty base refuses with a non-destructive remedy, never a bare 'resolve it'.
+  writeFileSync(join(base, 'stray.md'), 'x');
+  const refused = f.run('session', 'start', '--session', 'another');
+  assert.equal(refused.state, 'error');
+  assert.match(refused.error, /local-changes/); assert.match(refused.error, /Do not discard/); assert.match(refused.error, /stash push --include-untracked/);
+});

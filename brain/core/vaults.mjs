@@ -138,7 +138,13 @@ export function startSession(vault, id) {
     let record = getSession(vault, id);
     if (!record) {
       const sync = syncVault(vault);
-      if (!['current', 'updated', 'offline-snapshot', 'no-upstream'].includes(sync.state)) throw new Error(`Vault is ${sync.state}; resolve it before starting a new isolated session.`);
+      if (!['current', 'updated', 'offline-snapshot', 'no-upstream'].includes(sync.state)) {
+        // INNOV-415: 'resolve it' alone was read as 'make it clean' and the work was discarded.
+        const remedy = sync.state === 'local-changes'
+          ? `Uncommitted work sits in the base checkout at ${vault.path}. Do not discard it (no git clean, reset --hard or checkout --). Commit it on a branch, or set it aside recoverably with 'git stash push --include-untracked', then start the session. An untracked graphify/<repo>/ mirror is rebuilt by graph build, which commits on the session branch.`
+          : `The base checkout at ${vault.path} is ${sync.state} of its upstream. Push or open a PR for local commits, pull with --ff-only for remote ones; never reset or force-push.`;
+        throw new Error(`Vault is ${sync.state}; resolve it before starting a new isolated session. ${remedy}`);
+      }
       const path = join(home(), 'worktrees', vault.id, digest(id));
       const branch = `brain/session-${digest(id)}`;
       mkdirSync(dirname(path), { recursive: true });
