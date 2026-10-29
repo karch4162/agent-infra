@@ -33,7 +33,7 @@ try {
     else if (action === 'status') result = graphStatus(root, options.extractor);
     else throw new Error('Use graph build, prepare, record, or status.');
   }
-  else if (!command || command === 'help') result = { commands: ['init --vault <URL-or-path>', 'status', 'sync', 'session start --session <stable-id>', 'session end --session <stable-id>', 'context --task <text> --budget <words>', 'graph build --root <repo> --stack <stack> [--scopes JSON] [--session <id>]', 'graph status --root <repo>', 'save prepare --session <id>', 'save apply --session <id> --input <JSON-file>'], options: ['--project <path>', '--vault <name-or-path>', '--checkout <path>', '--repos-dir <path>'] };
+  else if (!command || command === 'help') result = { commands: ['init --vault <URL-or-path>', 'status', 'sync', 'session start --session <stable-id>', 'session end --session <stable-id>', 'context --task <text> --budget <words>', 'graph build --root <repo> --stack <stack> [--scopes JSON] [--session <id>]', 'graph status --root <repo>', 'save prepare --session <id>', 'save apply --session <id> --input <JSON-file>', 'land --session <id>'], options: ['--project <path>', '--vault <name-or-path>', '--checkout <path>', '--repos-dir <path>'] };
   else {
     // graph build reads the binding from the repo being built, not the cwd (INNOV-414).
     if (command === 'graph') options.project = options.root || process.cwd();
@@ -65,6 +65,15 @@ try {
       result = { ...context(target, options.task, options.budget ? Number(options.budget) : undefined), sync, backlog };
     }
     else if (command === 'publish') result = publishSession(vault, options.session);
+    else if (command === 'land') {
+      // INNOV-416: land the session's saves on the default branch. The remote decides how
+      // (PR on GitHub, fast-forward push elsewhere, local fast-forward with no origin).
+      if (!session || session.endedAt) throw new Error('land requires an active --session.');
+      const output = runMaintenance('land-save.sh', [], target.path, options.session);
+      const verdict = output.split('\n')[0].trim();
+      const state = /^LAND: MERGED/.test(verdict) ? 'merged' : /^LAND: LEFT OPEN/.test(verdict) ? 'left-open' : /^LAND: HOT/.test(verdict) ? 'hot' : 'skipped';
+      result = { state, verdict, output, sync: syncVault(vault) };
+    }
     else if (command === 'harvest') {
       if (!options.input || !options.provider) throw new Error('harvest requires --provider and --input.');
       result = importTranscript(target, options.provider, options.input, options.repo);

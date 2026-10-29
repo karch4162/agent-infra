@@ -226,3 +226,46 @@ writeFileSync('graphify-out/graph.json', JSON.stringify({ nodes: [{ id: 'a', lab
   assert.equal(refused.state, 'error');
   assert.match(refused.error, /local-changes/); assert.match(refused.error, /Do not discard/); assert.match(refused.error, /stash push --include-untracked/);
 });
+
+test('land puts a session save on the default branch without GitHub: fast-forward push with a bare origin, local fast-forward with none (INNOV-416)', t => {
+  const f = fixture(t);
+  const save = (id, title) => {
+    assert.equal(f.run('session', 'start', '--session', id).state, 'active');
+    const prep = f.run('save', 'prepare', '--session', id); assert.equal(prep.state, 'prepared', JSON.stringify(prep));
+    const payload = join(f.dir, `${id}.json`);
+    writeFileSync(payload, JSON.stringify({ preparation: prep.preparation, title, summary: 'summary', hot: 'Current focus\n' }));
+    const saved = f.run('save', 'apply', '--session', id, '--input', payload); assert.equal(saved.state, 'saved-locally', JSON.stringify(saved));
+    return saved.commit;
+  };
+  // 1. The fixture remote is a local bare repo: not GitHub, so the landing is a fast-forward push.
+  const bound = f.run('init', '--vault', pathToFileURL(f.remote).href); assert.equal(bound.exit, 0, JSON.stringify(bound));
+  assert.equal(f.run('status').landing, 'fast-forward');
+  const commit = save('writer', 'Landed over a bare origin');
+  const landed = f.run('land', '--session', 'writer');
+  assert.equal(landed.state, 'merged', JSON.stringify(landed));
+  assert.match(landed.verdict, /^LAND: MERGED \(fast-forward\)/);
+  assert.equal(git(f.remote, 'rev-parse', 'main'), commit, 'origin main is the save');
+  assert.equal(landed.sync.state, 'updated', JSON.stringify(landed.sync));
+  assert.equal(git(bound.vault.path, 'rev-parse', 'HEAD'), commit, 'base checkout followed');
+  assert.equal(f.run('land', '--session', 'missing').state, 'error');
+  // 2. A vault that is just a folder under git, no origin at all: the base checkout is fast-forwarded.
+  const folder = join(f.dir, 'folder-vault'); mkdirSync(join(folder, 'wiki'), { recursive: true });
+  writeFileSync(join(folder, 'wiki/hot.md'), 'Initial\n'); writeFileSync(join(folder, '.gitignore'), '.brain/\n');
+  writeFileSync(join(folder, '.saveinclude'), readFileSync(join(root, 'brain/templates/saveinclude')));
+  git(folder, 'init', '-b', 'main'); git(folder, 'config', 'user.name', 'Test'); git(folder, 'config', 'user.email', 'test@example.invalid');
+  git(folder, 'add', '.'); git(folder, 'commit', '-m', 'seed');
+  const project2 = join(f.dir, 'project2'); mkdirSync(project2);
+  const run2 = (...args) => { const r = spawnSync(process.execPath, [cli, ...args], { cwd: project2, env: { ...process.env, BRAIN_HOME: f.home, BRAIN_ROOT: '', BRAIN_SESSION_ID: '', CLAUDE_PROJECT_DIR: '', GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.invalid', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.invalid' }, encoding: 'utf8' }); try { return JSON.parse(r.stdout); } catch { return { output: r.stdout, error: r.stderr, state: 'error' }; } };
+  assert.equal(run2('init', '--vault', folder).state, 'bound');
+  assert.equal(run2('status').landing, 'local');
+  assert.equal(run2('session', 'start', '--session', 'solo').state, 'active', 'a no-origin vault can start a session');
+  const prep = run2('save', 'prepare', '--session', 'solo'); assert.equal(prep.state, 'prepared', JSON.stringify(prep));
+  const payload = join(f.dir, 'solo.json');
+  writeFileSync(payload, JSON.stringify({ preparation: prep.preparation, title: 'Landed locally', summary: 'summary', hot: 'Current focus\n' }));
+  const saved = run2('save', 'apply', '--session', 'solo', '--input', payload); assert.equal(saved.state, 'saved-locally', JSON.stringify(saved));
+  const local = run2('land', '--session', 'solo');
+  assert.equal(local.state, 'merged', JSON.stringify(local));
+  assert.match(local.verdict, /^LAND: MERGED \(local\)/);
+  assert.equal(git(folder, 'rev-parse', 'main'), saved.commit, 'the folder vault main is the save');
+  assert.equal(git(folder, 'status', '--porcelain'), '');
+});

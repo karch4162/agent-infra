@@ -197,9 +197,11 @@ other_lands() { # tag [extra-fn]
 }
 run_land() { # [args...] -> OUT, ST
   OUT="$(cd "$VAULT" && PATH="$STUB:$PATH" GH_LOG="$GH_LOG" GH_STATE="$GH_STATE" GH_ORIGIN="$ORIGIN" \
-    BRAIN_ROOT="$VAULT" bash "$LAND" "$@" 2>&1)"
+    LAND_GITHUB_HOSTS="${LAND_HOSTS:-origin.git}" BRAIN_ROOT="${LAND_IN:-$VAULT}" bash "$LAND" "$@" 2>&1)"
   ST=$?
 }
+# The fixture origin is a local bare repo: LAND_GITHUB_HOSTS=origin.git makes land-save treat
+# it as GitHub (PR mode, the stub gh). LAND_HOSTS=github.com leaves it as what it is.
 origin_has() { git -C "$ORIGIN" cat-file -e "main:$1" 2>/dev/null && echo yes || echo no; }
 origin_show() { git -C "$ORIGIN" show "main:$1" 2>/dev/null | tr -d '\r'; }
 origin_main() { git -C "$ORIGIN" rev-parse main; }
@@ -402,13 +404,16 @@ assert_contains "noremote-scope/skipped" "$(first)" "LAND: SKIPPED"
 assert_contains "noremote-scope/names-path" "$(first)" "wiki/area/note.md"
 assert_eq "noremote-scope/main-unmoved" "$main_before" "$(git -C "$VAULT" rev-parse main)"
 
-echo "--- 5d. gh unauthenticated (with an origin): SKIPPED, nothing pushed ---"
+echo "--- 5d. gh unauthenticated (with a GitHub origin): fast-forward push, no PR (INNOV-416) ---"
 new_sandbox
 save_in "$VAULT" mine
+head_before="$(git -C "$VAULT" rev-parse HEAD)"
 GH_AUTH_RC=1 run_land
-assert_contains "noauth/skipped" "$(first)" "LAND: SKIPPED"
-assert_contains "noauth/says-gh" "$(first)" "gh"
-assert_eq "noauth/nothing-pushed" "none" "$(remote_branch brain/save-2026-10-06)"
+assert_eq "noauth/verdict" "LAND: MERGED (fast-forward) - pushed 'brain/save-2026-10-06' to origin/main" "$(first)" "$OUT"
+assert_contains "noauth/says-why" "$OUT" "gh is not authenticated"
+assert_eq "noauth/origin-main-is-the-save" "$head_before" "$(origin_main)"
+assert_eq "noauth/remote-branch-deleted" "none" "$(remote_branch brain/save-2026-10-06)"
+assert_eq "noauth/no-pr-calls" "0" "$(gh_called 'pr ')"
 
 echo "--- 6. a non-save branch is never landed ---"
 new_sandbox
@@ -539,6 +544,63 @@ assert_contains "narrowed/left-open" "$(first)" "LAND: LEFT OPEN #1"
 assert_contains "narrowed/names-path" "$(first)" "logs/2026-10-06-mine.md"
 assert_eq "narrowed/no-merge" "0" "$(gh_called 'pr merge')"
 assert_eq "narrowed/log-not-published" "no" "$(origin_has logs/2026-10-06-mine.md)"
+
+echo "--- 14. a non-GitHub origin (local bare repo): fast-forward push, no gh involved (INNOV-416) ---"
+new_sandbox
+save_in "$VAULT" mine
+head_before="$(git -C "$VAULT" rev-parse HEAD)"
+LAND_HOSTS=github.com run_land
+assert_eq "ff/exit-0" "0" "$ST" "$OUT"
+assert_eq "ff/verdict" "LAND: MERGED (fast-forward) - pushed 'brain/save-2026-10-06' to origin/main" "$(first)" "$OUT"
+assert_contains "ff/says-why" "$OUT" "origin is not a GitHub remote"
+assert_eq "ff/origin-main-is-the-save" "$head_before" "$(origin_main)"
+assert_eq "ff/log-on-origin" "yes" "$(origin_has logs/2026-10-06-mine.md)"
+assert_eq "ff/remote-branch-deleted" "none" "$(remote_branch brain/save-2026-10-06)"
+assert_eq "ff/no-gh-calls" "0" "$(gh_called '')"
+reap_out="$(PATH="$STUB:$PATH" GH_LOG="$GH_LOG" GH_STATE="$GH_STATE" BRAIN_ROOT="$VAULT" bash "$BIN/reap-branches.sh" 2>&1)"
+assert_eq "ff/reaped" "" "$(git -C "$VAULT" branch --list brain/save-2026-10-06)" "$reap_out"
+
+echo "--- 14b. non-GitHub origin, origin's main moved on log.md: union merge, then fast-forward push ---"
+new_sandbox
+save_in "$VAULT" mine
+other_lands other
+# keep hot.md out of this case: the save already carries origin's version
+wr "$VAULT/wiki/hot.md" '# Hot cache' '' 'focus other'
+git -C "$VAULT" commit -qam "fold hot"
+LAND_HOSTS=github.com run_land
+assert_eq "ff-moved/verdict" "LAND: MERGED (fast-forward) - pushed 'brain/save-2026-10-06' to origin/main" "$(first)" "$OUT"
+assert_contains "ff-moved/resolved-union" "$OUT" "resolved: wiki/log.md (union)"
+assert_contains "ff-moved/both-log-lines" "$(origin_show wiki/log.md)" "mine."
+assert_contains "ff-moved/both-log-lines-2" "$(origin_show wiki/log.md)" "other."
+assert_eq "ff-moved/other-log-kept" "yes" "$(origin_has logs/2026-10-06-other.md)"
+
+echo "--- 14c. a portable session branch (brain/session-*) lands like a save branch ---"
+new_sandbox
+save_in "$VAULT" mine brain/session-0123456789abcdef01234567
+run_land
+assert_eq "session/verdict" "LAND: MERGED #1" "$(first)" "$OUT"
+assert_eq "session/log-on-origin" "yes" "$(origin_has logs/2026-10-06-mine.md)"
+
+echo "--- 14d. no origin, default branch checked out in the base of a session worktree: fast-forwarded there ---"
+new_sandbox
+git -C "$VAULT" remote remove origin
+WT="$BOX/wt"
+git -C "$VAULT" worktree add -q -b brain/session-aaaaaaaaaaaaaaaaaaaaaaaa "$WT" HEAD
+cfg "$WT"
+save_in "$WT" mine brain/session-bbbbbbbbbbbbbbbbbbbbbbbb
+wt_head="$(git -C "$WT" rev-parse HEAD)"
+LAND_IN="$WT" run_land
+assert_eq "wt/verdict" "LAND: MERGED (local) - fast-forwarded 'main' to 'brain/session-bbbbbbbbbbbbbbbbbbbbbbbb'" "$(first)" "$OUT"
+assert_eq "wt/base-main-is-the-save" "$wt_head" "$(git -C "$VAULT" rev-parse main)"
+assert_eq "wt/base-still-on-main" "main" "$(git -C "$VAULT" rev-parse --abbrev-ref HEAD)"
+assert_eq "wt/base-clean" "" "$(git -C "$VAULT" status --porcelain)"
+wr "$VAULT/stray.md" 'uncommitted in the base'
+save_in "$WT" two brain/session-cccccccccccccccccccccccc
+main_before="$(git -C "$VAULT" rev-parse main)"
+LAND_IN="$WT" run_land
+assert_contains "wt-dirty/skipped" "$(first)" "LAND: SKIPPED"
+assert_contains "wt-dirty/says-uncommitted" "$(first)" "uncommitted work"
+assert_eq "wt-dirty/main-unmoved" "$main_before" "$(git -C "$VAULT" rev-parse main)"
 
 echo
 echo "passed: $PASSED  failed: $FAILED"
