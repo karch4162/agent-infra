@@ -3,7 +3,7 @@ import { initVault, resolveVault, syncVault, vaultStatus, startSession, endSessi
 import { prepareSave, applySave } from '../core/save.mjs';
 import { context } from '../core/context.mjs';
 import { readJson, runMaintenance, pluginRoot, bashScript } from '../core/runtime.mjs';
-import { prepareGraph, recordGraph, graphStatus } from '../core/graph-inputs.mjs';
+import { prepareGraph, recordGraph, graphStatus, buildGraph } from '../core/graph-inputs.mjs';
 import { importTranscript } from '../core/transcripts.mjs';
 
 const argv = process.argv.slice(2);
@@ -12,7 +12,7 @@ const positional = [];
 try {
   for (let i = 0; i < argv.length; i++) {
     if (argv[i].startsWith('--')) {
-      const key = { '--vault': 'vault', '--project': 'project', '--checkout': 'checkout', '--name': 'name', '--repos-dir': 'reposDir', '--session': 'session', '--input': 'input', '--task': 'task', '--budget': 'budget', '--root': 'root', '--scopes': 'scopes', '--extractor': 'extractor', '--args': 'args', '--provider': 'provider', '--repo': 'repo' }[argv[i]];
+      const key = { '--vault': 'vault', '--project': 'project', '--checkout': 'checkout', '--name': 'name', '--repos-dir': 'reposDir', '--session': 'session', '--input': 'input', '--task': 'task', '--budget': 'budget', '--root': 'root', '--scopes': 'scopes', '--extractor': 'extractor', '--args': 'args', '--provider': 'provider', '--repo': 'repo', '--stack': 'stack' }[argv[i]];
       if (!key || !argv[i + 1] || argv[i + 1].startsWith('--')) throw new Error(`Unknown option or missing value: ${argv[i]}`);
       options[key] = argv[++i];
     } else positional.push(argv[i]);
@@ -25,19 +25,22 @@ try {
     hosts: { claude: 'skills-and-hooks', codex: 'skills-and-hooks', copilot: 'skills-and-session-start-hook', grok: 'skills-and-hook-input-normalization', 'grok-bot': 'terminal-and-skills' },
     extraction: 'Use the installed graphify skill in the host session; no automatic API fallback.',
     limitations: ['Host installation and hook delivery require live validation.', 'Grok Bot uses its own cloud checkout.', 'Semantic graph builds and trusted-note promotion remain agent workflows.'] };
-  else if (command === 'graph') {
+  else if (command === 'graph' && action !== 'build') {
     const root = options.root || process.cwd();
     if (action === 'prepare') result = prepareGraph(root, JSON.parse(options.scopes || '["."]'), options.extractor);
     else if (action === 'record') result = recordGraph(root);
     else if (action === 'status') result = graphStatus(root, options.extractor);
-    else throw new Error('Use graph prepare, record, or status.');
+    else throw new Error('Use graph build, prepare, record, or status.');
   }
-  else if (!command || command === 'help') result = { commands: ['init --vault <URL-or-path>', 'status', 'sync', 'session start --session <stable-id>', 'session end --session <stable-id>', 'context --task <text> --budget <words>', 'save prepare --session <id>', 'save apply --session <id> --input <JSON-file>'], options: ['--project <path>', '--vault <name-or-path>', '--checkout <path>', '--repos-dir <path>'] };
+  else if (!command || command === 'help') result = { commands: ['init --vault <URL-or-path>', 'status', 'sync', 'session start --session <stable-id>', 'session end --session <stable-id>', 'context --task <text> --budget <words>', 'graph build --root <repo> --stack <stack> [--scopes JSON] [--session <id>]', 'graph status --root <repo>', 'save prepare --session <id>', 'save apply --session <id> --input <JSON-file>'], options: ['--project <path>', '--vault <name-or-path>', '--checkout <path>', '--repos-dir <path>'] };
   else {
+    // graph build reads the binding from the repo being built, not the cwd (INNOV-414).
+    if (command === 'graph') options.project = options.root || process.cwd();
     const vault = resolveVault(options);
     const session = options.session ? getSession(vault, options.session) : null;
     const target = session ? { ...vault, path: session.path } : vault;
     if (command === 'status') result = vaultStatus(target);
+    else if (command === 'graph') result = buildGraph(options.project, target, { scopes: JSON.parse(options.scopes || '["."]'), stack: options.stack, session: options.session });
     else if (command === 'sync') {
       if (options.session) throw new Error('sync updates the base vault; omit --session. Session branches are preserved for review.');
       result = syncVault(vault);
