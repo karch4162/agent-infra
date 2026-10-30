@@ -18,6 +18,12 @@ Resolve the vault root as `$BRAIN_ROOT` (else the current project dir / cwd); al
 
 Do these in order; keep the summary tight (the user wants to start working, not read a report).
 
+0. **Refuse to brief from a stale plugin install (INNOV-417).** A behind install behaves like an older, worse version of itself silently: saves written by old code, guards shipped since then not running. `/brain:doctor` check 7 diagnoses this; resume is the command every session starts with, so it gates on it. **Run the script, don't reason about it, and never pass `--plugin`:**
+   ```bash
+   bash "${CLAUDE_PLUGIN_ROOT}/bin/check-plugin-version.sh"
+   ```
+   - **Exit `0` (`PLUGIN-VERSION: OK` or `PLUGIN-VERSION: SKIPPED`) →** print nothing about it and go on to step 1. SKIPPED is a machine running from source (`--plugin-dir`) or a portable host whose registry the script does not read; neither is drift.
+   - **Exit `1` (`PLUGIN-VERSION: DRIFTED` or `PLUGIN-VERSION: STALE-CLONE`) →** relay the script's output **verbatim** (it names both versions and the two-command remedy, in the order that matters) and **stop: no session check, no brief.** Add one line: update, restart the session (or `/reload-plugins`), then run `/brain:resume` again. **Do not update the plugin yourself** — an updated copy is not live until restart, and resume is read-only. Do not work around the block.
 1. **Check whether another session is already live in this checkout.** `/brain:resume` is read-only, so it uses **`--status` only — never `--start`, never `--end`.** `--start` would create a branch, and creating a branch is a write; resume must never do that.
    ```bash
    bash "${CLAUDE_PLUGIN_ROOT}/bin/session.sh" --status   # from the vault root, or with BRAIN_ROOT=<vault> set
