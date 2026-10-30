@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>brain — a memory for coding agents</title>
+<meta name="description" content="brain is a git-backed knowledge vault that coding agents read before they grep: a deterministic code graph, a human-gated wiki, and session continuity across Claude Code, Codex, GitHub Copilot CLI and Grok.">
+<meta property="og:title" content="brain — a memory for coding agents">
+<meta property="og:description" content="A git-backed brain every agent session reads before it greps. Works with Claude Code, Codex, GitHub Copilot CLI and Grok.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://karch4162.github.io/agent-infra/">
+<meta property="og:image" content="https://karch4162.github.io/agent-infra/assets/control-center-graph.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23070807'/%3E%3Ccircle cx='10' cy='12' r='3.2' fill='%2340d987'/%3E%3Ccircle cx='22' cy='9' r='2.4' fill='%23ff8f2a'/%3E%3Ccircle cx='21' cy='22' r='3.4' fill='%2340d987'/%3E%3Ccircle cx='9' cy='23' r='2' fill='%23e9ece6'/%3E%3Cpath d='M10 12L22 9M10 12L21 22M22 9L21 22M9 23L21 22M9 23L10 12' stroke='%23e9ece6' stroke-opacity='.45' stroke-width='1.1'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@500;700;800&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#070807;--bg-2:#0c0e0c;--bg-3:#121512;--line:#1e231f;--line-2:#2a312b;
+  --fg:#e9ece6;--fg-2:#b9c1b8;--fg-3:#7f8a7f;
+  --green:#40d987;--green-2:#1f7a4c;--green-glow:rgba(64,217,135,.22);
+  --orange:#ff8f2a;--orange-2:#8a4a12;--orange-glow:rgba(255,143,42,.22);
+  --white:#f3f5f0;
+  --display:"Syne",ui-sans-serif,system-ui,sans-serif;
+  --body:"Instrument Sans",ui-sans-serif,system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --gutter:clamp(16px,4vw,56px);--max:1180px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--body);font-size:17px;line-height:1.6;overflow-x:hidden}
+::selection{background:var(--green);color:#06130b}
+a{color:var(--green);text-decoration:none;text-underline-offset:.2em}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--green);outline-offset:3px;border-radius:3px}
+html{scrollbar-color:var(--line-2) var(--bg)}
+::-webkit-scrollbar{width:10px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:6px;border:2px solid var(--bg)}
+h1,h2,h3{font-family:var(--display);line-height:1.05;letter-spacing:-.02em;margin:0;text-wrap:balance}
+h2{font-size:clamp(30px,4.2vw,48px);font-weight:700}
+h3{font-size:clamp(20px,2vw,24px);font-weight:700;letter-spacing:-.01em}
+p{margin:0}
+code,pre,kbd{font-family:var(--mono);font-size:.86em}
+code{background:var(--bg-3);border:1px solid var(--line);padding:.1em .4em;border-radius:5px;color:var(--fg);white-space:nowrap}
+pre{margin:0;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:16px 18px;overflow-x:auto;line-height:1.55;color:var(--fg-2);scrollbar-width:thin}
+pre .c{color:var(--fg-3)}pre .g{color:var(--green)}pre .o{color:var(--orange)}pre .w{color:var(--white)}
+.wrap{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
+section{padding:clamp(72px,10vw,140px) 0;position:relative}
+section+section{border-top:1px solid var(--line)}
+.lede{color:var(--fg-2);font-size:clamp(18px,1.5vw,21px);max-width:62ch;margin-top:22px}
+.btn{display:inline-flex;align-items:center;gap:10px;font-family:var(--display);font-weight:700;font-size:15px;letter-spacing:.01em;padding:13px 20px;border-radius:999px;border:1px solid var(--line-2);color:var(--fg);background:rgba(12,14,12,.7);backdrop-filter:blur(8px);transition:border-color .2s,transform .25s cubic-bezier(.2,.8,.2,1),background .2s}
+.btn:hover{text-decoration:none;border-color:var(--green);transform:translateY(-1px);background:rgba(18,22,18,.9)}
+.btn.primary{background:var(--green);color:#06130b;border-color:var(--green)}
+.btn.primary:hover{background:#5ae79b}
+.btn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* nav */
+nav{position:fixed;inset:0 0 auto 0;z-index:20;display:flex;align-items:center;justify-content:space-between;padding:14px var(--gutter);mix-blend-mode:normal;pointer-events:none}
+nav>*{pointer-events:auto}
+.brand{display:flex;align-items:center;gap:10px;font-family:var(--display);font-weight:800;font-size:18px;color:var(--fg);letter-spacing:-.01em}
+.brand:hover{text-decoration:none}
+.brand svg{width:26px;height:26px;flex:none}
+.navlinks{display:flex;gap:4px;background:rgba(7,8,7,.6);backdrop-filter:blur(10px);border:1px solid var(--line);border-radius:999px;padding:4px}
+.navlinks a{color:var(--fg-2);font-size:14px;font-weight:500;padding:7px 13px;border-radius:999px;transition:color .2s,background .2s}
+.navlinks a:hover{color:var(--fg);background:var(--bg-3);text-decoration:none}
+@media(max-width:720px){.navlinks{display:none}}
+
+/* hero */
+.hero{min-height:100svh;display:grid;align-items:end;padding:0;border:0}
+.hero canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.hero .wrap{position:relative;z-index:2;width:100%;padding-bottom:clamp(40px,7vh,84px);padding-top:120px}
+.hero h1{font-size:clamp(42px,7.4vw,96px);font-weight:800;letter-spacing:-.035em;max-width:11ch}
+.hero h1 em{font-style:normal;color:var(--green)}
+.hero .lede{max-width:52ch}
+.hero .cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:32px;align-items:center}
+.hosts{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:28px;color:var(--fg-3);font-size:14px}
+.hosts span{display:inline-flex;align-items:center;gap:8px}
+.hosts i{width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block}
+.hero .caption{position:absolute;right:var(--gutter);bottom:clamp(40px,7vh,84px);z-index:2;max-width:250px;color:var(--fg-3);font-size:13px;line-height:1.5;text-align:right;pointer-events:none}
+.hero .caption b{color:var(--fg-2);font-weight:500;display:block}
+.hero .caption output{display:block;color:var(--white);font-family:var(--mono);font-size:12px;margin-top:6px;min-height:1.4em;opacity:0;transition:opacity .2s}
+.hero .caption output.on{opacity:1}
+.hero .scrim{position:absolute;inset:auto 0 0 0;height:60%;background:linear-gradient(to top,var(--bg) 18%,rgba(7,8,7,0));z-index:1;pointer-events:none}
+@media(max-width:900px){.hero canvas{opacity:.75}.hero .scrim{height:78%;background:linear-gradient(to top,var(--bg) 52%,rgba(7,8,7,0))}.hero .vignette{background:radial-gradient(90% 45% at 50% 20%,transparent 30%,var(--bg) 100%)}}
+.hero .vignette{position:absolute;inset:0;background:radial-gradient(70% 60% at 62% 42%,transparent 40%,var(--bg) 100%);z-index:1;pointer-events:none}
+@media(max-width:900px){.hero .caption{display:none}.hero{min-height:92svh}}
+
+/* problem */
+.split{display:grid;grid-template-columns:1.05fr .95fr;gap:clamp(32px,6vw,96px);align-items:start}
+@media(max-width:860px){.split{grid-template-columns:1fr}}
+.transcript{font-family:var(--mono);font-size:13.5px;line-height:1.7;background:var(--bg-2);border:1px solid var(--line);border-radius:12px;padding:20px 22px;color:var(--fg-2);box-shadow:0 20px 50px -30px rgba(0,0,0,.9)}
+.transcript .u{color:var(--white)}
+.transcript .m{color:var(--fg-3)}
+.transcript .x{color:var(--orange)}
+.transcript .y{color:var(--green)}
+.transcript hr{border:0;border-top:1px dashed var(--line-2);margin:12px 0}
+.quote{font-family:var(--display);font-weight:500;font-size:clamp(22px,2.6vw,30px);line-height:1.25;letter-spacing:-.015em;color:var(--fg);margin-top:28px}
+.quote small{display:block;font-family:var(--body);font-size:15px;color:var(--fg-3);margin-top:10px;letter-spacing:0}
+
+/* layers */
+.layers{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin-top:48px;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--bg-2)}
+.layer{padding:28px 26px 30px;position:relative;min-height:100%}
+.layer+.layer{border-left:1px solid var(--line)}
+.layer .step{font-family:var(--mono);font-size:12px;color:var(--fg-3);display:flex;align-items:center;gap:10px;margin-bottom:18px}
+.layer .step i{width:8px;height:8px;border-radius:50%;display:inline-block}
+.layer:nth-child(1) .step i{background:var(--white)}
+.layer:nth-child(2) .step i{background:var(--green)}
+.layer:nth-child(3) .step i{background:var(--orange)}
+.layer h3{margin-bottom:10px}
+.layer p{color:var(--fg-2);font-size:15.5px}
+.layer .ex{margin-top:18px;font-family:var(--mono);font-size:12.5px;color:var(--fg-3);line-height:1.6;border-top:1px dashed var(--line-2);padding-top:14px}
+.layer .ex b{color:var(--fg-2);font-weight:500}
+.layer .arrow{position:absolute;right:-13px;top:34px;width:26px;height:26px;border-radius:50%;background:var(--bg-3);border:1px solid var(--line-2);display:grid;place-items:center;z-index:2}
+.layer .arrow svg{width:12px;height:12px;stroke:var(--fg-2);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+@media(max-width:860px){.layers{grid-template-columns:1fr}.layer+.layer{border-left:0;border-top:1px solid var(--line)}.layer .arrow{right:auto;left:26px;top:-13px;transform:rotate(90deg)}}
+
+/* loop */
+.loop{margin-top:56px;display:grid;grid-template-columns:repeat(5,1fr);gap:18px;position:relative}
+.loop:before{content:"";position:absolute;left:14px;right:14px;top:9px;height:1px;background:linear-gradient(90deg,var(--line-2),var(--green-2) 50%,var(--line-2))}
+.stage{position:relative;padding-top:28px}
+.stage:before{content:"";position:absolute;left:0;top:4px;width:11px;height:11px;border-radius:50%;background:var(--bg);border:2px solid var(--green)}
+.stage h3{font-size:19px;margin-bottom:8px}
+.stage p{font-size:14.5px;color:var(--fg-2)}
+.stage code{display:inline-block;margin-top:12px;font-size:12.5px;white-space:normal;word-break:break-word;color:var(--fg-2)}
+.stage .verdict{margin-top:10px;font-family:var(--mono);font-size:12px;color:var(--green)}
+@media(max-width:1000px){.loop{grid-template-columns:repeat(2,1fr)}.loop:before{display:none}}
+@media(max-width:560px){.loop{grid-template-columns:1fr}}
+
+/* guarantees */
+.rules{margin-top:48px;border-top:1px solid var(--line)}
+.rule{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:clamp(16px,4vw,64px);padding:26px 0;border-bottom:1px solid var(--line);align-items:baseline}
+.rule h3{font-size:clamp(19px,1.8vw,23px)}
+.rule p{color:var(--fg-2);font-size:15.5px}
+.rule p code{white-space:normal}
+@media(max-width:700px){.rule{grid-template-columns:1fr;gap:8px}}
+
+/* install */
+.tabs{display:flex;gap:4px;margin-top:40px;border:1px solid var(--line);border-radius:999px;padding:4px;width:max-content;max-width:100%;background:var(--bg-2);overflow-x:auto}
+.tabs button{font:inherit;font-family:var(--display);font-weight:700;font-size:14px;color:var(--fg-2);background:transparent;border:0;border-radius:999px;padding:9px 16px;cursor:pointer;white-space:nowrap;transition:background .2s,color .2s}
+.tabs button[aria-selected=true]{background:var(--fg);color:#06130b}
+.tabs button:hover:not([aria-selected=true]){color:var(--fg);background:var(--bg-3)}
+.panel{display:none;margin-top:22px}
+.panel[data-on]{display:grid;grid-template-columns:1.1fr .9fr;gap:28px;align-items:start}
+.panel ol{margin:0;padding-left:0;list-style:none;counter-reset:s;display:grid;gap:14px}
+.panel li{counter-increment:s;display:grid;grid-template-columns:28px 1fr;gap:12px;font-size:15.5px;color:var(--fg-2)}
+.panel li:before{content:counter(s);font-family:var(--mono);font-size:12px;color:var(--fg-3);border:1px solid var(--line-2);border-radius:50%;width:24px;height:24px;display:grid;place-items:center;margin-top:2px}
+.panel li b{color:var(--fg);font-weight:600}
+.panel li p{margin-top:4px;font-size:14.5px}
+@media(max-width:860px){.panel[data-on]{grid-template-columns:1fr}}
+
+/* tend */
+.tend{display:grid;grid-template-columns:.9fr 1.1fr;gap:clamp(28px,5vw,72px);align-items:start;margin-top:48px}
+@media(max-width:900px){.tend{grid-template-columns:1fr}}
+.skills{display:grid;gap:0;border-top:1px solid var(--line)}
+.skill{display:grid;grid-template-columns:150px 1fr;gap:16px;padding:13px 0;border-bottom:1px solid var(--line);font-size:14.5px;color:var(--fg-2)}
+.skill code{color:var(--green);background:transparent;border:0;padding:0;font-size:13px}
+@media(max-width:480px){.skill{grid-template-columns:1fr;gap:4px}}
+.shots{display:grid;gap:14px;grid-template-columns:1fr 1fr}
+.shots figure{margin:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#000;box-shadow:0 30px 60px -40px rgba(0,0,0,1)}
+.shots figure.wide{grid-column:1/-1}
+.shots img{display:block;width:100%;height:auto}
+.shots figure:not(.wide){display:flex;flex-direction:column}
+.shots figure:not(.wide) img{aspect-ratio:330/270;object-fit:cover;object-position:top}
+.shots figure:not(.wide) figcaption{margin-top:auto}
+.shots figcaption{padding:10px 14px;font-size:13px;color:var(--fg-3);border-top:1px solid var(--line);background:var(--bg-2)}
+.shots figcaption b{color:var(--fg-2);font-weight:500}
+
+/* footer */
+footer{border-top:1px solid var(--line);padding:40px 0 48px;color:var(--fg-3);font-size:14px}
+footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:14px 28px;align-items:center}
+footer nav{position:static;padding:0;display:flex;gap:20px}
+footer a{color:var(--fg-2)}
+
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+
+<nav aria-label="Primary">
+  <a class="brand" href="#top" aria-label="brain, home">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#0c0e0c" stroke="#1e231f"/><circle cx="10" cy="12" r="3.2" fill="#40d987"/><circle cx="22" cy="9" r="2.4" fill="#ff8f2a"/><circle cx="21" cy="22" r="3.4" fill="#40d987"/><circle cx="9" cy="23" r="2" fill="#e9ece6"/><path d="M10 12L22 9M10 12L21 22M22 9L21 22M9 23L21 22M9 23L10 12" stroke="#e9ece6" stroke-opacity=".45" stroke-width="1.1"/></svg>
+    brain
+  </a>
+  <div class="navlinks">
+    <a href="#how">How it works</a>
+    <a href="#loop">The loop</a>
+    <a href="#rules">Guarantees</a>
+    <a href="#install">Install</a>
+    <a href="https://github.com/karch4162/agent-infra" rel="noopener">GitHub</a>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <canvas id="graph" aria-hidden="true"></canvas>
+  <div class="vignette"></div>
+  <div class="scrim"></div>
+  <aside class="caption">
+    <b>This is the brain's graph of its own code.</b>
+    170 functions, 433 calls, extracted from the plugin source with no model and no API key. Move across it.
+    <output id="hover"></output>
+  </aside>
+  <div class="wrap">
+    <h1>Give your coding agents a <em>memory.</em></h1>
+    <p class="lede">brain is a git-backed vault that every agent session reads before it greps: a deterministic graph of your code, a wiki of the decisions code can't tell you, and a log of what the last session learned.</p>
+    <div class="cta">
+      <a class="btn primary" href="#install">Install in two commands <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+      <a class="btn" href="#how">How it works</a>
+    </div>
+    <div class="hosts" aria-label="Supported hosts">
+      <span><i></i>Claude Code</span><span><i></i>GitHub Copilot CLI</span><span><i></i>Codex</span><span><i></i>Grok Build and Grok Bot</span>
+    </div>
+  </div>
+</header>
+
+<section id="why">
+  <div class="wrap split">
+    <div>
+      <h2>Every session starts from zero. Yours don't have to.</h2>
+      <p class="lede">An agent that re-derives your architecture from raw files each morning spends its first ten minutes guessing, and the decision you made on Tuesday is gone by Thursday. The code can say what. It has never been able to say why.</p>
+      <p class="quote">A brain turns "re-read everything" into "read what the last session already knew."<small>Graph for structure. Wiki for reasons. Logs for continuity. All of it in git, all of it diffable.</small></p>
+    </div>
+    <div class="transcript" aria-label="Example of a session resuming from the brain">
+      <div class="m">// without a brain</div>
+      <div class="u">&gt; where is the save allowlist enforced?</div>
+      <div class="x">grep -rn "saveinclude" . &nbsp;·&nbsp; 33 files &nbsp;·&nbsp; reads nine of them &nbsp;·&nbsp; guesses</div>
+      <hr>
+      <div class="m">// with a brain (the graph path is real; the note is illustrative)</div>
+      <div class="u">&gt; where is the save allowlist enforced?</div>
+      <div class="y">graph: vault-commit.sh → read_index() → refuse_foreign() → check-governance.mjs commitGate()</div>
+      <div class="y">wiki: bridges/vault-commit-gate.md &nbsp;·&nbsp; confidence: high &nbsp;·&nbsp; verified 3 days ago</div>
+      <div class="m">"The index is checked before the first git add, so a refusal leaves nothing staged."</div>
+    </div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <h2>Three layers, one query rule.</h2>
+    <p class="lede">The vault's own instructions tell every agent to answer in this order. Each layer is cheaper and more certain than the one after it, so most questions never reach raw files.</p>
+    <div class="layers">
+      <div class="layer">
+        <div class="step"><i></i>graph first</div>
+        <h3>The code graph</h3>
+        <p>Functions, calls and communities extracted from the AST by <a href="https://pypi.org/project/graphifyy/" rel="noopener">graphify</a>. Deterministic, seed-pinned and keyless, so two machines build the same graph from the same commit.</p>
+        <div class="ex"><b>graphify/&lt;repo&gt;/graph.json</b><br>built_at_commit · scope fingerprint · 40 communities</div>
+        <div class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+      </div>
+      <div class="layer">
+        <div class="step"><i></i>then the wiki</div>
+        <h3>The wiki</h3>
+        <p>One fact per note, with an owner, a source anchor into code, a confidence and a last-verified date. Agents write drafts. People promote the keepers through a pull request.</p>
+        <div class="ex"><b>wiki/bridges/auth-contract.md</b><br>source: api/auth.ts#verify · confidence: high · last_verified: 2026-10-28</div>
+        <div class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+      </div>
+      <div class="layer">
+        <div class="step"><i></i>raw files last</div>
+        <h3>The raw source</h3>
+        <p>Still there, still read, but only when the graph and the wiki have already narrowed the question to a handful of files. Grep becomes the confirmation, not the search.</p>
+        <div class="ex"><b>graph-before-grep hook</b><br>nudges once per session · stale-aware · silent when no graph exists</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="loop">
+  <div class="wrap">
+    <h2>A day with a brain.</h2>
+    <p class="lede">Five moves. Each one is a command with a JSON result, so any host that can run Node can run the loop, and nothing depends on remembering a ritual. Shown as <code>brain …</code>: in Claude Code these are the <code>/brain:*</code> skills; elsewhere, <code>node PLUGIN/bin/brain.mjs …</code>.</p>
+    <div class="loop">
+      <div class="stage">
+        <h3>Init</h3>
+        <p>Bind the repo to a vault: a GitHub repo, a local bare repo, or a plain folder. Pick the stack and the source roots.</p>
+        <code>brain init --vault URL</code>
+      </div>
+      <div class="stage">
+        <h3>Seed</h3>
+        <p>Build the first code graph at the recorded scope and mirror it into the vault on an isolated session branch.</p>
+        <code>brain graph build --root . --stack node-ts</code>
+        <div class="verdict">state: built · sync: synced · commit: committed</div>
+      </div>
+      <div class="stage">
+        <h3>Resume</h3>
+        <p>Start the next session with the hot cache, the last logs and the notes relevant to the task, inside a word budget.</p>
+        <code>brain resume --task "…"</code>
+      </div>
+      <div class="stage">
+        <h3>Save</h3>
+        <p>Write a dated log, refresh the hot cache, rebuild changed graphs and ingest changed docs as drafts. All through an allowlist.</p>
+        <code>brain save prepare · save apply</code>
+        <div class="verdict">state: saved-locally</div>
+      </div>
+      <div class="stage">
+        <h3>Land</h3>
+        <p>Put the save on the default branch. The remote decides how: a PR on GitHub, a fast-forward anywhere else.</p>
+        <code>brain land --session ID</code>
+        <div class="verdict">LAND: MERGED (fast-forward)</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="rules">
+  <div class="wrap">
+    <h2>What it will never do to your repo.</h2>
+    <p class="lede">A knowledge tool earns trust by what it refuses. These are enforced in the scripts, not promised in a README.</p>
+    <div class="rules">
+      <div class="rule"><h3>Never writes to your base checkout.</h3><p>Every build and save happens in its own git worktree on a <code>brain/session-*</code> branch. The checkout you work in is never touched, and a dirty vault refuses with a remedy that never involves <code>reset --hard</code>.</p></div>
+      <div class="rule"><h3>Never commits outside the allowlist.</h3><p>The vault's <code>.saveinclude</code> is the whole permission model. The commit gate inspects the git index before the first <code>git add</code>, so a stray staged file refuses the commit and leaves nothing behind.</p></div>
+      <div class="rule"><h3>Never lets an agent's draft become fact.</h3><p>Anything an agent or an ingest pipeline writes lands in <code>wiki/_drafts/</code>. A trusted note exists only after a person promotes it in a pull request. Drafts older than 14 days are promote-or-drop.</p></div>
+      <div class="rule"><h3>Never sends your code to a model to build the graph.</h3><p>The code graph is an AST extraction with a pinned hash seed. No API key, no network, no sampling. The wiki concept graph runs inside your own host session.</p></div>
+      <div class="rule"><h3>Never force-pushes or resolves knowledge conflicts for you.</h3><p>Landing is a fast-forward or a PR. Anything else is reported as left open, with the reason, and the branch stays where you can see it.</p></div>
+      <div class="rule"><h3>Never needs GitHub.</h3><p>A local bare repo, GitLab, a file share or a plain folder all work. The remote you give it decides the landing mode, and <code>brain status</code> shows which one you got.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <h2>Install in two commands.</h2>
+    <p class="lede">One prerequisite everywhere: <a href="https://docs.astral.sh/uv/" rel="noopener">uv</a>, which the brain uses to install a pinned, hash-checked graphify on the first init.</p>
+    <div class="tabs" role="tablist" aria-label="Choose your host">
+      <button role="tab" aria-selected="true" aria-controls="t-claude" id="tab-claude">Claude Code</button>
+      <button role="tab" aria-selected="false" aria-controls="t-copilot" id="tab-copilot">GitHub Copilot CLI</button>
+      <button role="tab" aria-selected="false" aria-controls="t-portable" id="tab-portable">Codex and Grok</button>
+    </div>
+    <div class="panel" id="t-claude" role="tabpanel" aria-labelledby="tab-claude" data-on>
+      <pre><span class="c"># inside Claude Code</span>
+<span class="g">/plugin</span> marketplace add https://github.com/karch4162/agent-infra
+<span class="g">/plugin</span> install brain@agent-infra
+
+<span class="c"># restart, then in your project</span>
+<span class="g">/brain:init</span>      <span class="c"># vault, graph scope, first seed</span>
+<span class="g">/brain:resume</span>    <span class="c"># start of a session</span>
+<span class="g">/brain:save</span>      <span class="c"># end of a session</span></pre>
+      <ol>
+        <li><div><b>Add the marketplace by URL.</b><p>Claude Code clones and caches it; updates arrive with <code>/plugin update brain@agent-infra</code>.</p></div></li>
+        <li><div><b>Init once per machine.</b><p>Registers the vault, installs graphify and its skill, writes the per-stack carve-out and records the scope.</p></div></li>
+        <li><div><b>Work normally.</b><p>The graph-before-grep hook nudges the agent to the graph first. You never run a query command by hand.</p></div></li>
+      </ol>
+    </div>
+    <div class="panel" id="t-copilot" role="tabpanel" aria-labelledby="tab-copilot" hidden>
+      <pre><span class="c"># in your terminal</span>
+copilot plugin marketplace add karch4162/agent-infra
+copilot plugin install brain@agent-infra
+graphify install --platform copilot
+
+<span class="c"># skills are model-invoked: ask for them in plain words</span>
+<span class="w">"set up the brain here"</span>   <span class="c"># init, stack question, seed</span>
+<span class="w">"save the brain"</span>          <span class="c"># prepare → apply → land</span></pre>
+      <ol>
+        <li><div><b>Install the plugin and the graphify skill.</b><p>Copilot keeps skills under <code>~/.copilot/skills/</code>; the skill activates after a restart.</p></div></li>
+        <li><div><b>Say what you want.</b><p>Copilot has no slash commands; the brain's skills trigger on natural language and run the same portable commands.</p></div></li>
+        <li><div><b>Land without GitHub if you like.</b><p>A local bare repo as the vault origin lands saves by fast-forward. Windows, PowerShell and Git Bash are all covered.</p></div></li>
+      </ol>
+    </div>
+    <div class="panel" id="t-portable" role="tabpanel" aria-labelledby="tab-portable" hidden>
+      <pre><span class="c"># any host that can run Node 20, Git and Bash</span>
+node PLUGIN/bin/brain.mjs init --vault https://github.com/ORG/VAULT.git
+node PLUGIN/bin/brain.mjs graph build --root . --stack python
+node PLUGIN/bin/brain.mjs resume --task "current task"
+node PLUGIN/bin/brain.mjs save prepare --session ID
+node PLUGIN/bin/brain.mjs land --session ID</pre>
+      <ol>
+        <li><div><b>Codex</b><p>Ships as a Codex plugin from the same repo; the skills are shared and the commands above are the contract.</p></div></li>
+        <li><div><b>Grok Build and Grok Bot</b><p>Load the plugin through Claude-plugin compatibility or a plugin directory; Grok Bot binds a URL-backed vault on its cloud machine.</p></div></li>
+        <li><div><b>Everything is JSON.</b><p>Each command returns a state. <code>error</code> and a nonzero exit mean it did not happen; partial states are never upgraded to success. The full contract is in <a href="https://github.com/karch4162/agent-infra/blob/main/brain/references/portable.md" rel="noopener">portable.md</a>.</p></div></li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section id="tend">
+  <div class="wrap">
+    <h2>Knowledge rots. The brain notices.</h2>
+    <p class="lede">A note that cites a line that moved, a link to a page that was renamed, a fact nobody has checked in a quarter. Each maintenance skill finds one kind of rot, proposes the smallest fix, and ships it as one reviewed pull request. Nothing is deleted on your behalf.</p>
+    <div class="tend">
+      <div>
+        <div class="skills" aria-label="Maintenance skills">
+          <div class="skill"><code>/brain:freshness</code><span>Orphans, dead links, stale verification, broken source anchors, as a review queue.</span></div>
+          <div class="skill"><code>/brain:tidy</code><span>Applies the mechanical findings as one approved batch: re-anchor, index, fold tags.</span></div>
+          <div class="skill"><code>/brain:verify</code><span>One read-only agent per judgment finding, checking the claim against the code it cites.</span></div>
+          <div class="skill"><code>/brain:revise</code><span>Turns verify's evidence into the smallest body edit, applied only with approval.</span></div>
+          <div class="skill"><code>/brain:label</code><span>Names graph communities vault-side, never overwriting a name a person gave.</span></div>
+          <div class="skill"><code>/brain:consolidate</code><span>Distils one community of notes into a single sourced synthesis draft.</span></div>
+          <div class="skill"><code>/brain:promote</code><span>The human gate: keep, merge or drop each draft, then one PR for the batch.</span></div>
+          <div class="skill"><code>/brain:doctor</code><span>Diagnoses and repairs the graphify install, the binding, the registry and the caches.</span></div>
+        </div>
+      </div>
+      <div class="shots">
+        <figure class="wide"><img src="assets/control-center-graph.png" width="1154" height="801" alt="A 3D graph of a personal brain vault: green high-confidence notes, orange medium-confidence notes and white code communities, linked by thin lines on black" loading="lazy"><figcaption><b>Agent Control Center</b>, a companion local dashboard. Every note in the vault, coloured by confidence, with the code communities it cites.</figcaption></figure>
+        <figure><img src="assets/control-center-audit.png" width="330" height="270" alt="Brain audit panel: 48 findings to review, 16 broken, 32 needing a re-check, 10 tidy-ups" loading="lazy"><figcaption>The freshness report, as a number you can watch go down.</figcaption></figure>
+        <figure><img src="assets/control-center-skills.png" width="321" height="294" alt="Brain skills panel listing resume, freshness, tidy and verify with one-line descriptions" loading="lazy"><figcaption>The skills, in the order a session runs them.</figcaption></figure>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>brain <span id="ver">0.19.0</span> · MIT licence · built by Mason Beard</div>
+    <nav aria-label="Footer">
+      <a href="https://github.com/karch4162/agent-infra" rel="noopener">Source</a>
+      <a href="https://github.com/karch4162/agent-infra/blob/main/brain/README.md" rel="noopener">README</a>
+      <a href="https://github.com/karch4162/agent-infra/blob/main/brain/references/portable.md" rel="noopener">Portable reference</a>
+      <a href="https://github.com/karch4162/agent-infra/issues" rel="noopener">Issues</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+// tabs
+document.querySelectorAll('.tabs [role=tab]').forEach(tab=>{
+  tab.addEventListener('click',()=>{
+    document.querySelectorAll('.tabs [role=tab]').forEach(t=>t.setAttribute('aria-selected',t===tab));
+    document.querySelectorAll('.panel').forEach(p=>{const on=p.id===tab.getAttribute('aria-controls');p.hidden=!on;p.toggleAttribute('data-on',on)});
+  });
+});
+
+// hero graph: the brain's own code graph, force-laid-out on a canvas
+(async()=>{
+  const cv=document.getElementById('graph'),out=document.getElementById('hover');
+  if(!cv.getContext)return;
+  let data;try{data=await(await fetch('assets/brain-graph.json')).json()}catch(e){return}
+  const ctx=cv.getContext('2d'),reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const N=data.n.map(([label,c,deg,file],i)=>({label,c,deg,file,x:0,y:0,vx:0,vy:0,r:2.2+Math.sqrt(deg)*1.15}));
+  const L=data.l.map(([a,b])=>[N[a],N[b]]);N.forEach(n=>n.adj=new Set());for(const[a,b]of L){a.adj.add(b);b.adj.add(a)}
+  const pal=['#40d987','#ff8f2a','#f3f5f0','#2ea86a','#d9742a','#9fe8c0'];
+  const colour=n=>pal[n.c%pal.length];
+  let W=0,H=0,dpr=1,cx=0,cy=0,mx=-1e9,my=-1e9,hot=null,t=0,alpha=1;
+  const CF=10;
+  function size(){
+    dpr=Math.min(devicePixelRatio||1,1.5);const r=cv.getBoundingClientRect();W=r.width;H=r.height;
+    cv.width=W*dpr;cv.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);
+    cx=W>900?W*.66:W*.5;cy=W>900?H*.40:H*.18;
+  }
+  size();addEventListener('resize',()=>{size()});
+  // seed positions by community angle so clusters start apart
+  const comms=Math.max(...N.map(n=>n.c))+1;
+  N.forEach((n,i)=>{const a=(n.c/comms)*Math.PI*2+(i%7)*.08,d=Math.min(W,H)*(.12+Math.random()*.22);n.x=cx+Math.cos(a)*d;n.y=cy+Math.sin(a)*d});
+  const spread=()=>W>900?Math.min(W,H)*.055:W*.048;
+  function step(k){
+    const rep=spread()*spread()*1.1;
+    for(let i=0;i<N.length;i++){const a=N[i];
+      for(let j=i+1;j<N.length;j++){const b=N[j];let dx=a.x-b.x,dy=a.y-b.y,d2=dx*dx+dy*dy+.01;if(d2>90000)continue;const f=rep/d2*k;dx*=f/Math.sqrt(d2);dy*=f/Math.sqrt(d2);a.vx+=dx;a.vy+=dy;b.vx-=dx;b.vy-=dy}}
+    const rest=spread()*1.6;
+    for(const[a,b]of L){let dx=b.x-a.x,dy=b.y-a.y,d=Math.sqrt(dx*dx+dy*dy)+.01,f=(d-rest)/d*.012*k;dx*=f;dy*=f;a.vx+=dx;a.vy+=dy;b.vx-=dx;b.vy-=dy}
+    for(const n of N){n.vx+=(cx-n.x)*.004*k;n.vy+=(cy-n.y)*.0045*k;n.vx*=.86;n.vy*=.86;n.x+=n.vx;n.y+=n.vy}
+  }
+  for(let i=0;i<260;i++)step(1);
+  const near=()=>{let best=null,bd=20*20;for(const n of N){const dx=n.x-mx,dy=n.y-my,d=dx*dx+dy*dy;if(d<bd+n.r*n.r){bd=d;best=n}}return best};
+  cv.addEventListener('pointermove',e=>{const r=cv.getBoundingClientRect();mx=e.clientX-r.left;my=e.clientY-r.top});
+  cv.addEventListener('pointerleave',()=>{mx=my=-1e9});
+  function draw(){
+    t+=1;if(!reduce){alpha=Math.max(alpha*.995,.06);step(alpha);for(const n of N){n.x+=Math.sin(t*.011+n.deg)*.05;n.y+=Math.cos(t*.009+n.c)*.05}}
+    hot=near();
+    ctx.clearRect(0,0,W,H);
+    ctx.lineWidth=.7;
+    for(const[a,b]of L){const h=hot&&(a===hot||b===hot);ctx.strokeStyle=h?'rgba(243,245,240,.9)':'rgba(190,200,190,.13)';ctx.lineWidth=h?1.2:.7;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke()}
+    for(const n of N){
+      const c=colour(n),h=n===hot||(hot&&hot.adj.has(n));
+      if(h||n.deg>10){const R=n.r*(h?4:2.6),g=ctx.createRadialGradient(n.x,n.y,n.r*.6,n.x,n.y,R);g.addColorStop(0,c);g.addColorStop(1,'rgba(0,0,0,0)');ctx.globalAlpha=h?.55:.28;ctx.fillStyle=g;ctx.beginPath();ctx.arc(n.x,n.y,R,0,Math.PI*2);ctx.fill()}
+      ctx.fillStyle=c;ctx.globalAlpha=h?1:.92;
+      ctx.beginPath();ctx.arc(n.x,n.y,h?n.r+1.5:n.r,0,Math.PI*2);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+    if(hot){
+      ctx.font='500 12px JetBrains Mono, monospace';const txt=hot.label,pad=7,w=ctx.measureText(txt).width+pad*2,x=Math.min(Math.max(hot.x+12,8),W-w-8),y=hot.y-26;
+      ctx.fillStyle='rgba(12,14,12,.92)';ctx.strokeStyle='#2a312b';ctx.beginPath();if(ctx.roundRect)ctx.roundRect(x,y,w,22,6);else ctx.rect(x,y,w,22);ctx.fill();ctx.stroke();
+      ctx.fillStyle='#e9ece6';ctx.fillText(txt,x+pad,y+15);
+      out.textContent=hot.file+' · '+hot.deg+' calls';out.classList.add('on');cv.style.cursor='crosshair';
+    }else{out.classList.remove('on');cv.style.cursor=''}
+    if(seen&&!reduce)draw0();
+  }
+  let seen=true,queued=false;const tick=()=>{queued=false;draw()};
+  function draw0(){if(!queued){queued=true;requestAnimationFrame(tick)}}
+  new IntersectionObserver(([e])=>{seen=e.isIntersecting;if(seen)draw0()}).observe(cv);
+  draw();
+  cv.addEventListener('pointermove',draw0);
+})();
+</script>
+</body>
+</html>
