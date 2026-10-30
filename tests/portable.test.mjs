@@ -269,3 +269,25 @@ test('land puts a session save on the default branch without GitHub: fast-forwar
   assert.equal(git(folder, 'rev-parse', 'main'), saved.commit, 'the folder vault main is the save');
   assert.equal(git(folder, 'status', '--porcelain'), '');
 });
+
+// INNOV-418: the portable resume gates on `version`, which reads no host registry. It
+// compares this copy's manifest against the release tags on a remote: behind, current,
+// or unknown. Unknown (offline, no tags) is never reported as current.
+test('version compares the installed manifest against release tags and never guesses', t => {
+  const f = fixture(t);
+  const installed = JSON.parse(readFileSync(join(root, 'brain/.claude-plugin/plugin.json'), 'utf8')).version;
+  git(f.remote, 'tag', 'brain--v999.0.0', 'main');
+  git(f.remote, 'tag', 'brain--v0.0.1', 'main');
+  git(f.remote, 'tag', 'wave--v999.0.0', 'main');   // another plugin's tag is not ours
+  const behind = f.run('version', '--remote', f.remote);
+  assert.deepEqual([behind.installed, behind.latest, behind.state], [installed, '999.0.0', 'behind'], JSON.stringify(behind));
+  git(f.remote, 'tag', '-d', 'brain--v999.0.0');
+  const current = f.run('version', '--remote', f.remote);
+  assert.deepEqual([current.latest, current.state], ['0.0.1', 'current'], JSON.stringify(current));
+  git(f.remote, 'tag', '-d', 'brain--v0.0.1');
+  const untagged = f.run('version', '--remote', f.remote);
+  assert.deepEqual([untagged.latest, untagged.state], [undefined, 'unknown'], JSON.stringify(untagged));
+  const offline = f.run('version', '--remote', join(f.dir, 'missing.git'));
+  assert.equal(offline.state, 'unknown', JSON.stringify(offline));
+  assert.ok(offline.reason);
+});

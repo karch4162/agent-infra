@@ -6,6 +6,26 @@ import { readJson, runMaintenance, pluginRoot, bashScript } from '../core/runtim
 import { prepareGraph, recordGraph, graphStatus, buildGraph } from '../core/graph-inputs.mjs';
 import { importTranscript } from '../core/transcripts.mjs';
 import { randomUUID } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
+
+// INNOV-418: is a newer release published? Host-neutral on purpose: Copilot CLI, Codex and
+// Grok each record installs differently, so this compares the copy's own manifest against
+// the release tags on its homepage instead. Offline is `unknown`, never `current`.
+function pluginVersion(remote) {
+  // Root plugin.json is what portable hosts ship; the Claude manifest carries the homepage.
+  const manifest = { ...readJson(join(pluginRoot, 'plugin.json'), {}), ...readJson(join(pluginRoot, '.claude-plugin/plugin.json'), {}) };
+  const installed = manifest.version || '';
+  remote = remote || manifest.homepage;
+  const r = spawnSync('git', ['ls-remote', '--tags', '--refs', remote], { encoding: 'utf8', timeout: 5000, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+  const num = v => v.split('.').map(Number);
+  const cmp = (a, b) => num(a).reduce((d, x, i) => d || x - num(b)[i], 0);
+  const tag = new RegExp(`refs/tags/${manifest.name}--v(\\d+\\.\\d+\\.\\d+)\\s*$`, 'gm');
+  const latest = r.status === 0 ? [...r.stdout.matchAll(tag)].map(m => m[1]).sort(cmp).at(-1) : undefined;
+  const state = !latest ? 'unknown' : cmp(installed, latest) < 0 ? 'behind' : 'current';
+  const reason = r.error?.code === 'ETIMEDOUT' ? 'ls-remote timed out' : r.status !== 0 ? 'remote unreachable' : !latest ? 'no release tags on the remote' : undefined;
+  return { installed, latest, state, remote, reason };
+}
 
 const argv = process.argv.slice(2);
 const options = {};
@@ -13,7 +33,7 @@ const positional = [];
 try {
   for (let i = 0; i < argv.length; i++) {
     if (argv[i].startsWith('--')) {
-      const key = { '--vault': 'vault', '--project': 'project', '--checkout': 'checkout', '--name': 'name', '--repos-dir': 'reposDir', '--session': 'session', '--input': 'input', '--task': 'task', '--budget': 'budget', '--root': 'root', '--scopes': 'scopes', '--extractor': 'extractor', '--args': 'args', '--provider': 'provider', '--repo': 'repo', '--stack': 'stack' }[argv[i]];
+      const key = { '--vault': 'vault', '--project': 'project', '--checkout': 'checkout', '--name': 'name', '--repos-dir': 'reposDir', '--session': 'session', '--input': 'input', '--task': 'task', '--budget': 'budget', '--root': 'root', '--scopes': 'scopes', '--extractor': 'extractor', '--args': 'args', '--provider': 'provider', '--repo': 'repo', '--stack': 'stack', '--remote': 'remote' }[argv[i]];
       if (!key || !argv[i + 1] || argv[i + 1].startsWith('--')) throw new Error(`Unknown option or missing value: ${argv[i]}`);
       options[key] = argv[++i];
     } else positional.push(argv[i]);
@@ -21,6 +41,7 @@ try {
   const [command, action] = positional;
   let result;
   if (command === 'init') result = initVault(options);
+  else if (command === 'version') result = pluginVersion(options.remote);
   else if (command === 'capabilities') result = { version: 1, pluginRoot, storage: 'local-git', runtime: { node: process.version, platform: process.platform },
     workflows: ['URL-vaults', 'isolated-sessions', 'save', 'context', 'graph-inputs', 'maintenance', 'publish'],
     hosts: { claude: 'skills-and-hooks', codex: 'skills-and-hooks', copilot: 'skills-and-session-start-hook', grok: 'skills-and-hook-input-normalization', 'grok-bot': 'terminal-and-skills' },
@@ -33,7 +54,7 @@ try {
     else if (action === 'status') result = graphStatus(root, options.extractor);
     else throw new Error('Use graph build, prepare, record, or status.');
   }
-  else if (!command || command === 'help') result = { commands: ['init --vault <URL-or-path>', 'status', 'sync', 'session start --session <stable-id>', 'session end --session <stable-id>', 'context --task <text> --budget <words>', 'graph build --root <repo> --stack <stack> [--scopes JSON] [--session <id>]', 'graph status --root <repo>', 'save prepare --session <id>', 'save apply --session <id> --input <JSON-file>', 'land --session <id>'], options: ['--project <path>', '--vault <name-or-path>', '--checkout <path>', '--repos-dir <path>'] };
+  else if (!command || command === 'help') result = { commands: ['init --vault <URL-or-path>', 'version', 'status', 'sync', 'session start --session <stable-id>', 'session end --session <stable-id>', 'context --task <text> --budget <words>', 'graph build --root <repo> --stack <stack> [--scopes JSON] [--session <id>]', 'graph status --root <repo>', 'save prepare --session <id>', 'save apply --session <id> --input <JSON-file>', 'land --session <id>'], options: ['--project <path>', '--vault <name-or-path>', '--checkout <path>', '--repos-dir <path>'] };
   else {
     // graph build reads the binding from the repo being built, not the cwd (INNOV-414).
     if (command === 'graph') options.project = options.root || process.cwd();
