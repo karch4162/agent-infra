@@ -32,7 +32,8 @@ export function assertVault(path) {
 }
 function identityForPath(path) {
   const remote = git(path, ['config', '--get', 'remote.origin.url'], true);
-  if (!remote) return `local:${real(path)}`;
+  // No remote: the identity is the base checkout, so a session worktree matches it (INNOV-416).
+  if (!remote) return `local:${real(dirname(resolve(path, git(path, ['rev-parse', '--git-common-dir']))))}`;
   return existsSync(remote) ? `local:${real(remote)}` : remoteIdentity(remote);
 }
 function projectBinding(project) {
@@ -99,6 +100,12 @@ export function initVault(options) {
     return { state: 'bound', vault, project };
   });
 }
+// INNOV-416: the remote is the landing setting. Same rule as land-save.sh.
+export function landingMode(path) {
+  const remote = git(path, ['config', '--get', 'remote.origin.url'], true);
+  if (!remote) return 'local';
+  return (process.env.LAND_GITHUB_HOSTS || 'github.com').split(/\s+/).some(h => h && remote.includes(h)) ? 'github-pr' : 'fast-forward';
+}
 export function vaultStatus(vault, upstream) {
   const branch = git(vault.path, ['symbolic-ref', '--short', 'HEAD'], true);
   const head = git(vault.path, ['rev-parse', 'HEAD']);
@@ -108,7 +115,7 @@ export function vaultStatus(vault, upstream) {
   if (ref && git(vault.path, ['rev-parse', '--verify', ref], true)) {
     [ahead, behind] = git(vault.path, ['rev-list', '--left-right', '--count', `HEAD...${ref}`]).split(/\s+/).map(Number);
   }
-  return { state: dirty ? 'local-changes' : !branch ? 'detached' : ahead && behind ? 'diverged' : behind ? 'behind' : ahead ? 'ahead' : ahead === 0 ? 'current' : 'no-upstream', branch, head, dirty, upstream: ref, ahead, behind, path: vault.path };
+  return { state: dirty ? 'local-changes' : !branch ? 'detached' : ahead && behind ? 'diverged' : behind ? 'behind' : ahead ? 'ahead' : ahead === 0 ? 'current' : 'no-upstream', branch, head, dirty, upstream: ref, ahead, behind, path: vault.path, landing: landingMode(vault.path) };
 }
 export function syncVault(vault) {
   return locked(join(vault.path, '.brain/write.lock'), () => {

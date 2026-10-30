@@ -52,6 +52,8 @@
 # The first line on stdout is one of:
 #   LAND: MERGED #<n>
 #   LAND: MERGED (local) - <what moved>  (no origin: the default branch was fast-forwarded)
+#   LAND: MERGED (fast-forward) - <what moved>  (origin is not GitHub, or gh cannot drive a PR:
+#                                   the branch was pushed onto the default branch, INNOV-416)
 #   LAND: LEFT OPEN [#<n>] - <reason>
 #   LAND: SKIPPED - <reason>          (nothing was pushed)
 #   LAND: HOT - <what to do>          (nothing was pushed)
@@ -96,19 +98,27 @@ g rev-parse --git-dir >/dev/null 2>&1 || skip "'$VAULT' is not a git repo"
 BRANCH="$(g symbolic-ref -q --short HEAD 2>/dev/null)" ||
   skip "the vault is on a detached HEAD; there is no save branch to land"
 case "$BRANCH" in
-  brain/save-*) ;;
+  brain/save-*|brain/session-*) ;;
   *) skip "'$BRANCH' is not a /brain:save branch (brain/save-*)" \
        "  Only save PRs land automatically. Promote, ingest, verify, tidy and revise" \
        "  PRs carry trusted knowledge, and their review is the governance gate." ;;
 esac
 LOCAL=""
+FF=""  # INNOV-416: set to the reason when the landing is a fast-forward push, not a PR
 if ! g remote get-url origin >/dev/null 2>&1; then
   LOCAL=1
 else
-  command -v gh >/dev/null 2>&1 ||
-    skip "gh is not installed; the save stays a local commit on '$BRANCH'"
-  (cd "$VAULT" && gh auth status >/dev/null 2>&1) ||
-    skip "gh is not authenticated (gh auth status); the save stays a local commit on '$BRANCH'"
+  # The remote is the setting (no init question, no config key): a GitHub origin lands
+  # through a PR; any other origin (a local bare repo, GitLab, a file share) or a
+  # machine where gh cannot drive the PR lands by a non-forced fast-forward push.
+  # LAND_GITHUB_HOSTS (space-separated substrings, default github.com) names GHE hosts.
+  ORIGIN_URL="$(g remote get-url origin)"
+  is_github=""
+  for h in ${LAND_GITHUB_HOSTS:-github.com}; do [[ "$ORIGIN_URL" == *"$h"* ]] && is_github=1; done
+  if [[ -z "$is_github" ]]; then FF="origin is not a GitHub remote"
+  elif ! command -v gh >/dev/null 2>&1; then FF="gh is not installed"
+  elif ! (cd "$VAULT" && gh auth status >/dev/null 2>&1); then FF="gh is not authenticated"
+  fi
 fi
 
 # The ticket's own incident: a post-commit index sync that did not land. Never
@@ -212,17 +222,26 @@ if [[ -n "$LOCAL" ]]; then
   OLD="$(g rev-parse "$BASE")"
   g merge-base --is-ancestor "$OLD" HEAD ||
     skip "no 'origin' remote, and '$DEFAULT' has commit(s) '$BRANCH' lacks; nothing was moved"       "  Something landed on '$DEFAULT' since this save branched. Reconcile by hand"       "  (merge '$DEFAULT' into '$BRANCH'), then re-run land-save."
-  # A branch checked out in another worktree must not move under that worktree.
-  ! g worktree list --porcelain 2>/dev/null | grep -qxF "branch $BASE" ||
-    skip "'$DEFAULT' is checked out in another worktree; nothing was moved"
-  g update-ref -m "land-save: fast-forward to $BRANCH" "$BASE" "$HEAD_SHA" "$OLD" 2>/dev/null ||
-    skip "could not fast-forward '$DEFAULT' (it moved meanwhile?); nothing was moved"
+  # A branch checked out in another worktree must not move under that worktree. The
+  # base checkout of a portable session always holds it (INNOV-416): fast-forward it
+  # there, and only while that checkout is clean.
+  wt="$(g worktree list --porcelain 2>/dev/null | awk -v b="branch $BASE" '/^worktree /{p=substr($0,10)} $0==b{print p; exit}')"
+  if [[ -n "$wt" ]]; then
+    [[ -z "$(git -C "$wt" status --porcelain 2>/dev/null)" ]] ||
+      skip "'$DEFAULT' is checked out at '$wt' with uncommitted work; nothing was moved"
+    git -C "$wt" merge -q --ff-only "$HEAD_SHA" >/dev/null 2>&1 ||
+      skip "could not fast-forward '$DEFAULT' at '$wt'; nothing was moved"
+  else
+    g update-ref -m "land-save: fast-forward to $BRANCH" "$BASE" "$HEAD_SHA" "$OLD" 2>/dev/null ||
+      skip "could not fast-forward '$DEFAULT' (it moved meanwhile?); nothing was moved"
+  fi
   rm -f "$ACK"
   say "MERGED (local) - fast-forwarded '$DEFAULT' to '$BRANCH'"     "  No 'origin' remote, so nothing was pushed; '$BRANCH' is now in '$DEFAULT', so step 6b reaps it."
 fi
 
 # --- 4b. merge, if origin moved -----------------------------------------------
 open_pr() {
+  [[ -z "$FF" ]] || return 0
   (cd "$VAULT" && gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number' 2>/dev/null) |
     tr -dc '0-9'
 }
@@ -235,6 +254,7 @@ push_tip() { # sha — never forced: a rejection means someone else moved the br
 }
 ensure_pr() {
   local out body
+  [[ -z "$FF" ]] || { PR=""; return 0; }
   PR="$(open_pr)"
   [[ -n "$PR" ]] && return 0
   [[ -n "$TITLE" ]] || TITLE="$(g log --reverse --no-merges --format=%s "$BASE..$HEAD_SHA" | sed -n 1p)"
@@ -285,7 +305,7 @@ if ! g merge-base --is-ancestor "$BASE" HEAD; then
     if [[ -n "$UNKNOWN" ]]; then
       push_tip "$HEAD_SHA"
       ensure_pr
-      say "LEFT OPEN #$PR - conflicts outside the known paths:$UNKNOWN" \
+      say "LEFT OPEN${PR:+ #$PR} - conflicts outside the known paths:$UNKNOWN" \
         "  origin/$DEFAULT is untouched. These need a person: resolve on '$BRANCH' and merge," \
         "  or close the PR. /brain:resume lists it until then."
     fi
@@ -362,12 +382,33 @@ pushed="$(g rev-parse -q --verify FETCH_HEAD 2>/dev/null)"
 # Re-read the policy too: the default branch may have narrowed .saveinclude since
 # step 3, and the merge publishes against the default branch as it is now.
 g fetch -q origin 2>/dev/null
-load_policy || say "LEFT OPEN #$PR - origin/$DEFAULT no longer has a .saveinclude with entries"
+load_policy || say "LEFT OPEN${PR:+ #$PR} - origin/$DEFAULT no longer has a .saveinclude with entries"
 bad="$(outside_scope "${pushed:-$TIP}")"
-[[ -z "$bad" ]] || say "LEFT OPEN #$PR - the pushed branch carries path(s) outside origin/$DEFAULT's .saveinclude: $(printf '%s' "$bad" | tr '\n' ' ')"
+[[ -z "$bad" ]] || say "LEFT OPEN${PR:+ #$PR} - the pushed branch carries path(s) outside origin/$DEFAULT's .saveinclude: $(printf '%s' "$bad" | tr '\n' ' ')"
 gov="$(governance "${pushed:-$TIP}")" ||
-  say "LEFT OPEN #$PR - the pushed branch breaks origin/$DEFAULT's brain.json policy" \
+  say "LEFT OPEN${PR:+ #$PR} - the pushed branch breaks origin/$DEFAULT's brain.json policy" \
     "$(printf '%s\n' "$gov" | sed 's/^/    /')"
+
+if [[ -n "$FF" ]]; then
+  # The fast-forward push IS the merge. Never forced: a rejection means the default
+  # branch moved since the fetch above (re-run: the merge step folds it in) or is
+  # protected (then the host's own review path applies).
+  if ! err="$(g push -q origin "${pushed:-$TIP}:refs/heads/$DEFAULT" 2>&1)"; then
+    say "LEFT OPEN - push to origin/$DEFAULT rejected: $(first_line "$err")" \
+      "  '$BRANCH' is pushed and origin/$DEFAULT is untouched. If $DEFAULT moved, re-run" \
+      "  land-save (it merges origin in first); if it is protected, merge the branch your host's way."
+  fi
+  rm -f "$ACK"
+  notes=()
+  g push -q origin --delete "$BRANCH" >/dev/null 2>&1 ||
+    notes+=("  NOTE: could not delete origin's '$BRANCH'; delete it by hand (it is merged).")
+  g fetch -q origin 2>/dev/null
+  echo "LAND: MERGED (fast-forward) - pushed '$BRANCH' to origin/$DEFAULT"
+  echo "  $FF, so no PR: the fast-forward push is the merge; step 6b reaps it."
+  [[ -z "$RESOLVED" ]] || echo "  resolved:$RESOLVED"
+  [[ ${#notes[@]} -eq 0 ]] || printf '%s\n' "${notes[@]}"
+  exit 0
+fi
 
 tries=0
 while :; do
@@ -375,11 +416,11 @@ while :; do
   tries=$((tries + 1))
   case "$merge_err" in
     *review*|*approv*|*protect*|*rule*|*permission*|*"not authorized"*)
-      say "LEFT OPEN #$PR - merge blocked: $(first_line "$merge_err")" \
+      say "LEFT OPEN${PR:+ #$PR} - merge blocked: $(first_line "$merge_err")" \
         "  origin/$DEFAULT requires something this account cannot give (a review, a" \
         "  ruleset bypass). The PR is open; merge it the usual way." ;;
   esac
-  [[ $tries -lt 3 ]] || say "LEFT OPEN #$PR - gh pr merge failed: $(first_line "$merge_err")"
+  [[ $tries -lt 3 ]] || say "LEFT OPEN${PR:+ #$PR} - gh pr merge failed: $(first_line "$merge_err")"
   # GitHub computes mergeability asynchronously; a PR opened a moment ago can
   # briefly read as not mergeable.
   sleep "${LAND_MERGE_RETRY_SECS:-2}"
