@@ -8,6 +8,9 @@
 <meta property="og:title" content="brain — a memory for coding agents">
 <meta property="og:description" content="A git-backed brain every agent session reads before it greps. Works with Claude Code, Codex, GitHub Copilot CLI and Grok.">
 <meta property="og:type" content="website">
+<meta property="og:url" content="https://karch4162.github.io/agent-infra/">
+<meta property="og:image" content="https://karch4162.github.io/agent-infra/assets/control-center-graph.png">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23070807'/%3E%3Ccircle cx='10' cy='12' r='3.2' fill='%2340d987'/%3E%3Ccircle cx='22' cy='9' r='2.4' fill='%23ff8f2a'/%3E%3Ccircle cx='21' cy='22' r='3.4' fill='%2340d987'/%3E%3Ccircle cx='9' cy='23' r='2' fill='%23e9ece6'/%3E%3Cpath d='M10 12L22 9M10 12L21 22M22 9L21 22M9 23L21 22M9 23L10 12' stroke='%23e9ece6' stroke-opacity='.45' stroke-width='1.1'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -191,7 +194,7 @@ footer a{color:var(--fg-2)}
   <canvas id="graph" aria-hidden="true"></canvas>
   <div class="vignette"></div>
   <div class="scrim"></div>
-  <aside class="caption" aria-live="polite">
+  <aside class="caption">
     <b>This is the brain's graph of its own code.</b>
     170 functions, 433 calls, extracted from the plugin source with no model and no API key. Move across it.
     <output id="hover"></output>
@@ -219,11 +222,11 @@ footer a{color:var(--fg-2)}
     <div class="transcript" aria-label="Example of a session resuming from the brain">
       <div class="m">// without a brain</div>
       <div class="u">&gt; where is the save allowlist enforced?</div>
-      <div class="x">grep -rn "saveinclude" . &nbsp;·&nbsp; 41 files &nbsp;·&nbsp; reads 9 of them &nbsp;·&nbsp; guesses</div>
+      <div class="x">grep -rn "saveinclude" . &nbsp;·&nbsp; 33 files &nbsp;·&nbsp; reads nine of them &nbsp;·&nbsp; guesses</div>
       <hr>
-      <div class="m">// with a brain</div>
+      <div class="m">// with a brain (the graph path is real; the note is illustrative)</div>
       <div class="u">&gt; where is the save allowlist enforced?</div>
-      <div class="y">graph: vault-commit.sh → readAllowlist() → check-governance.mjs</div>
+      <div class="y">graph: vault-commit.sh → read_index() → refuse_foreign() → check-governance.mjs commitGate()</div>
       <div class="y">wiki: bridges/vault-commit-gate.md &nbsp;·&nbsp; confidence: high &nbsp;·&nbsp; verified 3 days ago</div>
       <div class="m">"The index is checked before the first git add, so a refusal leaves nothing staged."</div>
     </div>
@@ -238,8 +241,8 @@ footer a{color:var(--fg-2)}
       <div class="layer">
         <div class="step"><i></i>graph first</div>
         <h3>The code graph</h3>
-        <p>Functions, calls and communities extracted from the AST by <a href="https://github.com/safishamsi/graphify" rel="noopener">graphify</a>. Deterministic, seed-pinned and keyless, so two machines build the same graph from the same commit.</p>
-        <div class="ex"><b>graphify/&lt;repo&gt;/graph.json</b><br>built_at_commit · scope fingerprint · 44 named communities</div>
+        <p>Functions, calls and communities extracted from the AST by <a href="https://pypi.org/project/graphifyy/" rel="noopener">graphify</a>. Deterministic, seed-pinned and keyless, so two machines build the same graph from the same commit.</p>
+        <div class="ex"><b>graphify/&lt;repo&gt;/graph.json</b><br>built_at_commit · scope fingerprint · 40 communities</div>
         <div class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
       </div>
       <div class="layer">
@@ -262,7 +265,7 @@ footer a{color:var(--fg-2)}
 <section id="loop">
   <div class="wrap">
     <h2>A day with a brain.</h2>
-    <p class="lede">Five moves. Each one is a command with a JSON result, so any host that can run Node can run the loop, and nothing depends on remembering a ritual.</p>
+    <p class="lede">Five moves. Each one is a command with a JSON result, so any host that can run Node can run the loop, and nothing depends on remembering a ritual. Shown as <code>brain …</code>: in Claude Code these are the <code>/brain:*</code> skills; elsewhere, <code>node PLUGIN/bin/brain.mjs …</code>.</p>
     <div class="loop">
       <div class="stage">
         <h3>Init</h3>
@@ -462,7 +465,7 @@ document.querySelectorAll('.tabs [role=tab]').forEach(tab=>{
     ctx.globalAlpha=1;
     if(hot){
       ctx.font='500 12px JetBrains Mono, monospace';const txt=hot.label,pad=7,w=ctx.measureText(txt).width+pad*2,x=Math.min(Math.max(hot.x+12,8),W-w-8),y=hot.y-26;
-      ctx.fillStyle='rgba(12,14,12,.92)';ctx.strokeStyle='#2a312b';ctx.beginPath();ctx.roundRect(x,y,w,22,6);ctx.fill();ctx.stroke();
+      ctx.fillStyle='rgba(12,14,12,.92)';ctx.strokeStyle='#2a312b';ctx.beginPath();if(ctx.roundRect)ctx.roundRect(x,y,w,22,6);else ctx.rect(x,y,w,22);ctx.fill();ctx.stroke();
       ctx.fillStyle='#e9ece6';ctx.fillText(txt,x+pad,y+15);
       out.textContent=hot.file+' · '+hot.deg+' calls';out.classList.add('on');cv.style.cursor='crosshair';
     }else{out.classList.remove('on');cv.style.cursor=''}
