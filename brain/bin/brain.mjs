@@ -5,6 +5,7 @@ import { context } from '../core/context.mjs';
 import { readJson, runMaintenance, pluginRoot, bashScript } from '../core/runtime.mjs';
 import { prepareGraph, recordGraph, graphStatus, buildGraph } from '../core/graph-inputs.mjs';
 import { importTranscript } from '../core/transcripts.mjs';
+import { randomUUID } from 'node:crypto';
 
 const argv = process.argv.slice(2);
 const options = {};
@@ -40,7 +41,14 @@ try {
     const session = options.session ? getSession(vault, options.session) : null;
     const target = session ? { ...vault, path: session.path } : vault;
     if (command === 'status') result = vaultStatus(target);
-    else if (command === 'graph') result = buildGraph(options.project, target, { scopes: JSON.parse(options.scopes || '["."]'), stack: options.stack, session: options.session });
+    else if (command === 'graph') {
+      // INNOV-415: never write the base checkout. No --session starts a managed one; the
+      // caller keeps using the returned id for the rest of the conversation.
+      const id = options.session || randomUUID();
+      const started = startSession(vault, id);
+      result = { ...buildGraph(options.project, { ...vault, path: started.path }, { scopes: JSON.parse(options.scopes || '["."]'), stack: options.stack, session: id }),
+        session: { id, path: started.path, branch: started.branch, env: started.env, reuse: 'Pass --session ' + id + ' to every later writing command in this conversation.' } };
+    }
     else if (command === 'sync') {
       if (options.session) throw new Error('sync updates the base vault; omit --session. Session branches are preserved for review.');
       result = syncVault(vault);

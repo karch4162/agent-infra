@@ -2,7 +2,7 @@ import { existsSync, readFileSync, lstatSync, readlinkSync, readdirSync, mkdirSy
 import { join, resolve, relative, isAbsolute, basename } from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { git, readJson, writeJson, bashScript, pluginRoot } from './runtime.mjs';
+import { git, readJson, writeJson, bashScript, runMaintenance, pluginRoot } from './runtime.mjs';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 function fingerprint(root, scopes) {
@@ -102,6 +102,14 @@ export function buildGraph(root, vault, { scopes = ['.'], stack, session } = {})
   let sync;
   try { sync = { state: 'synced', output: bashScript('sync-graph.sh', ['--no-commit', root.replace(/\\/g, '/')], vault.path, session) }; }
   catch (error) { sync = { state: 'refused', output: error.message }; }
-  return { state: 'built', root, name, scopes: scoped, extractor, carveOut, graph: join(root, 'graphify-out/graph.json'), mirror: join(vault.path, 'graphify', name, 'graph.json'), graphHash: record.graphHash, sync,
-    note: sync.state === 'synced' ? 'The mirror is copied, not committed; save or vault-commit.sh commits graphify/.' : 'The graph is built and recorded locally; fix the refusal, then rerun graph build.' };
+  // INNOV-415: with a session the vault path is its worktree, so the mirror is committed
+  // there (the allowlist covers graphify/ and wiki/log.md) and the base checkout stays
+  // clean for the next session start. Without one the copy is left for the caller.
+  let commit = { state: 'skipped', reason: session ? 'sync refused' : 'no --session: mirror copied uncommitted' };
+  if (session && sync.state === 'synced') {
+    try { commit = { state: 'committed', output: runMaintenance('vault-commit.sh', ['-m', `chore(brain): ${name} graph mirror (${extractor})`, 'graphify/', 'wiki/log.md'], vault.path, session) }; }
+    catch (error) { commit = { state: 'refused', output: error.message }; }
+  }
+  return { state: 'built', root, name, scopes: scoped, extractor, carveOut, graph: join(root, 'graphify-out/graph.json'), mirror: join(vault.path, 'graphify', name, 'graph.json'), graphHash: record.graphHash, sync, commit,
+    note: sync.state !== 'synced' ? 'The graph is built and recorded locally; fix the refusal, then rerun graph build.' : commit.state === 'committed' ? 'Mirror committed on the session branch; save or publish carries it.' : 'The mirror is copied, not committed; save or vault-commit.sh commits graphify/.' };
 }
