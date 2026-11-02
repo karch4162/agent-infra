@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-31T00:00:00Z",
+  "title": "Design System: brain",
+  "extensions": {
+    "colorMeta": {
+      "void": { "role": "neutral", "displayName": "Void", "canonical": "#070807", "tonalRamp": ["#070807", "#0c0e0c", "#121512", "#1e231f", "#2a312b", "#7f8a7f", "#b9c1b8", "#e9ece6"] },
+      "void-raised": { "role": "neutral", "displayName": "Void Raised", "canonical": "#0c0e0c" },
+      "void-panel": { "role": "neutral", "displayName": "Void Panel", "canonical": "#121512" },
+      "hairline": { "role": "neutral", "displayName": "Hairline", "canonical": "#1e231f" },
+      "hairline-strong": { "role": "neutral", "displayName": "Hairline Strong", "canonical": "#2a312b" },
+      "signal-green": { "role": "primary", "displayName": "Signal Green", "canonical": "#40d987", "tonalRamp": ["#06130b", "#0f3a24", "#1f7a4c", "#2aa868", "#40d987", "#5ae79b", "#8ff0ba", "#d2f9e3"] },
+      "signal-green-deep": { "role": "primary", "displayName": "Signal Green Deep", "canonical": "#1f7a4c" },
+      "alert-orange": { "role": "secondary", "displayName": "Alert Orange", "canonical": "#ff8f2a", "tonalRamp": ["#1a0d03", "#4a2709", "#8a4a12", "#c66a1a", "#ff8f2a", "#ffa655", "#ffc48c", "#ffe6cc"] },
+      "alert-orange-deep": { "role": "secondary", "displayName": "Alert Orange Deep", "canonical": "#8a4a12" },
+      "ink-on-green": { "role": "neutral", "displayName": "Ink on Green", "canonical": "#06130b" },
+      "text": { "role": "neutral", "displayName": "Text", "canonical": "#e9ece6" },
+      "text-muted": { "role": "neutral", "displayName": "Text Muted", "canonical": "#b9c1b8" },
+      "text-faint": { "role": "neutral", "displayName": "Text Faint", "canonical": "#7f8a7f" },
+      "bright": { "role": "neutral", "displayName": "Bright", "canonical": "#f3f5f0" }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Hero headline only; one word may take Signal Green." },
+      "headline": { "displayName": "Headline", "purpose": "Section headings." },
+      "title": { "displayName": "Title", "purpose": "Panel and rule headings; buttons and tabs at 14-15px." },
+      "body": { "displayName": "Body", "purpose": "Reading copy; Body Small inside panels." },
+      "label": { "displayName": "Label", "purpose": "Mono step numbers, verdicts, captions." },
+      "code": { "displayName": "Code", "purpose": "Transcripts and command blocks." }
+    },
+    "shadows": [
+      { "name": "bench-media", "value": "0 30px 60px -40px rgba(0,0,0,1)", "purpose": "Under screenshot figures only." },
+      { "name": "bench-card", "value": "0 20px 50px -30px rgba(0,0,0,.9)", "purpose": "Under the transcript card only." }
+    ],
+    "motion": [
+      { "name": "ease-lift", "value": "cubic-bezier(.2,.8,.2,1)", "purpose": "Button lift on hover, 250ms." },
+      { "name": "duration-state", "value": "200ms", "purpose": "Colour, border and background transitions." }
+    ],
+    "breakpoints": [
+      { "name": "loop", "value": "1000px" },
+      { "name": "hero", "value": "900px" },
+      { "name": "stack", "value": "860px" },
+      { "name": "nav", "value": "720px" },
+      { "name": "rules", "value": "700px" },
+      { "name": "loop-single", "value": "560px" },
+      { "name": "skills", "value": "480px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The install call to action; the only large green fill on the page.",
+      "html": "<a class=\"ds-btn ds-btn-primary\" href=\"#\">Install brain <svg viewBox=\"0 0 24 24\"><path d=\"M5 12h14M13 6l6 6-6 6\"/></svg></a>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;gap:10px;font-family:Syne,system-ui,sans-serif;font-weight:700;font-size:15px;letter-spacing:.01em;padding:13px 20px;border-radius:999px;border:1px solid #2a312b;color:#e9ece6;background:rgba(12,14,12,.7);text-decoration:none;transition:border-color .2s,transform .25s cubic-bezier(.2,.8,.2,1),background .2s}.ds-btn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.ds-btn:hover{border-color:#40d987;transform:translateY(-1px)}.ds-btn:focus-visible{outline:2px solid #40d987;outline-offset:3px}.ds-btn-primary{background:#40d987;color:#06130b;border-color:#40d987}.ds-btn-primary:hover{background:#5ae79b}"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Secondary action; translucent with a hairline that turns green on hover.",
+      "html": "<a class=\"ds-btn ds-btn-ghost\" href=\"#\">Read the source</a>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;gap:10px;font-family:Syne,system-ui,sans-serif;font-weight:700;font-size:15px;letter-spacing:.01em;padding:13px 20px;border-radius:999px;border:1px solid #2a312b;color:#e9ece6;background:rgba(12,14,12,.7);backdrop-filter:blur(8px);text-decoration:none;transition:border-color .2s,transform .25s cubic-bezier(.2,.8,.2,1),background .2s}.ds-btn-ghost:hover{border-color:#40d987;transform:translateY(-1px);background:rgba(18,22,18,.9)}.ds-btn:focus-visible{outline:2px solid #40d987;outline-offset:3px}"
+    },
+    {
+      "name": "Tab Rail",
+      "kind": "nav",
+      "refersTo": "tab-selected",
+      "description": "Pill rail of host tabs; the selected tab inverts to off-white.",
+      "html": "<div class=\"ds-tabs\" role=\"tablist\"><button class=\"ds-tab\" role=\"tab\" aria-selected=\"true\">Claude Code</button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\">GitHub Copilot CLI</button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\">Codex and Grok</button></div>",
+      "css": ".ds-tabs{display:inline-flex;gap:4px;border:1px solid #1e231f;border-radius:999px;padding:4px;background:#0c0e0c}.ds-tab{font-family:Syne,system-ui,sans-serif;font-weight:700;font-size:14px;color:#b9c1b8;background:transparent;border:0;border-radius:999px;padding:9px 16px;cursor:pointer;transition:background .2s,color .2s}.ds-tab[aria-selected=true]{background:#e9ece6;color:#06130b}.ds-tab:hover:not([aria-selected=true]){color:#e9ece6;background:#121512}.ds-tab:focus-visible{outline:2px solid #40d987;outline-offset:3px}"
+    },
+    {
+      "name": "Nav Link Rail",
+      "kind": "nav",
+      "description": "Translucent blurred pill holding the top navigation links.",
+      "html": "<div class=\"ds-navlinks\"><a href=\"#\">How it works</a><a href=\"#\">Install</a><a href=\"#\">Source</a></div>",
+      "css": ".ds-navlinks{display:inline-flex;gap:4px;background:rgba(7,8,7,.6);backdrop-filter:blur(10px);border:1px solid #1e231f;border-radius:999px;padding:4px}.ds-navlinks a{font-family:'Instrument Sans',system-ui,sans-serif;color:#b9c1b8;font-size:14px;font-weight:500;padding:7px 13px;border-radius:999px;text-decoration:none;transition:color .2s,background .2s}.ds-navlinks a:hover{color:#e9ece6;background:#121512}.ds-navlinks a:focus-visible{outline:2px solid #40d987;outline-offset:3px}"
+    },
+    {
+      "name": "Code Block",
+      "kind": "card",
+      "refersTo": "code-block",
+      "description": "Install commands; mono on Void Raised with four token colours.",
+      "html": "<pre class=\"ds-pre\"><span class=\"c\"># add the marketplace, then install</span>\nclaude plugin marketplace add <span class=\"g\">karch4162/agent-infra</span>\nclaude plugin install <span class=\"w\">brain@agent-infra</span></pre>",
+      "css": ".ds-pre{margin:0;font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-size:13.5px;background:#0c0e0c;border:1px solid #1e231f;border-radius:10px;padding:16px 18px;overflow-x:auto;line-height:1.7;color:#b9c1b8}.ds-pre .c{color:#7f8a7f}.ds-pre .g{color:#40d987}.ds-pre .o{color:#ff8f2a}.ds-pre .w{color:#f3f5f0}"
+    },
+    {
+      "name": "Layer Panel",
+      "kind": "card",
+      "refersTo": "card-panel",
+      "description": "One cell of the three-layer strip: mono step label with a coloured dot, title, body, example.",
+      "html": "<div class=\"ds-layer\"><div class=\"ds-step\"><i></i>02 · wiki</div><h3>Human-gated notes</h3><p>Drafts stay in staging until someone promotes them by PR.</p><div class=\"ds-ex\"><b>wiki/_drafts/</b> → <b>wiki/</b></div></div>",
+      "css": ".ds-layer{padding:28px 26px 30px;background:#0c0e0c;border:1px solid #1e231f;border-radius:14px;font-family:'Instrument Sans',system-ui,sans-serif;color:#b9c1b8}.ds-step{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-size:12px;color:#7f8a7f;display:flex;align-items:center;gap:10px;margin-bottom:18px}.ds-step i{width:8px;height:8px;border-radius:50%;background:#40d987;display:inline-block}.ds-layer h3{font-family:Syne,system-ui,sans-serif;font-weight:700;font-size:22px;line-height:1.05;letter-spacing:-.01em;margin:0 0 10px;color:#e9ece6}.ds-layer p{margin:0;font-size:15.5px;line-height:1.6}.ds-ex{margin-top:18px;font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-size:12.5px;color:#7f8a7f;line-height:1.6;border-top:1px dashed #2a312b;padding-top:14px}.ds-ex b{color:#b9c1b8;font-weight:500}"
+    },
+    {
+      "name": "Transcript Card",
+      "kind": "custom",
+      "description": "A before/after agent transcript on the bench; the one card with a shadow.",
+      "html": "<div class=\"ds-transcript\"><div class=\"u\">&gt; where do we validate webhook signatures?</div><div class=\"m\">grep -rn \"signature\" src/ …</div><div class=\"x\">✗ 4 minutes, wrong file</div><hr><div class=\"u\">&gt; /brain:resume</div><div class=\"y\">✓ wiki/webhooks.md → src/hooks/verify.ts:41</div></div>",
+      "css": ".ds-transcript{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-size:13.5px;line-height:1.7;background:#0c0e0c;border:1px solid #1e231f;border-radius:12px;padding:20px 22px;color:#b9c1b8;box-shadow:0 20px 50px -30px rgba(0,0,0,.9)}.ds-transcript .u{color:#f3f5f0}.ds-transcript .m{color:#7f8a7f}.ds-transcript .x{color:#ff8f2a}.ds-transcript .y{color:#40d987}.ds-transcript hr{border:0;border-top:1px dashed #2a312b;margin:12px 0}"
+    },
+    {
+      "name": "Inline Code",
+      "kind": "chip",
+      "refersTo": "code-inline",
+      "description": "Skill and file names inside prose.",
+      "html": "<p class=\"ds-p\">Run <code class=\"ds-code\">/brain:resume</code> before you grep.</p>",
+      "css": ".ds-p{font-family:'Instrument Sans',system-ui,sans-serif;font-size:17px;line-height:1.6;color:#e9ece6;margin:0}.ds-code{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-size:.86em;background:#121512;border:1px solid #1e231f;padding:.1em .4em;border-radius:5px;color:#e9ece6;white-space:nowrap}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Night Observatory",
+    "overview": "A dark instrument room where a living graph is the only light. The field is near-black and stays that way; the graph's green nodes are the signal, orange is the alert, and everything else is hairlines and readouts. The page feels calm and precise, with a hint of cinema from the canvas-drawn graph in the hero, but nothing glows at rest and nothing competes with the data.\n\nDensity is comfortable, not dashboard-dense. Sections breathe with generous vertical padding; inside them, information sits in hairline-bounded grids that read like labelled instrument panels. Depth comes from stepping the black up a tone and drawing a 1px line, never from shadows, except under screenshots and the transcript card.\n\nType does the persuading. Syne carries every heading and button; Instrument Sans carries the reading; JetBrains Mono carries anything the machine said or the user will type.",
+    "keyCharacteristics": [
+      "Near-black tonal field in three steps with 1px hairlines.",
+      "One signal colour (green) for links, primary action, live dots and good readouts; one alert colour (orange) for drift, failure and the third step of any sequence.",
+      "Syne display at 700–800 with negative tracking; mono for every machine string.",
+      "Pill geometry for interactive controls, 10–14px radii for panels, hairline borders everywhere.",
+      "Flat by default; shadows only under media.",
+      "Motion is restrained: 200ms colour transitions, 250ms lift on buttons, a living canvas in the hero, everything off under reduced-motion."
+    ],
+    "rules": [
+      { "name": "The Two Signals Rule", "body": "Green means live or good; orange means drift or alert. No third accent, and neither colour appears as a large fill except the single primary button.", "section": "colors" },
+      { "name": "The Ink Rule", "body": "Text on a green or white fill is always ink-on-green, never black or grey.", "section": "colors" },
+      { "name": "The Machine Voice Rule", "body": "Commands, file names, skill names and transcript lines are JetBrains Mono, never styled sans.", "section": "typography" },
+      { "name": "The One Display Rule", "body": "Display weight 800 appears once per page, in the hero.", "section": "typography" },
+      { "name": "The Flat Bench Rule", "body": "Surfaces are flat and hairlined at rest. Shadows exist only under media and the transcript; buttons, panels and tabs never cast one.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep the page background at Void and build depth with Void Raised and Void Panel plus 1px hairlines.",
+      "Do reserve Signal Green for links, the primary action, live dots and good states, and Alert Orange for drift and failure.",
+      "Do set every command, path and transcript line in JetBrains Mono.",
+      "Do use pills for interactive controls and 10–14px radii for containers.",
+      "Do honour prefers-reduced-motion by removing all animation and transition."
+    ],
+    "donts": [
+      "Don't add shadows to buttons, panels or tabs; only media and the transcript cast one.",
+      "Don't introduce a third accent, gradient text, or glow at rest.",
+      "Don't put black or grey text on a green or white fill; use Ink on Green.",
+      "Don't use Display weight 800 anywhere but the hero headline.",
+      "Don't replace the hairline grid with floating glass cards."
+    ]
+  }
+}

@@ -18,3 +18,8 @@ Thumbs.db
 
 .claude/settings.local.json
 .graphifyignore
+
+# impeccable: machine paths and live-session journals stay local; config, tokens and live file list are shared
+.impeccable/hook.cache.json
+.impeccable/live/*
+!.impeccable/live/config.json

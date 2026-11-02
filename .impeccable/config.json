@@ -1,0 +1,41 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "instrument sans",
+        "createdAt": "2026-10-30T15:50:36.243Z",
+        "reason": "model: body face only; Syne carries the display voice"
+      },
+      {
+        "rule": "tight-leading",
+        "value": "*",
+        "files": [
+          "docs/index.html"
+        ],
+        "createdAt": "2026-10-30T15:50:36.655Z",
+        "reason": "model: 1.05 leading is on display headings only, body is 1.6"
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          "docs/index.html"
+        ],
+        "createdAt": "2026-10-30T15:50:37.074Z",
+        "reason": "model: sections carry 72px+ inner padding; detector reads the section border-top"
+      },
+      {
+        "rule": "marquee",
+        "value": "*",
+        "files": [
+          "docs/index.html"
+        ],
+        "createdAt": "2026-10-31T14:46:00.989Z",
+        "reason": "model: loop-pulse is a 1px spark on a decorative connector line, no content scrolls; variant accepted in live mode"
+      }
+    ]
+  }
+}

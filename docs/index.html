@@ -86,14 +86,23 @@ nav>*{pointer-events:auto}
 @media(max-width:900px){.hero .caption{display:none}.hero{min-height:92svh}}
 
 /* problem */
-.split{display:grid;grid-template-columns:1.05fr .95fr;gap:clamp(32px,6vw,96px);align-items:start}
-@media(max-width:860px){.split{grid-template-columns:1fr}}
-.transcript{font-family:var(--mono);font-size:13.5px;line-height:1.7;background:var(--bg-2);border:1px solid var(--line);border-radius:12px;padding:20px 22px;color:var(--fg-2);box-shadow:0 20px 50px -30px rgba(0,0,0,.9)}
-.transcript .u{color:var(--white)}
-.transcript .m{color:var(--fg-3)}
-.transcript .x{color:var(--orange)}
-.transcript .y{color:var(--green)}
-.transcript hr{border:0;border-top:1px dashed var(--line-2);margin:12px 0}
+#why .wrap{display:grid;gap:clamp(28px,4vw,48px)}
+.why-copy{display:grid;grid-template-columns:1.05fr .95fr;gap:clamp(32px,6vw,96px);align-items:end}
+.why-copy .quote{margin-top:0}
+@media(max-width:860px){.why-copy{grid-template-columns:1fr;align-items:start}.why-copy .quote{margin-top:28px}}
+.diff{font-family:var(--mono);font-size:13.5px;line-height:1.7;background:var(--bg-2);border:1px solid var(--line);border-radius:12px;overflow:hidden;color:var(--fg-2)}
+.diff-head{padding:10px 18px;border-bottom:1px solid var(--line);color:var(--fg-3);font-size:12px;display:flex;justify-content:space-between;gap:16px}
+.diff-head b{color:var(--fg-2);font-weight:500}
+.diff-hunk{padding:6px 18px;color:var(--fg-3);background:var(--bg-3);border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-size:12px}
+.diff-line{display:grid;grid-template-columns:44px 22px 1fr;padding:0 18px 0 0;transition:background .15s}
+.diff-line>i{font-style:normal;text-align:right;padding-right:10px;color:var(--fg-3)}
+.diff-line>b{font-weight:400;color:var(--fg-3)}
+.diff-line>span{color:var(--fg-3)}
+.diff-line.u>span{color:var(--white)}
+.diff-line.x{background:rgba(255,143,42,.08)}.diff-line.x>b,.diff-line.x>span{color:var(--orange)}
+.diff-line.y{background:rgba(64,217,135,.08)}.diff-line.y>b,.diff-line.y>span{color:var(--green)}
+.diff-line.x:hover{background:rgba(255,143,42,.16)}.diff-line.y:hover{background:rgba(64,217,135,.16)}
+@media(max-width:560px){.diff-line{grid-template-columns:0 22px 1fr}.diff-line>i{display:none}}
 .quote{font-family:var(--display);font-weight:500;font-size:clamp(22px,2.6vw,30px);line-height:1.25;letter-spacing:-.015em;color:var(--fg);margin-top:28px}
 .quote small{display:block;font-family:var(--body);font-size:15px;color:var(--fg-3);margin-top:10px;letter-spacing:0}
 
@@ -113,6 +122,22 @@ nav>*{pointer-events:auto}
 .layer .arrow{position:absolute;right:-13px;top:34px;width:26px;height:26px;border-radius:50%;background:var(--bg-3);border:1px solid var(--line-2);display:grid;place-items:center;z-index:2}
 .layer .arrow svg{width:12px;height:12px;stroke:var(--fg-2);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 @media(max-width:860px){.layers{grid-template-columns:1fr}.layer+.layer{border-left:0;border-top:1px solid var(--line)}.layer .arrow{right:auto;left:26px;top:-13px;transform:rotate(90deg)}}
+/* the question narrows as the strip scrolls into view (resting dim .25) */
+.layers{view-timeline-name:--layers;view-timeline-axis:block}
+.layer{opacity:.25;animation:layer-wake both linear;animation-timeline:--layers}
+.layer:nth-child(1){animation-range:cover 4% cover 16%}.layer:nth-child(2){animation-range:cover 18% cover 30%}.layer:nth-child(3){animation-range:cover 32% cover 44%}
+.layer .arrow{animation:arrow-pop both linear;animation-timeline:--layers}
+.layer:nth-child(1) .arrow{animation-range:cover 14% cover 20%}.layer:nth-child(2) .arrow{animation-range:cover 28% cover 34%}
+.layer .narrow{display:flex;justify-content:space-between;gap:12px;font-family:var(--mono);font-size:12px;color:var(--fg-3);margin-top:16px}
+.layer .bar{height:4px;border-radius:2px;background:var(--bg-3);margin-top:8px;overflow:hidden}
+.layer .bar i{display:block;height:100%;width:100%;transform-origin:left center;animation:bar-narrow both linear;animation-timeline:--layers}
+.layer:nth-child(1) .bar i{--w:1;background:var(--white);animation-range:cover 6% cover 18%}
+.layer:nth-child(2) .bar i{--w:.38;background:var(--green);animation-range:cover 20% cover 32%}
+.layer:nth-child(3) .bar i{--w:.06;background:var(--orange);animation-range:cover 34% cover 46%}
+@keyframes layer-wake{from{opacity:.25}to{opacity:1}}
+@keyframes arrow-pop{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}
+@keyframes bar-narrow{from{transform:scaleX(1)}to{transform:scaleX(var(--w,1))}}
+@supports not (animation-timeline:view()){.layer,.layer .arrow{animation:none;opacity:1;transform:none}.layer .bar i{animation:none;transform:scaleX(var(--w))}}
 
 /* loop */
 .loop{margin-top:56px;display:grid;grid-template-columns:repeat(5,1fr);gap:18px;position:relative}
@@ -124,6 +149,16 @@ nav>*{pointer-events:auto}
 .stage code{display:inline-block;margin-top:12px;font-size:12.5px;white-space:normal;word-break:break-word;color:var(--fg-2)}
 .stage .verdict{margin-top:10px;font-family:var(--mono);font-size:12px;color:var(--green)}
 @media(max-width:1000px){.loop{grid-template-columns:repeat(2,1fr)}.loop:before{display:none}}
+/* a pulse runs the loop every 7s; each move lights as it passes */
+.loop .pulse{position:absolute;left:14px;right:14px;top:9px;height:1px;overflow:hidden;pointer-events:none}
+.loop .pulse:before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent 0,transparent calc(100% - 140px),var(--green) calc(100% - 20px),var(--white));transform:translateX(-100%);animation:loop-pulse 7s linear infinite}
+.stage:before{animation:loop-dot 7s linear infinite}
+.stage .verdict{animation:loop-verdict 7s linear infinite}
+.stage:nth-child(1):before,.stage:nth-child(1) .verdict{animation-delay:-3.5s}.stage:nth-child(2):before,.stage:nth-child(2) .verdict{animation-delay:-2.8s}.stage:nth-child(3):before,.stage:nth-child(3) .verdict{animation-delay:-2.1s}.stage:nth-child(4):before,.stage:nth-child(4) .verdict{animation-delay:-1.4s}.stage:nth-child(5):before,.stage:nth-child(5) .verdict{animation-delay:-.7s}
+@keyframes loop-pulse{to{transform:translateX(100%)}}
+@keyframes loop-dot{0%,3%{background:var(--green);box-shadow:0 0 0 4px var(--green-glow)}14%{background:var(--bg);box-shadow:0 0 0 0 transparent}100%{background:var(--bg)}}
+@keyframes loop-verdict{0%,3%{color:var(--white)}14%,100%{color:var(--green)}}
+@media(max-width:1000px){.loop .pulse{display:none}.stage:before,.stage .verdict{animation:none}}
 @media(max-width:560px){.loop{grid-template-columns:1fr}}
 
 /* guarantees */
@@ -213,22 +248,24 @@ footer a{color:var(--fg-2)}
 </header>
 
 <section id="why">
-  <div class="wrap split">
-    <div>
-      <h2>Every session starts from zero. Yours don't have to.</h2>
-      <p class="lede">An agent that re-derives your architecture from raw files each morning spends its first ten minutes guessing, and the decision you made on Tuesday is gone by Thursday. The code can say what. It has never been able to say why.</p>
+  <div class="wrap">
+    <div class="why-copy">
+      <div>
+        <h2>Every session starts from zero. Yours don't have to.</h2>
+        <p class="lede">An agent that re-derives your architecture from raw files each morning spends its first ten minutes guessing, and the decision you made on Tuesday is gone by Thursday. The code can say what. It has never been able to say why.</p>
+      </div>
       <p class="quote">A brain turns "re-read everything" into "read what the last session already knew."<small>Graph for structure. Wiki for reasons. Logs for continuity. All of it in git, all of it diffable.</small></p>
     </div>
-    <div class="transcript" aria-label="Example of a session resuming from the brain">
-      <div class="m">// without a brain</div>
-      <div class="u">&gt; where is the save allowlist enforced?</div>
-      <div class="x">grep -rn "saveinclude" . &nbsp;·&nbsp; 33 files &nbsp;·&nbsp; reads nine of them &nbsp;·&nbsp; guesses</div>
-      <hr>
-      <div class="m">// with a brain (the graph path is real; the note is illustrative)</div>
-      <div class="u">&gt; where is the save allowlist enforced?</div>
-      <div class="y">graph: vault-commit.sh → read_index() → refuse_foreign() → check-governance.mjs commitGate()</div>
-      <div class="y">wiki: bridges/vault-commit-gate.md &nbsp;·&nbsp; confidence: high &nbsp;·&nbsp; verified 3 days ago</div>
-      <div class="m">"The index is checked before the first git add, so a refusal leaves nothing staged."</div>
+    <div class="diff" aria-label="Example of a session resuming from the brain, shown as a diff">
+      <div class="diff-head"><span><b>session.log</b> &nbsp;·&nbsp; same question, two mornings</span><span>− without a brain &nbsp; + with a brain</span></div>
+      <div class="diff-line m"><i>1</i><b></b><span>// without a brain</span></div>
+      <div class="diff-line u"><i>2</i><b></b><span>&gt; where is the save allowlist enforced?</span></div>
+      <div class="diff-line x"><i>3</i><b>−</b><span>grep -rn "saveinclude" . &nbsp;·&nbsp; 33 files &nbsp;·&nbsp; reads nine of them &nbsp;·&nbsp; guesses</span></div>
+      <div class="diff-hunk">@@ next morning, with a brain (the graph path is real; the note is illustrative) @@</div>
+      <div class="diff-line u"><i>4</i><b></b><span>&gt; where is the save allowlist enforced?</span></div>
+      <div class="diff-line y"><i>5</i><b>+</b><span>graph: vault-commit.sh → read_index() → refuse_foreign() → check-governance.mjs commitGate()</span></div>
+      <div class="diff-line y"><i>6</i><b>+</b><span>wiki: bridges/vault-commit-gate.md &nbsp;·&nbsp; confidence: high &nbsp;·&nbsp; verified 3 days ago</span></div>
+      <div class="diff-line m"><i>7</i><b></b><span>"The index is checked before the first git add, so a refusal leaves nothing staged."</span></div>
     </div>
   </div>
 </section>
@@ -242,6 +279,8 @@ footer a{color:var(--fg-2)}
         <div class="step"><i></i>graph first</div>
         <h3>The code graph</h3>
         <p>Functions, calls and communities extracted from the AST by <a href="https://pypi.org/project/graphifyy/" rel="noopener">graphify</a>. Deterministic, seed-pinned and keyless, so two machines build the same graph from the same commit.</p>
+        <div class="narrow"><span>the question</span><span>whole repo</span></div>
+        <div class="bar"><i></i></div>
         <div class="ex"><b>graphify/&lt;repo&gt;/graph.json</b><br>built_at_commit · scope fingerprint · 40 communities</div>
         <div class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
       </div>
@@ -249,6 +288,8 @@ footer a{color:var(--fg-2)}
         <div class="step"><i></i>then the wiki</div>
         <h3>The wiki</h3>
         <p>One fact per note, with an owner, a source anchor into code, a confidence and a last-verified date. Agents write drafts. People promote the keepers through a pull request.</p>
+        <div class="narrow"><span>narrowed</span><span>the notes that matter</span></div>
+        <div class="bar"><i></i></div>
         <div class="ex"><b>wiki/bridges/auth-contract.md</b><br>source: api/auth.ts#verify · confidence: high · last_verified: 2026-10-28</div>
         <div class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
       </div>
@@ -256,6 +297,8 @@ footer a{color:var(--fg-2)}
         <div class="step"><i></i>raw files last</div>
         <h3>The raw source</h3>
         <p>Still there, still read, but only when the graph and the wiki have already narrowed the question to a handful of files. Grep becomes the confirmation, not the search.</p>
+        <div class="narrow"><span>confirmed</span><span>a handful of files</span></div>
+        <div class="bar"><i></i></div>
         <div class="ex"><b>graph-before-grep hook</b><br>nudges once per session · stale-aware · silent when no graph exists</div>
       </div>
     </div>
@@ -267,6 +310,7 @@ footer a{color:var(--fg-2)}
     <h2>A day with a brain.</h2>
     <p class="lede">Five moves. Each one is a command with a JSON result, so any host that can run Node can run the loop, and nothing depends on remembering a ritual. Shown as <code>brain …</code>: in Claude Code these are the <code>/brain:*</code> skills; elsewhere, <code>node PLUGIN/bin/brain.mjs …</code>.</p>
     <div class="loop">
+      <i class="pulse" aria-hidden="true"></i>
       <div class="stage">
         <h3>Init</h3>
         <p>Bind the repo to a vault: a GitHub repo, a local bare repo, or a plain folder. Pick the stack and the source roots.</p>
