@@ -9,6 +9,7 @@
 #   bash "$WAVE/triage.sh" SPO-378 SPO-236          # linear: selected candidates
 #   bash "$WAVE/triage.sh" --all                    # linear: all Backlog candidates
 #   bash "$WAVE/triage.sh" --json issues.json ...   # any tracker: issues saved as JSON
+#   bash "$WAVE/triage.sh" 86bcw6zh5 / --all       # clickup: via autonomy/clickup_tracker.py
 #   TRIAGER=agy bash "$WAVE/triage.sh" SPO-378      # grok (default) | agy | sonnet
 # --json takes a Jira search result ({"issues":{"nodes":[...]}} or a list), one Jira
 # issue, or Linear issue objects. Jira has no CLI here, so the host session fetches
@@ -94,6 +95,13 @@ if [ "$#" -eq 0 ]; then
   exit 2
 elif [ "$1" = "--json" ]; then
   shift; for f in "$@"; do split_issues keep < "$f"; done
+elif [ "$WAVE_TRACKER" = "clickup" ]; then
+  CU="$WAVE_HOME/autonomy/clickup_tracker.py"   # get/queue print {identifier,title,description,...}
+  if [ "$1" = "--all" ]; then
+    "$WAVE_PY" "$CU" queue --status "${WAVE_QUEUE_STATUS:-backlog}" | split_issues skip-ready
+  else
+    for id in "$@"; do "$WAVE_PY" "$CU" get "$id" | split_issues keep; done
+  fi
 elif [ "$WAVE_TRACKER" != "linear" ]; then
   echo "triage: $WAVE_TRACKER issues can't be fetched from the shell; save them with the MCP and pass --json FILE" >&2
   exit 2

@@ -492,6 +492,67 @@ out="$(cost_run ABC-8)"
 assert_contains "cost/missing-says-so" "$out" "no worktree found for ABC-8"
 assert_eq "cost/missing-exit-1" "1" "$(cost_run ABC-8 >/dev/null; echo $?)"
 
+echo "--- 32. clickup tracker: the prompt uses the REST adapter CLI, no orca linear, no assignee step ---"
+CLICKUP_CONFIG="WAVE_TRACKER=clickup
+WAVE_CLICKUP_LIST=123
+WAVE_QUEUE='list 123, status backlog, tag agent-ready'
+WAVE_STATE_START='in progress'
+WAVE_STATE_DONE=completed
+WAVE_FILE_TO='ClickUp list 123'"
+new_sandbox "$CLICKUP_CONFIG"
+st="$(spawn_dry)"
+out="$(cat "$BOX/out.txt")"
+assert_eq "clickup/exit-0" "0" "$st"
+assert_contains "clickup/tracker-ops" "$out" "clickup_tracker.py"
+assert_contains "clickup/start-state" "$out" "Set it in progress"
+assert_contains "clickup/no-assignee" "$out" "there is no assignee step"
+assert_contains "clickup/attach" "$out" "clickup_tracker.py comment"
+assert_not_contains "clickup/no-linear" "$out" "orca linear"
+new_sandbox "WAVE_TRACKER=clickup
+WAVE_QUEUE=q
+WAVE_STATE_START=a
+WAVE_STATE_DONE=b
+WAVE_FILE_TO=c"
+st="$(spawn_dry)"
+assert_eq "clickup-no-list/exit-1" "1" "$st"
+assert_contains "clickup-no-list/names-key" "$(cat "$BOX/out.txt")" "WAVE_CLICKUP_LIST"
+
+echo "--- 33. WAVE_RUNTIME=direct: same contract, summary.md + step commits instead of orca worktree set ---"
+new_sandbox "$JIRA_CONFIG"
+spawn_dry >/dev/null
+out="$(cat "$BOX/out.txt")"
+assert_contains "runtime-default/orca-summary" "$out" "orca worktree set --worktree active --comment"
+assert_contains "pr-markers/review-verdict" "$(sed -n '/## Wave/,/^6\. /p' <<<"$out")" "REVIEW VERDICT:"
+st="$(spawn_dry WAVE_RUNTIME=direct)"
+out="$(cat "$BOX/out.txt")"
+assert_eq "direct/exit-0" "0" "$st"
+assert_contains "direct/summary-file" "$out" 'summary.md'
+assert_contains "direct/step-commit" "$out" "worker_step_commit.py"
+assert_not_contains "direct/no-orca-set" "$out" "orca worktree set"
+assert_contains "direct/same-pr-block" "$out" "## Wave"
+st="$(spawn_dry WAVE_RUNTIME=bogus)"
+assert_eq "direct-bad/exit-1" "1" "$st"
+assert_contains "direct-bad/says" "$(cat "$BOX/out.txt")" "WAVE_RUNTIME must be orca or direct"
+st="$(spawn_dry WAVE_RUNTIME=direct WAVE_RUN=run_x DRY_RUN=)"
+assert_eq "direct-supervised/exit-1" "1" "$st"
+assert_contains "direct-supervised/says" "$(cat "$BOX/out.txt")" "needs WAVE_RUNTIME=orca"
+out="$(cd "$BOX" && WAVE_RUNTIME=direct bash "$WAVE/status.sh" 2>&1)"
+assert_contains "direct-status/empty" "$out" "no runs under"
+assert_not_contains "direct-status/no-orca" "$out" "not registered with Orca"
+
+echo "--- 34. bootstrap: clickup needs a list id and writes a config lib.sh accepts ---"
+new_sandbox ""
+st="$(boot bash "$WAVE/bootstrap.sh" --label sports --tracker clickup)"
+assert_eq "boot-clickup-nolist/exit-2" "2" "$st"
+assert_contains "boot-clickup-nolist/need-list" "$(cat "$BOX/boot.txt")" "NEED: list"
+st="$(boot bash "$WAVE/bootstrap.sh" --label sports --tracker clickup --list 901)"
+assert_eq "boot-clickup/exit-0" "0" "$st"
+cfg="$(cat "$(CFG)")"
+assert_contains "boot-clickup/list" "$cfg" "WAVE_CLICKUP_LIST='901'"
+assert_contains "boot-clickup/queue" "$cfg" "WAVE_QUEUE='list 901, status backlog, tag sports, tag agent-ready'"
+assert_contains "boot-clickup/default-done" "$cfg" "WAVE_STATE_DONE='completed'"
+assert_eq "boot-clickup/lib-accepts" "0" "$(spawn_dry)"
+
 echo
 echo "$PASSED passed, $FAILED failed"
 [[ $FAILED -eq 0 ]]

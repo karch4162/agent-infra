@@ -6,7 +6,7 @@
 # (queue label, state names) are flags only: one vault serves many repos.
 #
 #   bash bootstrap.sh --label <repo-label> [--start S] [--done S]
-#                     [--tracker jira|linear] [--project P] [--site S]
+#                     [--tracker jira|linear|clickup] [--project P] [--site S] [--list ID]
 #
 # Exit 0: wrote the config (or one already exists - never touched).
 # Exit 2: something is missing; each gap is a "NEED: <what> - <why>; pass
@@ -24,11 +24,12 @@ if [ -f "$CONFIG" ]; then
   exit 0
 fi
 
-TRACKER="" PROJECT="" SITE="" LABEL="" START="" DONE=""
+TRACKER="" PROJECT="" SITE="" LABEL="" START="" DONE="" LIST=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --tracker) TRACKER="${2:-}" ;;
     --project) PROJECT="${2:-}" ;;
+    --list)    LIST="${2:-}" ;;
     --site)    SITE="${2:-}" ;;
     --label)   LABEL="${2:-}" ;;
     --start)   START="${2:-}" ;;
@@ -64,10 +65,10 @@ else:
 t = (load(os.path.join(vault, "brain.json")) or {}).get("tracker") if vault else None
 if vault and not isinstance(t, dict): why = "%s/brain.json has no tracker" % vault
 t = t if isinstance(t, dict) else {}
-kind = t.get("type") if t.get("type") in ("jira", "linear") else ""
+kind = t.get("type") if t.get("type") in ("jira", "linear", "clickup") else ""
 if t.get("type") == "none": why = "%s/brain.json has tracker type none" % vault
 print(kind)
-print((t.get("team") or t.get("project") or "") if kind == "linear" else (t.get("project") or ""))
+print((t.get("team") or t.get("project") or "") if kind == "linear" else (t.get("list") or t.get("project") or ""))
 print(t.get("site") or "")
 print(why)
 ' "$(winpath "$ROOT")" "$(winpath "${BRAIN_ROOT:-}")" "$(winpath "${BRAIN_HOME:-$HOME/.brain}")" | tr -d '\r')" || {
@@ -81,27 +82,34 @@ V_WHY="$(sed -n 4p <<<"$FROM_VAULT")"
 TRACKER="${TRACKER:-$V_TYPE}"
 PROJECT="${PROJECT:-$V_PROJECT}"
 SITE="${SITE:-$V_SITE}"
+[ "$TRACKER" = clickup ] && LIST="${LIST:-$V_PROJECT}"
 
 need=0
 case "$TRACKER" in
-  jira|linear) ;;
-  "") echo "NEED: tracker - $V_WHY; pass --tracker jira|linear --project <Jira project or Linear team>"; need=1 ;;
-  *) echo "wave: --tracker must be jira or linear, got '$TRACKER'" >&2; exit 1 ;;
+  jira|linear|clickup) ;;
+  "") echo "NEED: tracker - $V_WHY; pass --tracker jira|linear|clickup --project <Jira project or Linear team> (clickup: --list <list id>)"; need=1 ;;
+  *) echo "wave: --tracker must be jira, linear or clickup, got '$TRACKER'" >&2; exit 1 ;;
 esac
-[ -n "$TRACKER" ] && [ -z "$PROJECT" ] && { echo "NEED: project - brain.json tracker names no project or team; pass --project <Jira project or Linear team>"; need=1; }
+if [ "$TRACKER" = clickup ]; then
+  [ -z "$LIST" ] && { echo "NEED: list - the ClickUp list id the queue lives in; pass --list <id>"; need=1; }
+elif [ -n "$TRACKER" ] && [ -z "$PROJECT" ]; then
+  echo "NEED: project - brain.json tracker names no project or team; pass --project <Jira project or Linear team>"; need=1
+fi
 [ "$TRACKER" = jira ] && [ -z "$SITE" ] && { echo "NEED: site - brain.json tracker has no site; pass --site <name>.atlassian.net"; need=1; }
 [ -z "$LABEL" ] && { echo "NEED: label - the repo label that scopes the agent-ready queue (e.g. brain-plugin); pass --label <label>"; need=1; }
 [ "$need" = 0 ] || exit 2
 
 if [ "$TRACKER" = jira ]; then
   START="${START:-In Progress}" DONE="${DONE:-Validate}"
+elif [ "$TRACKER" = clickup ]; then
+  START="${START:-in progress}" DONE="${DONE:-completed}"
 else
   START="${START:-In Progress}" DONE="${DONE:-In Review}"
 fi
 
 # Values land in single-quoted assignments that lib.sh sources: a quote or a
 # newline would end the string and run whatever follows.
-for v in "$PROJECT" "$SITE" "$LABEL" "$START" "$DONE"; do
+for v in "$PROJECT" "$SITE" "$LABEL" "$START" "$DONE" "$LIST"; do
   case "$v" in
     *"'"*|*$'\n'*|*$'\r'*) echo "wave: refusing a value with a quote or newline: $v" >&2; exit 1 ;;
   esac
@@ -111,6 +119,13 @@ if [ "$TRACKER" = jira ]; then
   QUEUE="project = $PROJECT AND labels = $LABEL AND labels = agent-ready AND statusCategory = \"To Do\" AND assignee IS EMPTY ORDER BY priority DESC"
   FILE_TO="Jira project $PROJECT, label $LABEL"
   EXTRA="WAVE_JIRA_SITE='$SITE'"
+elif [ "$TRACKER" = clickup ]; then
+  QUEUE="list $LIST, status backlog, tag $LABEL, tag agent-ready"
+  FILE_TO="ClickUp list $LIST, status backlog, tag $LABEL"
+  EXTRA="WAVE_CLICKUP_LIST='$LIST'
+# Optional: WAVE_CLICKUP_SPACE (tag creation) and WAVE_CLICKUP_TEAM.
+# Runtime: orca (default) | direct. The direct runtime + autonomy_tick.py need no Orca.
+# WAVE_RUNTIME=direct"
 else
   QUEUE="team $PROJECT, state Backlog, label $LABEL, label agent-ready, unassigned"
   FILE_TO="Linear team $PROJECT, label $LABEL"

@@ -10,6 +10,11 @@
 # selector_not_found on Windows and fails silently per line when piped.
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+if [ "$WAVE_RUNTIME" = direct ]; then
+  # Direct runtime: state is .claude/wave/runs/<slug>/status.json, joined with the
+  # live PID, last log event and cost by wave_status.py (--sweep prints git worktree remove).
+  exec "$WAVE_PY" "$WAVE_HOME/autonomy/wave_status.py" ${1:+"$1"}
+fi
 REPO_ID="$(orca_repo_id)"
 [ -n "$REPO_ID" ] || { echo "$MAIN_CHECKOUT is not registered with Orca" >&2; exit 1; }
 
