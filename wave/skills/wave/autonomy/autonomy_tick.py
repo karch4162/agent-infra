@@ -110,6 +110,9 @@ def _sh(args: list[str], cwd: Path, timeout: int = 180, input_text: str | None =
 class Tick:
     def __init__(self, *, repo: Path, execute: bool, log) -> None:
         self.repo = repo
+        # Every no-arg load_autonomy_config() downstream (auto_merge, clickup CLI)
+        # resolves the repo from cwd; pin it so --repo from anywhere reads this config.
+        os.environ["WAVE_REPO"] = str(repo)
         self.wave_dir = _wave_dir(repo)
         self.cfg = load_autonomy_config(self.wave_dir / "config.env")
         self.execute = execute
