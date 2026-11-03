@@ -28,7 +28,7 @@ Other providers review; they never re-implement the same issue. Set `TIER` per s
 
 | `TIER` | For | Review |
 |---|---|---|
-| `quick` | renames, copy/UI tweaks, boilerplate, a one-function bug with a named `file:line` | one Codex Terra round, no loop. A diff that hits a risk trigger escalates itself to `normal`'s risk review. |
+| `quick` | renames, copy/UI tweaks, boilerplate, a one-function bug with a named `file:line` | one correctness round, no loop: Codex Terra, or Opus when Codex wrote the diff (low rating, direct runtime). A diff that hits a risk trigger escalates itself to `normal`'s risk review. |
 | `normal` (default) | the everyday bounded feature or fix | Codex Terra, up to 3 rounds; Grok added only when the diff hits a risk trigger (auth, authorization incl. RLS, payments, public API contracts, concurrency, recovery, broad refactor) |
 | `risk` | anything you already know hits a risk trigger, or an architectural change | the worker writes `.wave-plan.md` first; Codex Terra (technical) and Grok (adversarial) review the plan in parallel before code; then the diff review always includes Grok |
 

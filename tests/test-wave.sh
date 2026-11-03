@@ -153,7 +153,7 @@ echo "--- 10. TIER=quick runs one round and escalates on a risk trigger ---"
 st="$(spawn_dry TIER=quick)"
 out="$(cat "$BOX/out.txt")"
 assert_eq "tier-quick/exit-0" "0" "$st"
-assert_contains "tier-quick/one-round" "$out" "one Codex Terra correctness round, no loop"
+assert_contains "tier-quick/one-round" "$out" "one correctness round, no loop (Codex Terra, or Opus when Codex wrote the diff)"
 assert_contains "tier-quick/escalates" "$out" "TIER: quick -> normal"
 assert_not_contains "tier-quick/no-plan" "$out" "plan-review.sh"
 

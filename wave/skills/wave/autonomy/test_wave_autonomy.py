@@ -63,6 +63,35 @@ class Sufficiency(unittest.TestCase):
         self.assertEqual(r.reasons, ())
 
 
+class SpawnPreflightLoad(unittest.TestCase):
+    def test_dataclass_module_loads_from_file(self):
+        """preflight.py is loaded by path; @dataclass with string annotations needs the
+        module in sys.modules first (Python 3.14 crashed every direct spawn without it)."""
+        import importlib.util
+        from unittest import mock
+
+        import worker_runtime
+
+        with tempfile.TemporaryDirectory() as d:
+            fake = Path(d) / "preflight.py"
+            fake.write_text(
+                "from __future__ import annotations\n"
+                "from dataclasses import dataclass\n"
+                "@dataclass\n"
+                "class R:\n"
+                "    ok: bool\n"
+                "    def to_dict(self):\n"
+                "        return {'ok': self.ok, 'checks': []}\n"
+                "def run_preflight(repo):\n"
+                "    return R(True)\n",
+                encoding="utf-8",
+            )
+            real = importlib.util.spec_from_file_location
+            with mock.patch.object(importlib.util, "spec_from_file_location",
+                                   lambda name, _path: real(name, fake)):
+                self.assertTrue(worker_runtime.run_spawn_preflight(Path(d))["ok"])
+
+
 class PlanStep(unittest.TestCase):
     def test_parse_decisions(self):
         self.assertEqual(

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -269,6 +270,7 @@ def main(argv: list[str] | None = None) -> int:
       clickup_tracker.py followup <name> [--description D|-] [--tag T ...]
     The token is CLICKUP_API_TOKEN in the environment; it is never printed.
     """
+    sys.stdout.reconfigure(encoding="utf-8")  # task text is not cp1252-safe on a Windows console
     import argparse
     import sys
 

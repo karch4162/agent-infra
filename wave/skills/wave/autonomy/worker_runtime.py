@@ -13,6 +13,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -158,6 +159,7 @@ def run_spawn_preflight(repo_root: Path, out_path: Path | None = None) -> dict:
     if spec is None or spec.loader is None:
         raise WorkerError(f"preflight.py not loadable at {pre_path}")
     mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod  # @dataclass resolves its module through sys.modules
     spec.loader.exec_module(mod)
     report_obj = mod.run_preflight(str(repo_root))
     report = report_obj.to_dict() if hasattr(report_obj, "to_dict") else dict(report_obj)
@@ -314,6 +316,7 @@ class DirectWorkerRuntime:
         env = os.environ.copy()
         env["WAVE_TICKET_ID"] = ticket_id
         env["WAVE_RUNTIME"] = "direct"
+        env["WAVE_IMPLEMENTER"] = agent  # review.sh reviews with the other model family
         # worker_step_commit.py heartbeats into this dir; wave_status.py reads it.
         env["WAVE_RUN_DIR"] = str(run_dir)
         env.setdefault("WAVE_HOME", str(Path(__file__).resolve().parent.parent))
@@ -361,6 +364,9 @@ class DirectWorkerRuntime:
                 "exec",
                 "--dangerously-bypass-approvals-and-sandbox",
                 "--skip-git-repo-check",
+                # Codex's default shell policy hides WAVE_* and CLICKUP_* from the worker's commands.
+                "-c",
+                "shell_environment_policy.inherit=all",
                 "-",
             ]
             if model:

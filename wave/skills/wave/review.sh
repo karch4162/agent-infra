@@ -31,6 +31,20 @@ architecture_prompt="Act as an adversarial architecture reviewer. This worktree'
 # `codex review` treats --base, --uncommitted, and a custom prompt as alternative
 # review inputs. Feed our saved complete diff to `exec` instead so Terra receives
 # the exact same scope that the worker must gate, including untracked test files.
+if [ "${WAVE_IMPLEMENTER:-claude}" = codex ]; then
+  # Codex wrote this diff (low rating on the direct runtime); a Codex review would be
+  # self-review, so the assigned reviewer, Opus, is the primary. No quota fallback to
+  # Codex for the same reason.
+  name=claude-opus
+  opus_out="$(timeout 900 claude -p --model opus "$correctness_prompt" --allowedTools Read,Grep,Glob <"$DIFF_FILE" 2>"$ROOT/.wave-review.$name.err")"
+  printf '%s\n' "$opus_out" > "$ROOT/.wave-review.$name.log"
+  if verdict_ok 'TEST VERDICT:' "$opus_out"; then
+    printf '%s\nREVIEWER: %s\n' "$opus_out" "$name"
+  else
+    echo "NO OPUS REVIEW: Opus did not return a complete TEST VERDICT; see .wave-review.$name.log/.err"
+    exit 1
+  fi
+else
 codex_out="$(cat "$DIFF_FILE" | timeout 900 codex exec -s read-only --model gpt-5.6-terra "$correctness_prompt" 2>"$ROOT/.wave-review.codex-terra.err")"
 printf '%s\n' "$codex_out" > "$ROOT/.wave-review.codex-terra.log"
 if verdict_ok 'TEST VERDICT:' "$codex_out"; then
@@ -61,6 +75,7 @@ elif grep -qiE 'usage limit|usage_limit_exceeded|rate limit' "$ROOT/.wave-review
 else
   echo "NO CODEX REVIEW: Codex Terra did not return a complete TEST VERDICT; see .wave-review.codex-terra.log/.err"
   exit 1
+fi
 fi
 
 if [ "$RISK_REVIEW" != "1" ]; then
