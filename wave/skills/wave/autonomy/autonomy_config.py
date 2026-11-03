@@ -68,7 +68,7 @@ def load_config_env(path: Path | None = None) -> dict[str, str]:
         path = wave_dir() / "config.env"
     if not path.exists():
         return out
-    for raw in path.read_text(encoding="utf-8").splitlines():
+    for raw in path.read_text(encoding="utf-8-sig").splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue

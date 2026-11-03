@@ -79,10 +79,11 @@ def _bash() -> str:
         return "bash"
     git = shutil.which("git")
     if git:
-        root = Path(git).resolve().parents[2]  # <git>/{bin,ucrt64/bin,mingw64/bin}/git.exe
-        for cand in (root / "bin" / "bash.exe", root / "usr" / "bin" / "bash.exe"):
-            if cand.exists():
-                return str(cand)
+        # <Git>/{cmd,bin}/git.exe is two levels up; <Git>/{ucrt64,mingw64}/bin/git.exe is three
+        for root in Path(git).resolve().parents[1:3]:
+            for cand in (root / "bin" / "bash.exe", root / "usr" / "bin" / "bash.exe"):
+                if cand.exists():
+                    return str(cand)
     found = shutil.which("bash")
     if found and "system32" not in found.lower():
         return found
@@ -297,18 +298,24 @@ class Tick:
             prompt = (f"You are planning ticket {ticket}: {title}\n\nTicket body:\n{body[:6000]}\n\n"
                       "Fill in this plan (keep the ## Files, ## Approach, ## Tests, ## Risks headings; "
                       "cite file:line premises from this repo; no code). Output only the markdown.\n\n" + plan_md)
-            p = _sh(claude + ["--allowedTools", "Read", "Grep", "Glob", prompt], self.repo, timeout=900)
-            return p.stdout.strip() or plan_md
+            p = _sh(claude + [prompt, "--allowedTools", "Read,Grep,Glob"], self.repo, timeout=900)
+            if p.returncode != 0 or not p.stdout.strip():
+                raise WorkerError(f"planner failed ({p.returncode}): {p.stderr[-400:]}")
+            return p.stdout.strip()
         return plan
 
-    def _plan_reviewer(self, ticket: str):
+    def _plan_reviewer(self, ticket: str, title: str, body: str):
         codex = build_codex_reviewer_cmd(_resolve_agent_bin("codex"), read_only=True)
 
         def review(plan_md: str) -> str:
-            prompt = (f"Review this implementation plan for {ticket} before any code is written. You may read "
-                      "repository files. Report only high-confidence problems. End with exactly:\n"
-                      "PLAN_REVIEW_RESULT:\n  decision: PASS|FAIL|NEEDS_HUMAN\n  summary: <one line>")
-            p = _sh(codex + [prompt], self.repo, timeout=900, input_text=plan_md)
+            # codex exec ignores stdin when given a positional prompt, so plan and ticket travel on stdin via "-"
+            prompt = (f"Review this implementation plan for ticket {ticket}: {title}\n\nTicket body:\n{body[:6000]}\n\n"
+                      "The plan is below. Check it against the ticket and the repository files it cites; you may read "
+                      "repository files. Report only high-confidence problems; on FAIL say what is missing. End with exactly:\n"
+                      "PLAN_REVIEW_RESULT:\n  decision: PASS|FAIL|NEEDS_HUMAN\n  summary: <one line>\n\n" + plan_md)
+            p = _sh(codex + ["-"], self.repo, timeout=900, input_text=prompt)
+            if p.returncode != 0 or not p.stdout.strip():
+                raise WorkerError(f"plan reviewer failed ({p.returncode}): {p.stderr[-400:]}")
             return p.stdout
         return review
 
@@ -338,7 +345,7 @@ class Tick:
                     out = run_plan_loop(ticket_id=pick.ticket_id, title=pick.title, body=body, plan_needed=True,
                                         max_rounds=self.cfg.plan_rounds_cap,
                                         planner=self._planner(pick.ticket_id, pick.title, body),
-                                        reviewer=self._plan_reviewer(pick.ticket_id))
+                                        reviewer=self._plan_reviewer(pick.ticket_id, pick.title, body))
                     write_plan_artifacts(self.runs / pick.ticket_id.lower(), out)
                     if not out.approved:
                         self.ev(pick.ticket_id, "plan_held", reason=out.hold_reason)

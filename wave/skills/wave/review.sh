@@ -50,7 +50,7 @@ elif grep -qiE 'usage limit|usage_limit_exceeded|rate limit' "$ROOT/.wave-review
   printf '%s\n' "$fb_out" > "$ROOT/.wave-review.$name.log"
   if ! verdict_ok 'TEST VERDICT:' "$fb_out"; then
     name=sonnet-fallback
-    fb_out="$(timeout 900 claude -p --model sonnet --allowedTools Read Grep Glob "$fallback_prompt" 2>"$ROOT/.wave-review.$name.err")"
+    fb_out="$(timeout 900 claude -p --model sonnet "$fallback_prompt" --allowedTools Read,Grep,Glob 2>"$ROOT/.wave-review.$name.err")"
     printf '%s\n' "$fb_out" > "$ROOT/.wave-review.$name.log"
   fi
   if ! verdict_ok 'TEST VERDICT:' "$fb_out"; then
