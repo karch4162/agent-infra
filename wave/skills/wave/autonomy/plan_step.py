@@ -138,7 +138,10 @@ def run_plan_loop(
     rounds: list[PlanRound] = []
 
     for i in range(1, max_rounds + 1):
-        if i > 1 or seed_plan is None:
+        if i > 1:
+            # The planner hears why the last round failed; the plan it returns carries no review text.
+            plan_md = planner(plan_md + f"\n\n## Reviewer feedback (round {i - 1}; fix these, then drop this section)\n\n{rounds[-1].review_text}\n")
+        elif seed_plan is None:
             plan_md = planner(plan_md)
         ok_sections, missing = plan_has_required_sections(plan_md)
         review = reviewer(plan_md)
