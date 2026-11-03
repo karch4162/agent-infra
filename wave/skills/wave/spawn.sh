@@ -49,7 +49,7 @@ FULL_LOOP="   If you fixed anything, re-run the same review command on the new d
 PLAN_STEP=""
 case "$TIER" in
   quick)
-    REVIEW_SELECT="   Tier quick: one Codex Terra correctness round, no loop:
+    REVIEW_SELECT="   Tier quick: one correctness round, no loop (Codex Terra, or Opus when Codex wrote the diff):
      bash \"$WAVE_HOME/review.sh\" $ISSUE
    If the diff turns out to change $RISK_TRIGGERS,
    it is not a quick task: run the normal tier's risk review instead,
