@@ -96,6 +96,25 @@ class PlanStep(unittest.TestCase):
         self.assertEqual(len(out.rounds), 2)
         self.assertIn("cap", out.hold_reason or "")
 
+    def test_round_two_planner_sees_review(self):
+        seen = []
+
+        def planner(ctx):
+            seen.append(ctx)
+            return "## Files\na\n## Approach\nb\n## Tests\nc\n"
+
+        def reviewer(_):
+            return "Tests section names no assertion.\nPLAN VERDICT: REVISE"
+
+        plan_step.run_plan_loop(
+            ticket_id="t", title="t", body="", plan_needed=True, max_rounds=2,
+            planner=planner, reviewer=reviewer,
+        )
+        self.assertEqual(len(seen), 2)
+        self.assertNotIn("Reviewer feedback", seen[0])
+        self.assertIn("Reviewer feedback (round 1", seen[1])
+        self.assertIn("names no assertion", seen[1])
+
     def test_skip_when_not_needed(self):
         out = plan_step.run_plan_loop(
             ticket_id="t", title="t", body="", plan_needed=False
