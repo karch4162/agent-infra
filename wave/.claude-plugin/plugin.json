@@ -1,6 +1,6 @@
 {
   "name": "wave",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Run waves of unsupervised workers on agent-ready Linear, Jira or ClickUp issues, on Orca or on a direct git-worktree runtime: per-repo config, worker prompt contract, pre-PR Codex/Grok review, labelling triage, the fresh-session checklist (leftovers, brain save, sweep), and an autonomy tick that drives spawn, CI, challenge and merge without a session in the loop. Consumes the brain plugin (/brain:resume, /brain:save); brain never depends on it.",
   "author": {
     "name": "Mason Beard",
