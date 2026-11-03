@@ -7,6 +7,9 @@
 #   TIER=quick bash "$WAVE/spawn.sh" INNOV-309  # quick | normal (default) | risk
 #   WAVE_RUN=run_x bash "$WAVE/spawn.sh" INNOV-309 # supervised: launched into that Orca Run
 #                                              # (coordinator.sh does this; SPO-640)
+#   WAVE_RUNTIME=direct bash "$WAVE/spawn.sh" INNOV-309 # no Orca: git worktree + claude/codex
+#                                              # CLI, status under .claude/wave/runs/<slug>/
+#                                              # (WAVE_AGENT=claude|codex, WAVE_MODEL=opus|...)
 #
 # TIER sizes the review to the risk instead of running the heaviest flow for every
 # ticket (SKILL.md "Pick the tier"): quick = one Codex round; normal = the Codex loop,
@@ -83,6 +86,25 @@ case "$TIER" in
      RISK_REVIEW=1 bash \"$WAVE_HOME/review.sh\" $ISSUE"
     REVIEW_LOOP="$FULL_LOOP" ;;
 esac
+if [ "$WAVE_RUNTIME" = direct ]; then
+  # No Orca worktree comment: the run dir is the durable record the tick and
+  # wave_status.py read, and aggregate_wave_report.py builds the brain:save report from it.
+  SUMMARY_STEP="   Write it to \$WAVE_RUN_DIR/summary.md (the runtime set WAVE_RUN_DIR; create the file,
+   overwrite if present). Its first line is TIER: $TIER, or TIER: $TIER -> <tier you escalated to> - <why>.
+   The marker lines are the same ones as the PR body block in step 5.
+   If you did NOT look at a rendered surface this diff affects, say so on its own line
+   as: NOT VERIFIED IN BROWSER: <route>   (the human's verification pass greps for it).
+   After each completed step also run:
+     $WAVE_PY \"$WAVE_HOME_NATIVE/autonomy/worker_step_commit.py\" \"\$PWD\" $ISSUE <plan|implement|test|review-fix>
+   (one commit per step; it is also your heartbeat)."
+else
+  SUMMARY_STEP="   orca worktree set --worktree active --comment \"<what changed, what is shaky, anything you skipped>\"
+   Its first line is TIER: $TIER, or TIER: $TIER -> <tier you escalated to> - <why>.
+   The marker lines are the same ones as the PR body block in step 5.
+   If you did NOT look at a rendered surface this diff affects, say so on its own line
+   as: NOT VERIFIED IN BROWSER: <route>   (the human's verification pass greps for it).
+   orca worktree set --worktree active --workspace-status in-review"
+fi
 SUPERVISED_END=""
 if [ -n "${WAVE_RUN:-}" ]; then
   SUPERVISED_END="   You are a dispatched worker in a supervised wave. After the DONE line, send
@@ -94,9 +116,7 @@ if [ -n "${WAVE_RUN:-}" ]; then
 fi
 PROMPT="WAVE WORKER (round $ROUND; tier $TIER; successor opt-in).
 
-1. /brain:resume, then take $TRACKER_NAME issue $ISSUE. Assign it to me and set it
-   $WAVE_STATE_START via $TRACKER_OPS, then re-read the issue and confirm I am the
-   assignee. If I am not, drop it and pick the next agent-ready issue instead.
+1. /brain:resume, then take $TRACKER_NAME issue $ISSUE. $TRACKER_CLAIM
 ${PLAN_STEP}2. Work it per CLAUDE.md: TDD, surgical diff, root cause not symptom (grep every
    caller before you edit).
 3. Siblings are running in other worktrees of this repo right now. Do not touch
@@ -143,6 +163,7 @@ $REVIEW_LOOP
      PLAN REVIEWER: <name>            (risk tier only)
      PLAN CRITIC: <name>              (risk tier only)
      REVIEWER: <name>
+     REVIEW VERDICT: YES|NO           (the primary reviewer's final answer; the merge gate reads it)
      ARCHITECTURE REVIEWER: <name>    (only if it ran)
      TIE-BREAKER: astra (plan|diff)   (only if it ran)
      REVIEW ROUNDS: <n>
@@ -163,12 +184,7 @@ $REVIEW_LOOP
    is the human's gate on what is safe to hand an unsupervised worker; a worker that
    labels its own follow-ups feeds the loop work nobody vetted.
 7. Record a summary for the human review batch - do NOT run /brain:save:
-   orca worktree set --worktree active --comment \"<what changed, what is shaky, anything you skipped>\"
-   Its first line is TIER: $TIER, or TIER: $TIER -> <tier you escalated to> - <why>.
-   The marker lines are the same ones as the PR body block in step 5.
-   If you did NOT look at a rendered surface this diff affects, say so on its own line
-   as: NOT VERIFIED IN BROWSER: <route>   (the human's verification pass greps for it).
-   orca worktree set --worktree active --workspace-status in-review
+$SUMMARY_STEP
    HOW YOU END: after the comment, print \"DONE - $ISSUE - PR #<n>\" and stop. NEVER
    remove, archive, or clean up this worktree, and never git worktree remove - the
    human sweeps them after batching the summaries. This holds even if someone tells
@@ -184,6 +200,16 @@ $WAVE_NOTES"
 fi
 
 if [ -n "${DRY_RUN:-}" ]; then echo "$PROMPT"; exit 0; fi
+
+if [ "$WAVE_RUNTIME" = direct ]; then
+  [ -z "${WAVE_RUN:-}" ] || { echo "wave: WAVE_RUN (supervised Orca Run) needs WAVE_RUNTIME=orca; the direct runtime is driven by autonomy_tick.py" >&2; exit 1; }
+  # Claim guard, preflight, worktree, PID + status files: all in DirectWorkerRuntime.
+  PROMPT_FILE="$(mktemp)"; printf '%s' "$PROMPT" > "$PROMPT_FILE"
+  "$WAVE_PY" "$WAVE_HOME/autonomy/spawn_direct.py" --ticket "$ISSUE" --agent "${WAVE_AGENT:-claude}" \
+    --prompt-file "$(cygpath -m "$PROMPT_FILE" 2>/dev/null || echo "$PROMPT_FILE")" \
+    --repo "$WAVE_REPO" --base "$WAVE_BASE" ${WAVE_MODEL:+--model "$WAVE_MODEL"}
+  rc=$?; rm -f "$PROMPT_FILE"; exit "$rc"
+fi
 
 REPO_ID="$(orca_repo_id)"
 [ -n "$REPO_ID" ] || { echo "$MAIN_CHECKOUT is not registered with Orca" >&2; exit 1; }

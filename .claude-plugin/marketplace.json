@@ -18,7 +18,7 @@
     {
       "name": "wave",
       "source": "./wave",
-      "description": "Run waves of unsupervised Orca workers on agent-ready Linear or Jira issues, configured per repo (.claude/wave/config.env). A consumer of brain, never a dependency of it. Version lives in wave/.claude-plugin/plugin.json only.",
+      "description": "Run waves of unsupervised workers on agent-ready Linear, Jira or ClickUp issues, on Orca or a direct git-worktree runtime, configured per repo (.claude/wave/config.env). A consumer of brain, never a dependency of it. Version lives in wave/.claude-plugin/plugin.json only.",
       "author": { "name": "Mason Beard", "email": "mason.beard@gmail.com" },
       "license": "MIT",
       "category": "productivity",

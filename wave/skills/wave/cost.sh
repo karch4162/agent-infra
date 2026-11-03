@@ -8,9 +8,15 @@
 # Worktree paths come from Orca: it does not put them next to the main checkout (INNOV-406).
 set -uo pipefail
 WORKTREES="$(orca worktree list --json 2>/dev/null)"
+RUNS="$(git rev-parse --show-toplevel 2>/dev/null)/.claude/wave/runs"
 RC=0
 for ISSUE in "$@"; do
-  WT="$(printf '%s' "$WORKTREES" | python -c "
+  # Direct runtime first: the run dir records the worktree path; else ask Orca.
+  WT="$(python -c "
+import sys,json,os
+p=os.path.join(sys.argv[1],sys.argv[2].lower(),'status.json')
+print(json.load(open(p,encoding='utf-8-sig')).get('path','') if os.path.exists(p) else '')" "$RUNS" "$ISSUE" 2>/dev/null)"
+  [ -n "$WT" ] || WT="$(printf '%s' "$WORKTREES" | python -c "
 import sys,json; s=sys.stdin.read(); ws=json.loads(s[s.index('{'):])['result']['worktrees']
 print(next((w['path'] for w in ws if w.get('displayName')==sys.argv[1]), ''))" "$(tr 'A-Z' 'a-z' <<< "$ISSUE")" 2>/dev/null)"
   [ -n "$WT" ] || { echo "no worktree found for $ISSUE" >&2; RC=1; continue; }

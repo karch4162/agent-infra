@@ -25,17 +25,47 @@ for v in WAVE_TRACKER WAVE_QUEUE WAVE_STATE_START WAVE_STATE_DONE WAVE_FILE_TO; 
   eval "[ -n \"\${$v:-}\" ]" || { echo "wave: $v is not set in $WAVE_CONFIG" >&2; exit 1; }
 done
 
+# python for the runtime scripts: `python` on Windows/Git Bash, `python3` elsewhere.
+if command -v python >/dev/null 2>&1; then WAVE_PY=python; else WAVE_PY=python3; fi
+# Windows python cannot read /c/... paths; the runtime gets the repo as a native path.
+WAVE_REPO="$(cygpath -m "$MAIN_CHECKOUT" 2>/dev/null || echo "$MAIN_CHECKOUT")"
+WAVE_HOME_NATIVE="$(cygpath -m "$WAVE_HOME" 2>/dev/null || echo "$WAVE_HOME")"
+
+# Runtime: orca (worktrees + Orca Runs, the default since 0.1) or direct (git
+# worktree + claude/codex CLIs with status files under .claude/wave/runs/, no Orca).
+WAVE_RUNTIME="${WAVE_RUNTIME:-orca}"
+case "$WAVE_RUNTIME" in
+  orca|direct) ;;
+  *) echo "wave: WAVE_RUNTIME must be orca or direct, got '$WAVE_RUNTIME'" >&2; exit 1 ;;
+esac
+WAVE_BRANCH_PREFIX="${WAVE_BRANCH_PREFIX:-wave/}"
+WAVE_MERGE_METHOD="${WAVE_MERGE_METHOD:-merge}"
+
+# The claim step differs per tracker: Linear/Jira use the assignee as the second
+# lock; ClickUp's assignee is not exposed to the adapter, so the worktree claim is
+# the only lock there and the worker only moves the status.
 case "$WAVE_TRACKER" in
   linear)
     TRACKER_NAME="Linear"
     TRACKER_OPS="\`orca linear\`"
-    TRACKER_ATTACH="attach it with \`orca linear attach\`" ;;
+    TRACKER_ATTACH="attach it with \`orca linear attach\`"
+    TRACKER_CLAIM="Assign it to me and set it \$WAVE_STATE_START via $TRACKER_OPS, then re-read the issue and confirm I am the
+   assignee. If I am not, drop it and pick the next agent-ready issue instead." ;;
   jira)
     TRACKER_NAME="Jira"
     TRACKER_OPS="the Atlassian MCP Jira tools (site ${WAVE_JIRA_SITE:?set WAVE_JIRA_SITE in $WAVE_CONFIG})"
-    TRACKER_ATTACH="add the PR URL to the issue as a comment" ;;
-  *) echo "wave: WAVE_TRACKER must be linear or jira, got '$WAVE_TRACKER'" >&2; exit 1 ;;
+    TRACKER_ATTACH="add the PR URL to the issue as a comment"
+    TRACKER_CLAIM="Assign it to me and set it \$WAVE_STATE_START via $TRACKER_OPS, then re-read the issue and confirm I am the
+   assignee. If I am not, drop it and pick the next agent-ready issue instead." ;;
+  clickup)
+    [ -n "${WAVE_CLICKUP_LIST:-}" ] || { echo "wave: WAVE_CLICKUP_LIST must be set for WAVE_TRACKER=clickup in $WAVE_CONFIG" >&2; exit 1; }
+    TRACKER_NAME="ClickUp"
+    TRACKER_OPS="\`$WAVE_PY \"$WAVE_HOME_NATIVE/autonomy/clickup_tracker.py\"\` (verbs: get <id> | status <id> <state> | comment <id> <text> | followup <name> --description -; CLICKUP_API_TOKEN comes from the environment, never print it)"
+    TRACKER_ATTACH="add the PR URL to the task as a comment (clickup_tracker.py comment <id> <url>)"
+    TRACKER_CLAIM="Set it \$WAVE_STATE_START via $TRACKER_OPS. Your worktree is the claim; there is no assignee step." ;;
+  *) echo "wave: WAVE_TRACKER must be linear, jira or clickup, got '$WAVE_TRACKER'" >&2; exit 1 ;;
 esac
+TRACKER_CLAIM="${TRACKER_CLAIM//\$WAVE_STATE_START/$WAVE_STATE_START}"
 
 # Base ref: explicit override, else whatever origin/HEAD points at.
 if [ -z "${WAVE_BASE:-}" ]; then
@@ -48,6 +78,11 @@ BASE_BRANCH="${WAVE_BASE#origin/}"
 
 WAVE_NOTES=""
 [ -f "$WAVE_NOTES_FILE" ] && WAVE_NOTES="$(cat "$WAVE_NOTES_FILE")"
+
+# The python runtime reads the same contract from the environment.
+export WAVE_HOME WAVE_HOME_NATIVE WAVE_PY WAVE_REPO WAVE_RUNTIME WAVE_TRACKER WAVE_BASE WAVE_STATE_START WAVE_STATE_DONE \
+  WAVE_BRANCH_PREFIX WAVE_MERGE_METHOD
+export WAVE_CLICKUP_LIST="${WAVE_CLICKUP_LIST:-}" WAVE_CLICKUP_SPACE="${WAVE_CLICKUP_SPACE:-}" WAVE_CLICKUP_TEAM="${WAVE_CLICKUP_TEAM:-}"
 
 # Orca's repo id for this checkout. Called lazily - DRY_RUN and tests never need Orca.
 orca_repo_id() {

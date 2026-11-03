@@ -1,12 +1,13 @@
 ---
 name: wave
-description: Start a wave of unsupervised Orca workers on agent-ready tracker issues (Linear or Jira, configured per repo), and run the fresh-session checklist around it (leftovers, brain save, worktree sweep, queue check). Use when the user says "/wave", "spin up N workers", "start a wave", "run the loop", or opens a session wanting agents working the backlog.
+description: Start a wave of unsupervised workers on agent-ready tracker issues (Linear, Jira or ClickUp, configured per repo) on the Orca runtime or the direct git-worktree runtime, run the fresh-session checklist around it (leftovers, brain save, worktree sweep, queue check), or run the autonomy tick that drives spawn, CI, challenge and merge without a session in the loop. Use when the user says "/wave", "spin up N workers", "start a wave", "run the loop", "wave status", "autonomy tick", or opens a session wanting agents working the backlog.
 ---
 
-# /wave — run a wave of Orca workers
+# /wave — run a wave of workers
 
-Each worker takes one issue in its own Orca worktree, ships a PR, and writes a summary
-into its worktree comment. A successor wave is opt-in (`AUTO_SUCCESSOR=1`), not
+Each worker takes one issue in its own worktree, ships a PR, and writes a summary
+(an Orca worktree comment on the `orca` runtime; `runs/<ticket>/summary.md` on the
+`direct` runtime; see "Runtime" below). A successor wave is opt-in (`AUTO_SUCCESSOR=1`), not
 automatic; the human reviews between ordinary waves.
 
 The scripts live next to this file. Every command below uses
@@ -44,8 +45,9 @@ A quick task you are present for does not need a wave at all: do it in your sess
 ## Per-repo config
 
 A repo opts in with two committed files:
-- **`.claude/wave/config.env`** (required) — tracker (`linear`|`jira`), the agent-ready
-  queue query, workflow state names, where follow-ups get filed. Every script refuses
+- **`.claude/wave/config.env`** (required) — tracker (`linear`|`jira`|`clickup`), the
+  agent-ready queue query, workflow state names, where follow-ups get filed, and
+  optionally the runtime (`WAVE_RUNTIME=orca|direct`, default orca). Every script refuses
   to run without it. If it is missing, bootstrap it instead of copying
   `$WAVE/config.example.env` by hand:
   1. `bash "$WAVE/bootstrap.sh"`. It reads the tracker type, project (Jira) or team
@@ -74,7 +76,36 @@ matched by the main checkout's path.
 
 Tracker access: Linear goes through `orca linear`; Jira through the Atlassian MCP,
 which has no shell CLI — so for Jira the host session does the queue query and
-`triage.sh` reads issues from saved JSON.
+`triage.sh` reads issues from saved JSON. ClickUp goes through
+`autonomy/clickup_tracker.py` (`get`, `status`, `comment`, `queue`, `followup`), a
+REST adapter that reads `CLICKUP_API_TOKEN` from the environment and throttles to the
+free-plan rate; `triage.sh <id>` and `--all` work directly with it.
+
+## Runtime: `orca` or `direct`
+
+`WAVE_RUNTIME=orca` (default) is everything above: Orca worktrees, Orca Runs for the
+supervised wave, `status.sh`/`cost.sh` asking Orca. `WAVE_RUNTIME=direct` keeps the
+same worker contract and tracker config but needs no Orca: `spawn.sh` hands the
+rendered prompt to `autonomy/spawn_direct.py`, which runs the preflight (`.git`
+DENY-ACE scan, launch flags, optional Docker/Codex/ClickUp checks per config), creates
+`git worktree add -b <WAVE_BRANCH_PREFIX><ISSUE>` and launches `claude -p` (Opus,
+`stream-json` log) or `codex exec` with a PID and `status.json` under
+`.claude/wave/runs/<ticket>/`. Workers commit per step with
+`autonomy/worker_step_commit.py`, which is also their heartbeat. `status.sh` then shows
+every run with the live PID, last step, last tool call and cost (`--sweep` prints the
+`git worktree remove` commands), and `autonomy/aggregate_wave_report.py` builds the
+`/brain:save` report from the summaries.
+
+On top of the direct runtime, **`autonomy/autonomy_tick.py`** is the loop that removes
+the session from the merge path: one idempotent tick reconciles workers against their
+PIDs, finds their PRs, polls CI, runs the Grok challenge in the surviving worktree,
+merges through `merge_policy` (rating low/medium, CI green, `REVIEW VERDICT: YES`, no
+challenge blocker, no fallback reviewer or tie-break, `MIGRATION: no`), picks the next
+agent-ready tickets under the daily and concurrency caps, plans the thin ones first, and
+spawns. It is a dry run unless `--execute`, and it will not pick tickets until the
+repo sets `WAVE_BACKLOG_WATCH=1`. Risky tickets, held PRs, plans that need a human and
+a failed closeout all land in `.claude/wave/autonomy/human_*.md`. Details, caps and
+model roles: `autonomy/AUTONOMY.md`.
 
 ## Fresh session checklist
 
@@ -82,7 +113,9 @@ Run these in order. Steps 1–3 clear yesterday; 4 is the only one needing judgm
 
 **1. See what's left over.** `bash "$WAVE/status.sh"`
 Anything `in-review` with an open PR still needs your review. Anything `in-progress`
-with no PR either died or is still working — check its terminal before assuming.
+with no PR either died or is still working — check its terminal before assuming. On
+the direct runtime the same command prints each run's real state (a dead PID shows as
+`exited`, never `running`), last step, PR and cost.
 
 **2. Batch the summaries into one `/brain:save`.** First bring the main checkout onto
 the base branch, so the save builds its graph from the merged code and the merge
