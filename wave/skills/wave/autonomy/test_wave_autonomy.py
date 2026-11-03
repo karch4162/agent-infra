@@ -53,6 +53,15 @@ class Sufficiency(unittest.TestCase):
         self.assertFalse(r.plan_needed)
         self.assertTrue(r.file_hits)
 
+    def test_cited_prose_without_acceptance_wording_is_enough(self):
+        r = ticket_sufficiency.assess_ticket(
+            title="Rename the export button",
+            body="The label in src/components/Toolbar.tsx:88 says Export; change it to Download. " + "x" * 20,
+            tags=["agent-ready", "rating:low"],
+        )
+        self.assertTrue(r.enough)
+        self.assertEqual(r.reasons, ())
+
 
 class PlanStep(unittest.TestCase):
     def test_parse_decisions(self):

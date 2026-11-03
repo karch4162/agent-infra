@@ -7,9 +7,11 @@ Enough detail means ALL of:
   - a non-empty body (or description)
   - at least one file:line (or path with extension) citation, OR an explicit
     copyable reference implementation named in the body
-  - at least one testable acceptance criterion signal (Given/When/Then, AC:,
-    "acceptance", checkbox items, or "expected")
   - not tagged plan-needed / PLAN_NEEDED
+
+An acceptance-criterion wording check used to be a fourth rule; it sent most
+plain-prose tickets with good citations to the plan step, and the rating plus
+the worker's test contract already cover that judgment.
 """
 from __future__ import annotations
 
@@ -27,15 +29,6 @@ CODE_EXT = (
 FILE_LINE_RE = re.compile(
     r"(?P<path>(?:[A-Za-z]:)?(?:[\w.-]+[/\\])+[\w.-]+\.\w{1,10}"
     r"|\b[\w-]+\.(?:" + CODE_EXT + r")\b)(?::(?P<line>\d+))?"
-)
-# No trailing \b after the colon forms: "Expected: 404" has no word boundary
-# between ":" and " ", so the old pattern only matched "Expected:404".
-AC_SIGNAL_RE = re.compile(
-    r"(?i)\b(?:acceptance|given\s*/\s*when\s*/\s*then)\b|"
-    r"\b(?:expected|ac)\s*:|"
-    r"\bshould\s+(?:return|raise|show|render|call|write|refund|fail)\b|"
-    r"^\s*[-*]\s*\[[ xX]?\]",
-    re.M,
 )
 REF_IMPL_RE = re.compile(
     r"(?i)\b(copy(?:able)?\s+from|same\s+as|mirror|follow(?:s)?\s+(?:the\s+)?"
@@ -86,9 +79,6 @@ def assess_ticket(
     has_ref = bool(REF_IMPL_RE.search(text))
     if not has_file and not has_ref:
         reasons.append("no file:line citation and no copyable reference")
-
-    if not AC_SIGNAL_RE.search(text):
-        reasons.append("no acceptance-criterion signal")
 
     plan_needed = bool(reasons)
     return SufficiencyResult(
