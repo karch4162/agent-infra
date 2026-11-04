@@ -14,13 +14,29 @@ jobs:
   tests:
     strategy:
       fail-fast: false
+      # Windows spends ~10x Ubuntu's time on the same suites (process spawns for
+      # scratch git repos), so it runs as four shards, each on its own runner.
+      # Shard k runs every 4th suite in name order; ubuntu runs them all.
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - { os: ubuntu-latest, shard: 0, shards: 1 }
+          - { os: windows-latest, shard: 0, shards: 4 }
+          - { os: windows-latest, shard: 1, shards: 4 }
+          - { os: windows-latest, shard: 2, shards: 4 }
+          - { os: windows-latest, shard: 3, shards: 4 }
+    name: tests (${{ matrix.os }}${{ matrix.shards > 1 && format(' {0}/{1}', matrix.shard + 1, matrix.shards) || '' }})
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash
     steps:
+      # Real-time scanning inspects every file the suites' scratch repos create;
+      # a throwaway runner doesn't need it.
+      - name: Disable Defender real-time scanning
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
@@ -36,7 +52,10 @@ jobs:
       - name: Run test suites
         run: |
           failed=()
+          i=0
           for suite in tests/test-*.sh; do
+            i=$((i + 1))
+            [ $(((i - 1) % ${{ matrix.shards }})) -eq ${{ matrix.shard }} ] || continue
             echo "::group::$suite"
             if bash "$suite"; then
               echo "PASS $suite"
