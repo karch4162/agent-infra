@@ -38,6 +38,16 @@ class Runner:
         return self.result
 
 
+class ClickUpCli(unittest.TestCase):
+    def test_cli_starts(self):
+        """0.6.4 shipped a main() that died before argparse ran (UnboundLocalError on sys)."""
+        p = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "clickup_tracker.py")],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+        self.assertNotIn("Traceback", p.stderr)
+        self.assertEqual(p.returncode, 2)  # argparse: subcommand required
+        self.assertIn("usage", p.stderr)
+
+
 class DenyScan(unittest.TestCase):
     def setUp(self):
         td = tempfile.TemporaryDirectory()

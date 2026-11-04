@@ -107,6 +107,16 @@ def scaffold_plan(ticket_id: str, title: str, body: str = "") -> str:
     return base
 
 
+# The template's "- (...)" hint lines; a plan still holding one was never filled in.
+PLACEHOLDER_LINES = tuple(
+    ln.strip() for ln in PLAN_TEMPLATE.splitlines() if ln.strip().startswith("- (")
+)
+
+
+def unfilled_placeholders(plan_md: str) -> list[str]:
+    return [p for p in PLACEHOLDER_LINES if p in (plan_md or "")]
+
+
 PlannerFn = Callable[[str], str]  # plan_md in context -> new plan_md
 ReviewerFn = Callable[[str], str]  # plan_md -> review text with verdict
 
@@ -144,6 +154,15 @@ def run_plan_loop(
         elif seed_plan is None:
             plan_md = planner(plan_md)
         ok_sections, missing = plan_has_required_sections(plan_md)
+        unfilled = unfilled_placeholders(plan_md)
+        if unfilled:
+            # A template is not a plan; fail the round here instead of spending a review on it.
+            rounds.append(PlanRound(i, plan_md, (
+                "The plan still holds the template's placeholder lines; replace each with real "
+                "content from the ticket and the cited files:\n" + "\n".join(unfilled) +
+                "\n\nPLAN_REVIEW_RESULT:\n  decision: FAIL\n  summary: planner returned the template unfilled\n"
+            ), "FAIL"))
+            continue
         review = reviewer(plan_md)
         decision = parse_plan_decision(review) or "FAIL"
         if not ok_sections and decision == "PASS":
