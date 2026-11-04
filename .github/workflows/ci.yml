@@ -20,11 +20,12 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-latest, shard: 0, shards: 1 }
-          - { os: windows-latest, shard: 0, shards: 4 }
-          - { os: windows-latest, shard: 1, shards: 4 }
-          - { os: windows-latest, shard: 2, shards: 4 }
-          - { os: windows-latest, shard: 3, shards: 4 }
-    name: tests (${{ matrix.os }}${{ matrix.shards > 1 && format(' {0}/{1}', matrix.shard + 1, matrix.shards) || '' }})
+          - { os: windows-latest, shard: 0, shards: 4, part: 1/4 }
+          - { os: windows-latest, shard: 1, shards: 4, part: 2/4 }
+          - { os: windows-latest, shard: 2, shards: 4, part: 3/4 }
+          - { os: windows-latest, shard: 3, shards: 4, part: 4/4 }
+    # Expressions have no arithmetic, so each shard carries its own label.
+    name: tests (${{ matrix.os }}${{ matrix.part && format(' {0}', matrix.part) || '' }})
     runs-on: ${{ matrix.os }}
     defaults:
       run:
