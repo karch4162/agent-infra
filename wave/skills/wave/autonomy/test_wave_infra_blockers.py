@@ -38,6 +38,47 @@ class Runner:
         return self.result
 
 
+class SyncBaseBeforeCloseout(unittest.TestCase):
+    """Closeout ran in a checkout behind origin, so it tested code older than the merge."""
+
+    def setUp(self):
+        import autonomy_tick
+
+        self.sync = autonomy_tick.sync_base
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.git = lambda cwd, *a: subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+        self.git(root, "init", "-q", "--bare", "-b", "development", "origin.git")
+        for name in ("worker", "main"):
+            self.git(root, "clone", "-q", str(root / "origin.git"), name)
+            self.git(root / name, "config", "user.email", "t@example.invalid")
+            self.git(root / name, "config", "user.name", "t")
+        self.worker, self.main = root / "worker", root / "main"
+        self.git(self.worker, "commit", "-q", "--allow-empty", "-m", "base")
+        self.git(self.worker, "push", "-q", "origin", "HEAD:development")
+        self.git(self.main, "pull", "-q", "origin", "development")
+        self.git(self.worker, "commit", "-q", "--allow-empty", "-m", "merged PR")  # main is now stale
+        self.git(self.worker, "push", "-q", "origin", "HEAD:development")
+        self.merged = self.git(self.worker, "rev-parse", "HEAD")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_stale_checkout_is_brought_to_the_merge(self):
+        self.assertIsNone(self.sync(self.main, "origin/development", [self.merged]))
+        self.assertEqual(self.git(self.main, "rev-parse", "HEAD"), self.merged)
+
+    def test_missing_merge_fails(self):
+        why = self.sync(self.main, "origin/development", ["0" * 40])
+        self.assertIn("does not contain merged commit", why or "")
+
+    def test_other_branch_is_not_switched(self):
+        self.git(self.main, "checkout", "-q", "-b", "mine")
+        why = self.sync(self.main, "origin/development", [self.merged])
+        self.assertIn("needs development checked out", why or "")
+        self.assertEqual(self.git(self.main, "branch", "--show-current"), "mine")
+
+
 class ClickUpCli(unittest.TestCase):
     def test_cli_starts(self):
         """0.6.4 shipped a main() that died before argparse ran (UnboundLocalError on sys)."""
