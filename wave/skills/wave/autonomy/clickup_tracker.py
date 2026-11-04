@@ -272,7 +272,6 @@ def main(argv: list[str] | None = None) -> int:
     """
     sys.stdout.reconfigure(encoding="utf-8")  # task text is not cp1252-safe on a Windows console
     import argparse
-    import sys
 
     ap = argparse.ArgumentParser(prog="clickup_tracker.py")
     sub = ap.add_subparsers(dest="cmd", required=True)

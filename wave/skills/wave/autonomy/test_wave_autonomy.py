@@ -125,6 +125,26 @@ class PlanStep(unittest.TestCase):
         self.assertEqual(len(out.rounds), 2)
         self.assertIn("cap", out.hold_reason or "")
 
+    def test_template_plan_fails_without_review(self):
+        reviews = []
+        seen = []
+
+        def planner(ctx):
+            seen.append(ctx)
+            return plan_step.scaffold_plan("t", "t") if len(seen) == 1 else (
+                "## Files\na.ts:1\n## Approach\nb\n## Tests\nc\n")
+
+        def reviewer(plan):
+            reviews.append(plan)
+            return "PLAN VERDICT: APPROVE"
+
+        out = plan_step.run_plan_loop(ticket_id="t", title="t", body="", plan_needed=True,
+                                      max_rounds=2, planner=planner, reviewer=reviewer)
+        self.assertEqual(out.rounds[0].decision, "FAIL")
+        self.assertEqual(len(reviews), 1)  # only the filled round-two plan was reviewed
+        self.assertIn("placeholder", seen[1])
+        self.assertTrue(out.approved)
+
     def test_round_two_planner_sees_review(self):
         seen = []
 
