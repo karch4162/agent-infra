@@ -520,7 +520,9 @@ OrcaFn = Callable[[list[str]], subprocess.CompletedProcess]
 
 
 def _orca(args: list[str]) -> subprocess.CompletedProcess:
-    exe = shutil.which("orca.cmd") or shutil.which("orca") or "orca"
+    # The .exe, never orca.cmd: cmd.exe caps a command line at 8,191 chars and mangles the
+    # newlines and quotes of a worker prompt that runs to 12 KB.
+    exe = shutil.which("orca.exe") or shutil.which("orca") or "orca"
     return subprocess.run([exe, *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
 
 
