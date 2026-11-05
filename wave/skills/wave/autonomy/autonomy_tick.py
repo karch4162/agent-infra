@@ -45,9 +45,10 @@ from backlog_watch import run_watch  # noqa: E402
 from daily_cap import ET, RunLock, record_start  # noqa: E402
 from grok_challenge import run_grok_challenge  # noqa: E402
 from plan_step import run_plan_loop, write_plan_artifacts  # noqa: E402
-from worker_runtime import DirectWorkerRuntime, WorkerError, build_claude_reviewer_cmd, build_codex_reviewer_cmd, _resolve_agent_bin, pid_alive  # noqa: E402
+from worker_runtime import DirectWorkerRuntime, OrcaWorkerRuntime, WorkerError, codex_inherits_all, orca_worker_state, build_claude_reviewer_cmd, build_codex_reviewer_cmd, _resolve_agent_bin, pid_alive  # noqa: E402
 
 LIVE = {"running", "starting"}
+IDLE_NOTICE_S = 20 * 60  # an Orca worker silent this long may be waiting at a prompt
 
 
 def _now() -> str:
@@ -222,6 +223,32 @@ class Tick:
                 out.append((p, st))
         return out
 
+    def runtime(self):
+        """WAVE_RUNTIME=orca puts each worker in a visible Orca terminal. The tick runs when no
+        one is at the IDE, so an unreachable Orca falls back to the direct runtime, with a notice."""
+        if self.cfg.runtime == "orca":
+            try:
+                rt = OrcaWorkerRuntime(repo_path=str(self.repo), base_branch=self.cfg.wave_base)
+                rt.repo_id()
+                return rt
+            except WorkerError as e:
+                self.notice(f"Orca runtime unavailable, spawning direct: {e}")
+        return DirectWorkerRuntime(repo_path=str(self.repo), base_branch=self.cfg.wave_base)
+
+    def alive(self, path: Path, st: dict[str, Any]) -> bool:
+        """A direct worker is alive while its process is; an Orca worker until it writes
+        summary.md or its terminal closes. A long-silent Orca worker gets one notice, not a kill."""
+        if st.get("runtime") != "orca":
+            return pid_alive(int(st.get("pid") or 0))
+        alive, idle = orca_worker_state(st, path.parent)
+        if alive and idle and idle > IDLE_NOTICE_S and not st.get("idle_noticed"):
+            ticket = st.get("ticket_id") or path.parent.name
+            self.notice(f"{ticket}: Orca worker silent for {int(idle // 60)} min; it may be waiting at a prompt")
+            st["idle_noticed"] = _now()
+            if self.execute:
+                _write(path, st)
+        return alive
+
     def find_pr(self, branch: str) -> dict[str, Any] | None:
         p = _sh(["gh", "pr", "list", "--repo", self.repo_slug(), "--head", branch, "--state", "all",
                  "--json", "number,url,state,mergedAt", "--limit", "1"], self.repo)
@@ -236,7 +263,7 @@ class Tick:
         for path, st in self.statuses():
             ticket = st.get("ticket_id") or path.parent.name
             state = st.get("state")
-            if state in LIVE and not pid_alive(int(st.get("pid") or 0)):
+            if state in LIVE and not self.alive(path, st):
                 st["state"] = state = "exited"
                 self.ev(ticket, "exited")
                 if self.execute:
@@ -376,13 +403,13 @@ class Tick:
             self.notice(f"risky tickets waiting for a human: {[r['id'] for r in rep.flagged_risky]}", "human_risky.md")
         if not rep.picks:
             return
-        rt = DirectWorkerRuntime(repo_path=str(self.repo), base_branch=self.cfg.wave_base)
+        rt = self.runtime()
         for pick in rep.picks:
             tier = "quick" if pick.rating == "low" else "normal"
             agent = (pick.roles or {}).get("implementer", "claude")
             model = (pick.roles or {}).get("implementer_model")
             if not self.execute:
-                self.ev(pick.ticket_id, "would_spawn", action=pick.action, agent=agent, tier=tier)
+                self.ev(pick.ticket_id, "would_spawn", action=pick.action, agent=agent, tier=tier, runtime=self.cfg.runtime)
                 continue
             try:
                 prompt = self._prompt_for(pick.ticket_id, tier)
@@ -401,7 +428,12 @@ class Tick:
                         continue
                     self.track(pick.ticket_id, comment="wave: approved plan\n\n" + (out.plan_md or ""))
                     prompt += "\n\nAPPROVED PLAN (reviewed before code; follow it):\n" + (out.plan_md or "")
-                rec = rt.spawn(ticket_id=pick.ticket_id, prompt=prompt, agent=agent, model=model)
+                use = rt
+                if isinstance(rt, OrcaWorkerRuntime) and agent == "codex" and not codex_inherits_all():
+                    use = DirectWorkerRuntime(repo_path=str(self.repo), base_branch=self.cfg.wave_base)
+                    self.notice(f"{pick.ticket_id}: Codex worker spawned direct: Orca cannot pass it CLICKUP_*/WAVE_*; "
+                                "set shell_environment_policy.inherit = \"all\" in ~/.codex/config.toml to run it in Orca")
+                rec = use.spawn(ticket_id=pick.ticket_id, prompt=prompt, agent=agent, model=model)
             except WorkerError as e:
                 self.ev(pick.ticket_id, "spawn_failed", error=str(e)[:300])
                 self.notice(f"{pick.ticket_id}: spawn failed: {str(e)[:200]}")
@@ -412,13 +444,13 @@ class Tick:
             _write(Path(rec.status_path), st)
             self.ev(pick.ticket_id, "spawned", agent=agent, pid=rec.pid, branch=rec.branch)
             self.track(pick.ticket_id, status=self.cfg.state_start or None,
-                       comment=f"wave: worker started ({agent}{' ' + model if model else ''}, tier {tier}) on {rec.branch}")
+                       comment=f"wave: worker started ({agent}{' ' + model if model else ''}, tier {tier}, {rec.mode}) on {rec.branch}")
 
     # ---- 6. closeout -----------------------------------------------------------------
     def closeout(self) -> None:
         if not self.merged_this_tick or not self.cfg.closeout_cmd:
             return
-        if any(st.get("state") in LIVE and pid_alive(int(st.get("pid") or 0)) for _, st in self.statuses()):
+        if any(st.get("state") in LIVE and self.alive(p, st) for p, st in self.statuses()):
             self.log("closeout deferred: workers still live")
             return
         if not self.execute:

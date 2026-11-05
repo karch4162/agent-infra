@@ -89,7 +89,9 @@ esac
 if [ "$WAVE_RUNTIME" = direct ]; then
   # No Orca worktree comment: the run dir is the durable record the tick and
   # wave_status.py read, and aggregate_wave_report.py builds the brain:save report from it.
-  SUMMARY_STEP="   Write it to \$WAVE_RUN_DIR/summary.md (the runtime set WAVE_RUN_DIR; create the file,
+  # The path is spelled out: under Orca the worker's shell has no WAVE_RUN_DIR.
+  RUN_DIR_NATIVE="$WAVE_REPO/.claude/wave/runs/$(printf '%s' "$ISSUE" | tr '[:upper:]' '[:lower:]')"
+  SUMMARY_STEP="   Write it to $RUN_DIR_NATIVE/summary.md (create the file,
    overwrite if present). Its first line is TIER: $TIER, or TIER: $TIER -> <tier you escalated to> - <why>.
    The marker lines are the same ones as the PR body block in step 5.
    If you did NOT look at a rendered surface this diff affects, say so on its own line

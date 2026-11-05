@@ -15,6 +15,11 @@ ISSUE="${1:-}"
 RISK_REVIEW="${RISK_REVIEW:-0}"
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 DIFF_FILE="$ROOT/.wave-review.diff"
+# The direct runtime exports WAVE_IMPLEMENTER; an Orca-launched worker's shell does not, so read it from the run.
+if [ -z "${WAVE_IMPLEMENTER:-}" ] && [ -n "$ISSUE" ]; then
+  run_status="$MAIN_CHECKOUT/.claude/wave/runs/$(printf '%s' "$ISSUE" | tr '[:upper:]' '[:lower:]')/status.json"
+  [ -f "$run_status" ] && WAVE_IMPLEMENTER="$(sed -n 's/.*"agent": *"\([a-z]*\)".*/\1/p' "$run_status" | head -1)"
+fi
 
 wave_exclude '.wave-review.*'
 wave_exclude '.wave-plan*'   # a risk-tier plan is scratch, never part of the reviewed diff
