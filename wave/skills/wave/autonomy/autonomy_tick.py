@@ -108,8 +108,49 @@ def _sh(args: list[str], cwd: Path, timeout: int = 180, input_text: str | None =
                           errors="replace", timeout=timeout, input=input_text)
 
 
+def _grok_on_path() -> None:
+    """A scheduled tick's PATH often lacks the per-user Grok install; workers and the
+    review scripts call bare `grok`, so put its folder on PATH for every child."""
+    import shutil
+
+    home_bin = Path.home() / ".grok" / "bin"
+    if not shutil.which("grok") and home_bin.is_dir():
+        os.environ["PATH"] = str(home_bin) + os.pathsep + os.environ.get("PATH", "")
+
+
+def sync_base(repo: Path, base_ref: str, must_contain: list[str]) -> str | None:
+    """Bring `repo` to the tip of `base_ref` (e.g. origin/development) before closeout,
+    so it tests what was just merged. Returns None when ready, else why not.
+
+    Never switches branches: the checkout is shared with a human, so a different
+    branch checked out is a failure to report, not something to change."""
+    remote, _, branch = base_ref.partition("/") if "/" in base_ref else ("origin", "", base_ref)
+
+    def git(*a: str) -> subprocess.CompletedProcess:
+        return _sh(["git", *a], repo)
+
+    if branch == "HEAD":  # the WAVE_BASE default: resolve the remote's default branch
+        branch = git("symbolic-ref", "--short", f"refs/remotes/{remote}/HEAD").stdout.strip().partition("/")[2]
+        if not branch:
+            return f"cannot resolve {remote}/HEAD to a branch; set WAVE_BASE to {remote}/<branch>"
+    p = git("fetch", remote, branch)
+    if p.returncode != 0:
+        return f"git fetch {remote} {branch} failed: {p.stderr.strip()[-300:]}"
+    cur = git("branch", "--show-current").stdout.strip()
+    if cur != branch:
+        return f"closeout needs {branch} checked out in {repo}; it has {cur or 'a detached HEAD'}"
+    p = git("merge", "--ff-only", f"{remote}/{branch}")
+    if p.returncode != 0:
+        return f"{branch} cannot fast-forward to {remote}/{branch}: {p.stderr.strip()[-300:]}"
+    for sha in must_contain:
+        if git("merge-base", "--is-ancestor", sha, "HEAD").returncode != 0:
+            return f"HEAD {git('rev-parse', '--short', 'HEAD').stdout.strip()} does not contain merged commit {sha[:10]}"
+    return None
+
+
 class Tick:
     def __init__(self, *, repo: Path, execute: bool, log) -> None:
+        _grok_on_path()
         self.repo = repo
         # Every no-arg load_autonomy_config() downstream (auto_merge, clickup CLI)
         # resolves the repo from cwd; pin it so --repo from anywhere reads this config.
@@ -125,6 +166,7 @@ class Tick:
         self._slug: str | None = None
         self._tracker = None
         self.merged_this_tick: list[str] = []
+        self.merged_shas: list[str] = []
 
     # ---- helpers -------------------------------------------------------------
     def ev(self, ticket: str, what: str, **kw: Any) -> None:
@@ -271,6 +313,11 @@ class Tick:
             if res.action == "merged":
                 st.update(state="done_merged", note=res.decision)
                 self.merged_this_tick.append(ticket)
+                p = _sh(["gh", "pr", "view", str(st["pr_number"]), "--repo", self.repo_slug(),
+                         "--json", "mergeCommit", "-q", ".mergeCommit.oid"], self.repo)
+                if p.stdout.strip():
+                    st["merge_sha"] = p.stdout.strip()
+                    self.merged_shas.append(st["merge_sha"])
                 self.track(ticket, status=self.cfg.state_done or None,
                            comment=f"wave: merged {st['pr']} ({res.decision})")
             elif res.action in {"held", "conflict_held"}:
@@ -376,6 +423,11 @@ class Tick:
             return
         if not self.execute:
             self.ev("-", "would_closeout", cmd=self.cfg.closeout_cmd)
+            return
+        why = sync_base(self.repo, self.cfg.wave_base, self.merged_shas)
+        if why:
+            self.ev("-", "closeout_skipped", reason=why)
+            self.notice(f"closeout not run after merging {self.merged_this_tick}: {why}")
             return
         p = subprocess.run([_bash(), "-lc", self.cfg.closeout_cmd], cwd=str(self.repo), capture_output=True,
                            text=True, encoding="utf-8", errors="replace", timeout=3600)
