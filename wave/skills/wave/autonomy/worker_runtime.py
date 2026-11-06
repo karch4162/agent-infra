@@ -18,7 +18,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 AgentName = Literal["claude", "codex"]
 
@@ -39,7 +39,7 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
 def _read_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))  # a hand edit in PowerShell adds a BOM
 
 
 def pid_alive(pid: int) -> bool:
@@ -499,6 +499,122 @@ class DirectWorkerRuntime:
         st["state"] = "removed"
         st["updated_at"] = _now()
         _write_json(st_path, st)
+
+
+def codex_inherits_all(config: Path | None = None) -> bool:
+    """Whether Codex hands its shell the whole environment. Workers need CLICKUP_*/WAVE_* in
+    their commands; the direct runtime forces this per launch, Orca's launch cannot."""
+    import tomllib
+
+    path = config or Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "config.toml"
+    try:
+        cfg = tomllib.loads(path.read_text(encoding="utf-8-sig"))
+    except FileNotFoundError:
+        return True  # no config: Codex's default policy inherits everything
+    except (OSError, ValueError):
+        return False
+    return (cfg.get("shell_environment_policy") or {}).get("inherit", "all") == "all"
+
+
+OrcaFn = Callable[[list[str]], subprocess.CompletedProcess]
+
+
+def _orca(args: list[str]) -> subprocess.CompletedProcess:
+    # The .exe, never orca.cmd: cmd.exe caps a command line at 8,191 chars and mangles the
+    # newlines and quotes of a worker prompt that runs to 12 KB.
+    exe = shutil.which("orca.exe") or shutil.which("orca") or "orca"
+    return subprocess.run([exe, *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
+
+
+class OrcaWorkerRuntime:
+    """Workers as interactive agents in Orca terminals, so a person can watch and steer them.
+
+    Same run-folder contract as DirectWorkerRuntime: status.json, record.json, prompt.txt and,
+    from the worker, summary.md. Orca's per-agent launch settings decide the permission flags
+    (on Mason's machine: --dangerously-skip-permissions for Claude, the sandbox bypass for Codex).
+    An interactive agent does not exit when done, so liveness is summary.md or the terminal
+    closing (orca_worker_state), not a PID. No worker.log: tokens come from the agents' own logs.
+    """
+
+    def __init__(self, *, repo_path: str, base_branch: str = "origin/development",
+                 runs_dir: str | None = None, orca: OrcaFn | None = None):
+        self.repo_path = str(Path(repo_path).resolve())
+        self.base_branch = base_branch
+        self.runs_dir = Path(runs_dir or Path(self.repo_path) / ".claude" / "wave" / "runs")
+        self.orca = orca or _orca
+
+    def _json(self, *args: str) -> dict[str, Any]:
+        p = self.orca([*args, "--json"])
+        if p.returncode != 0:
+            raise WorkerError(f"orca {' '.join(args[:2])} failed ({p.returncode}): {(p.stderr or p.stdout or '')[-400:]}")
+        try:
+            return json.loads(p.stdout)["result"]
+        except (ValueError, KeyError, TypeError) as e:
+            raise WorkerError(f"orca {' '.join(args[:2])}: unreadable output ({e})")
+
+    def repo_id(self) -> str:
+        want = os.path.normcase(os.path.realpath(self.repo_path))
+        for r in self._json("repo", "list").get("repos", []):
+            if os.path.normcase(os.path.realpath(r.get("path", ""))) == want:
+                return r["id"]
+        raise WorkerError(f"{self.repo_path} is not registered with Orca")
+
+    def spawn(self, *, ticket_id: str, prompt: str, agent: str, model: str | None = None,
+              run_id: str | None = None, activate: bool = False) -> RunRecord:
+        if agent not in ("claude", "codex"):
+            raise WorkerError(f"unsupported agent for OrcaWorkerRuntime: {agent}")
+        run_dir = self.runs_dir / ticket_id.lower()
+        status_path = run_dir / "status.json"
+        if _read_json(status_path).get("state") in ("starting", "running"):
+            raise WorkerError(f"claim_guard: {ticket_id} already has a live run")
+        if os.environ.get("WAVE_SKIP_PREFLIGHT") != "1":
+            run_spawn_preflight(Path(self.repo_path), run_dir / "preflight.json")
+        repo_id = self.repo_id()
+        run_dir.mkdir(parents=True, exist_ok=True)
+        if (run_dir / "summary.md").exists():  # a previous attempt's summary would read as "done"
+            (run_dir / "summary.md").replace(run_dir / "summary.prev.md")
+        (run_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
+        branch = f"{os.environ.get('WAVE_BRANCH_PREFIX', 'wave/')}{ticket_id}"
+        args = ["worktree", "create", "--repo", f"id:{repo_id}", "--name", ticket_id.lower(), "--no-parent",
+                "--base-branch", self.base_branch, "--branch", branch, "--agent", agent,
+                "--surface", "terminal", "--prompt", prompt]
+        if model:
+            args += ["--model", model]
+        wt = self._json(*args).get("worktree") or {}
+        if not wt.get("path"):
+            raise WorkerError(f"orca worktree create returned no worktree path for {ticket_id}")
+        branch = (wt.get("branch") or branch).removeprefix("refs/heads/")
+        _write_json(status_path, {
+            "ticket_id": ticket_id, "agent": agent, "model": model, "state": "running",
+            "branch": branch, "path": wt["path"], "worktree_id": wt.get("id"),
+            "updated_at": _now(), "runtime": "orca",
+        })
+        rec = RunRecord(run_id=run_id or f"orca-{ticket_id}", ticket_id=ticket_id, agent=agent,
+                        worktree_name=ticket_id.lower(), worktree_id=wt.get("id"), path=wt["path"],
+                        branch=branch, mode="orca", status_path=str(status_path))
+        _write_json(run_dir / "record.json", asdict(rec))
+        return rec
+
+
+def orca_worker_state(st: dict[str, Any], run_dir: Path, orca: OrcaFn | None = None) -> tuple[bool, float | None]:
+    """(alive, seconds since the agent's terminal last printed) for an Orca-runtime worker.
+
+    Done when the worker wrote summary.md (the contract's last step, after the PR) or no
+    terminal is left in its worktree. If Orca cannot be asked, the worker counts as alive:
+    a failed query must never mark a running worker exited."""
+    if (run_dir / "summary.md").exists():
+        return False, None
+    p = (orca or _orca)(["terminal", "list", "--worktree", f"path:{st.get('path', '')}", "--json"])
+    try:
+        terms = json.loads(p.stdout)["result"]["terminals"] if p.returncode == 0 else None
+    except (ValueError, KeyError, TypeError):
+        terms = None
+    if terms is None:
+        return True, None
+    if not terms:
+        return False, None
+    last = max((t.get("lastOutputAt") or 0) for t in terms)
+    return True, (time.time() * 1000 - last) / 1000 if last else None
 
 
 # Back-compat alias used by spawn scripts after the Orca cut-over.

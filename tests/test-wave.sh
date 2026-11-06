@@ -394,6 +394,21 @@ assert_eq "grok-incomplete/one-call" "1" "$(cat "$STUB/grok.n")"
 st="$(grok_run review.sh '1 boom')"
 assert_contains "grok-crash/exit-code" "$(cat "$BOX/out.txt")" "incomplete verdict (exit 1)"
 
+echo "--- 26b. Orca worker, no WAVE_IMPLEMENTER: the run's status names Codex, so Opus reviews ---"
+cat >"$STUB/bin/claude" <<'EOF'
+#!/bin/sh
+cat >/dev/null
+echo "TEST VERDICT: none"
+EOF
+chmod +x "$STUB/bin/claude"
+mkdir -p "$BOX/.claude/wave/runs/abc-7"
+printf '{\n  "ticket_id": "ABC-7",\n  "agent": "codex"\n}\n' >"$BOX/.claude/wave/runs/abc-7/status.json"
+st="$(unset WAVE_IMPLEMENTER; grok_run review.sh "$PASS_OUT")"
+assert_eq "orca-implementer/exit-0" "0" "$st"
+assert_contains "orca-implementer/opus" "$(cat "$BOX/out.txt")" "REVIEWER: claude-opus"
+assert_not_contains "orca-implementer/no-terra" "$(cat "$BOX/out.txt")" "REVIEWER: codex-terra"
+rm -rf "$BOX/.claude/wave/runs" "$STUB/bin/claude"
+
 echo "--- 27. plan-review: REVISE still reported, timeouts fall back ---"
 st="$(grok_run plan-review.sh '0 the plan misses a caller\nPLAN VERDICT: REVISE')"
 assert_eq "plan-revise/exit-0" "0" "$st"
@@ -527,6 +542,9 @@ st="$(spawn_dry WAVE_RUNTIME=direct)"
 out="$(cat "$BOX/out.txt")"
 assert_eq "direct/exit-0" "0" "$st"
 assert_contains "direct/summary-file" "$out" 'summary.md'
+# The tick also runs this contract in Orca terminals, whose shells have no WAVE_RUN_DIR: the path is spelled out.
+assert_contains "direct/summary-path-spelled-out" "$out" '/.claude/wave/runs/'
+assert_not_contains "direct/summary-no-env-var" "$out" 'WAVE_RUN_DIR'
 assert_contains "direct/step-commit" "$out" "worker_step_commit.py"
 assert_not_contains "direct/no-orca-set" "$out" "orca worktree set"
 assert_contains "direct/same-pr-block" "$out" "## Wave"

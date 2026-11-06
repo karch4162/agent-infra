@@ -20,26 +20,38 @@ def commit_step(worktree: str, step: str, ticket_id: str, message: str | None = 
         return {"committed": False, "reason": "clean", "step": step}
     subprocess.run(["git", "commit", "-m", msg], cwd=cwd, check=True, capture_output=True, text=True)
     sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
-    heartbeat(step, sha)
+    heartbeat(step, sha, worktree=cwd, ticket_id=ticket_id)
     return {"committed": True, "sha": sha, "step": step, "message": msg}
 
 
-def heartbeat(step: str, sha: str | None = None) -> None:
-    """Record the step in the run's status.json (WAVE_RUN_DIR is set by the
-    runtime at spawn). Workers already call this per step, so it is the liveness
-    signal a status view reads: no new step and no log growth for N minutes = stuck."""
+def run_dir_for(worktree: str, ticket_id: str) -> Path | None:
+    """<main checkout>/.claude/wave/runs/<ticket>: where the run's status lives, found from
+    the worktree, for runtimes (Orca) that cannot hand the worker WAVE_RUN_DIR."""
+    p = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                       cwd=worktree, capture_output=True, text=True)
+    if p.returncode != 0 or not p.stdout.strip():
+        return None
+    d = Path(p.stdout.strip()).parent / ".claude" / "wave" / "runs" / ticket_id.lower()
+    return d if d.is_dir() else None
+
+
+def heartbeat(step: str, sha: str | None = None, *, worktree: str | None = None, ticket_id: str | None = None) -> None:
+    """Record the step in the run's status.json. WAVE_RUN_DIR is set by the direct runtime;
+    otherwise the run dir is found from the worktree. Workers already call this per step,
+    so it is the liveness signal a status view reads: no new step for N minutes = stuck."""
     import json
     import os
     from datetime import datetime, timezone
 
-    run_dir = os.environ.get("WAVE_RUN_DIR", "").strip()
+    run_dir = os.environ.get("WAVE_RUN_DIR", "").strip() or (
+        worktree and ticket_id and run_dir_for(worktree, ticket_id))
     if not run_dir:
         return
     path = Path(run_dir) / "status.json"
     try:
-        st = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        st = json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}
     except (OSError, ValueError):
-        st = {}
+        return  # never replace a status we could not read: it holds the whole run's record
     st["step"] = step
     if sha:
         st["step_sha"] = sha

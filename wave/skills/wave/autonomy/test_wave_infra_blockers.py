@@ -10,6 +10,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import unittest
 from pathlib import Path
@@ -36,6 +37,113 @@ class Runner:
         if isinstance(self.result[0], Exception):
             raise self.result[0]
         return self.result
+
+
+class FakeOrca:
+    """Stands in for the orca CLI; maps the first two args to a JSON result and records every call."""
+
+    def __init__(self, results, rc=0):
+        self.results, self.rc, self.calls = results, rc, []
+
+    def __call__(self, args):
+        self.calls.append(args)
+        res = self.results.get(" ".join(args[:2]))
+        out = json.dumps({"result": res}) if res is not None else ""
+        return subprocess.CompletedProcess(args, self.rc if res is not None else 1, out, "" if res is not None else "no such command")
+
+
+class OrcaRuntime(unittest.TestCase):
+    def setUp(self):
+        import worker_runtime
+
+        self.wr = worker_runtime
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = Path(self.tmp.name) / "repo"
+        self.repo.mkdir()
+        self.orca = FakeOrca({
+            "repo list": {"repos": [{"id": "r1", "path": str(self.repo)}]},
+            "worktree create": {"worktree": {"id": "r1::wt", "path": "C:/wt/86bcabc", "branch": "refs/heads/wave/86bcabc"}},
+        })
+        self.rt = worker_runtime.OrcaWorkerRuntime(repo_path=str(self.repo), base_branch="origin/development", orca=self.orca)
+        self.run_dir = self.repo / ".claude" / "wave" / "runs" / "86bcabc"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_spawn_writes_the_run_folder_contract(self):
+        self.run_dir.mkdir(parents=True)
+        (self.run_dir / "summary.md").write_text("old attempt", encoding="utf-8")
+        with mock.patch.dict("os.environ", {"WAVE_SKIP_PREFLIGHT": "1"}):
+            rec = self.rt.spawn(ticket_id="86bcabc", prompt="WAVE WORKER ...", agent="codex", model="gpt-5.6-terra")
+        st = json.loads((self.run_dir / "status.json").read_text(encoding="utf-8"))
+        self.assertEqual((st["runtime"], st["state"], st["agent"], st["path"], st["branch"]),
+                         ("orca", "running", "codex", "C:/wt/86bcabc", "wave/86bcabc"))
+        self.assertEqual(rec.mode, "orca")
+        create = self.orca.calls[-1]
+        for flag, value in (("--agent", "codex"), ("--surface", "terminal"), ("--model", "gpt-5.6-terra"),
+                            ("--base-branch", "origin/development"), ("--repo", "id:r1")):
+            self.assertEqual(create[create.index(flag) + 1], value)
+        self.assertFalse((self.run_dir / "summary.md").exists())  # a stale summary would read as done
+        self.assertTrue((self.run_dir / "summary.prev.md").exists())
+
+    def test_live_run_is_not_spawned_twice(self):
+        self.run_dir.mkdir(parents=True)
+        (self.run_dir / "status.json").write_text('{"state": "running"}', encoding="utf-8")
+        with self.assertRaisesRegex(self.wr.WorkerError, "claim_guard"):
+            self.rt.spawn(ticket_id="86bcabc", prompt="p", agent="claude")
+
+    def test_unregistered_repo_fails(self):
+        self.orca.results["repo list"] = {"repos": [{"id": "x", "path": str(Path(self.tmp.name) / "other")}]}
+        with self.assertRaisesRegex(self.wr.WorkerError, "not registered with Orca"):
+            self.rt.repo_id()
+
+    def test_liveness(self):
+        st = {"path": "C:/wt/86bcabc"}
+        self.run_dir.mkdir(parents=True)
+        now_ms = time.time() * 1000
+        alive, idle = self.wr.orca_worker_state(st, self.run_dir, FakeOrca({"terminal list": {"terminals": [{"lastOutputAt": now_ms - 90_000}]}}))
+        self.assertTrue(alive)
+        self.assertAlmostEqual(idle, 90, delta=5)
+        self.assertEqual(self.wr.orca_worker_state(st, self.run_dir, FakeOrca({"terminal list": {"terminals": []}})), (False, None))
+        # Orca not answering is not "exited": a failed query must not end a live worker.
+        self.assertEqual(self.wr.orca_worker_state(st, self.run_dir, FakeOrca({})), (True, None))
+        (self.run_dir / "summary.md").write_text("TIER: quick", encoding="utf-8")
+        self.assertEqual(self.wr.orca_worker_state(st, self.run_dir, FakeOrca({})), (False, None))
+
+    def test_codex_env_policy(self):
+        cfg = Path(self.tmp.name) / "config.toml"
+        self.assertTrue(self.wr.codex_inherits_all(cfg))  # no config: Codex inherits everything
+        cfg.write_text('[shell_environment_policy]\ninherit = "core"\n', encoding="utf-8")
+        self.assertFalse(self.wr.codex_inherits_all(cfg))
+        cfg.write_text('[shell_environment_policy]\ninherit = "all"\n', encoding="utf-8")
+        self.assertTrue(self.wr.codex_inherits_all(cfg))
+
+
+class HeartbeatWithoutEnv(unittest.TestCase):
+    """An Orca-launched worker's shell has no WAVE_RUN_DIR; the heartbeat finds the run from the worktree."""
+
+    def test_heartbeat_finds_run_and_never_wipes_an_unreadable_status(self):
+        import worker_step_commit
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            git = lambda cwd, *a: subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True, text=True)
+            main, wt = root / "main", root / "wt"
+            main.mkdir()
+            git(main, "init", "-q")
+            git(main, "-c", "user.email=t@x", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "base")
+            git(main, "worktree", "add", "-q", "-b", "wave/86bcabc", str(wt))
+            run = main / ".claude" / "wave" / "runs" / "86bcabc"
+            run.mkdir(parents=True)
+            status = run / "status.json"
+            status.write_text("\ufeff" + json.dumps({"ticket_id": "86bcabc", "state": "running"}), encoding="utf-8")
+            with mock.patch.dict("os.environ", {"WAVE_RUN_DIR": ""}):
+                worker_step_commit.heartbeat("implement", "abc123", worktree=str(wt), ticket_id="86BCABC")
+                st = json.loads(status.read_text(encoding="utf-8-sig"))
+                self.assertEqual((st["state"], st["step"], st["step_sha"]), ("running", "implement", "abc123"))
+                status.write_text("{not json", encoding="utf-8")
+                worker_step_commit.heartbeat("test", None, worktree=str(wt), ticket_id="86bcabc")
+                self.assertEqual(status.read_text(encoding="utf-8"), "{not json")
 
 
 class SyncBaseBeforeCloseout(unittest.TestCase):

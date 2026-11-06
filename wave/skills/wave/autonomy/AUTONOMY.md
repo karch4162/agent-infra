@@ -7,7 +7,7 @@ On top of it, backlog-watch picks agent-ready tickets and `autonomy_tick.py` run
 the whole pipeline. **Both are opt-in per repo** in `.claude/wave/config.env`:
 
 ```
-WAVE_RUNTIME=direct        # spawn.sh / status.sh / cost.sh use the direct runtime
+WAVE_RUNTIME=direct        # spawn.sh / status.sh / cost.sh use the direct runtime; orca: tick workers in Orca terminals
 WAVE_BACKLOG_WATCH=1       # the tick may pick and spawn; keep 0 until you turn it on
 ```
 
@@ -26,12 +26,33 @@ Each tick, idempotent, resumable from the status files:
 
 | stage | reads | writes |
 |---|---|---|
-| reconcile | `status.json` + real PID, `gh pr list --head <branch>` | `exited`, `pr_open`, or `done_held` (no PR) |
+| reconcile | `status.json` + real PID (Orca: `summary.md` or the terminal), `gh pr list --head <branch>` | `exited`, `pr_open`, or `done_held` (no PR) |
 | ci | `gh pr view --json statusCheckRollup` (every check counts; empty is pending) | `ci_green` or `done_held` |
 | challenge | Grok in the surviving worktree, read-only, diff written for it | `challenged` + verdict |
 | merge | `merge_policy.decide` over the PR body's `## Wave` block + checks + challenge | `done_merged` or `done_held`; tracker status + comment |
 | spawn | `backlog_watch` (cap, slots, rating, sufficiency), plan loop when thin | a worker; daily cap counted only after the spawn succeeded |
 | closeout | `WAVE_CLOSEOUT_CMD` when something merged and nothing is live | `autonomy/closeout-last.log` |
+
+## Watching workers in Orca
+
+`WAVE_RUNTIME=orca` keeps the tick and the run folders exactly as above but starts
+each worker as an interactive agent in its own Orca terminal (`orca worktree create
+--agent … --surface terminal`), so you can watch it and type into it.
+
+- Orca's per-agent launch settings decide the permission flags; unattended runs need
+  Claude's `--dangerously-skip-permissions` and Codex's sandbox bypass set there.
+- An interactive agent does not exit when it finishes. The tick counts it done when
+  it writes `summary.md` (the contract's last step, after the PR) or its terminal
+  closes. A worker silent for 20 minutes gets one notice, never a kill. Terminals
+  are left open; the sweep removes the worktrees.
+- Orca not running, or the repo not registered with Orca: the tick spawns direct
+  and leaves a notice, since it runs when no one is at the IDE.
+- Codex workers need `CLICKUP_*`/`WAVE_*` in their commands. The direct runtime
+  forces that per launch; Orca cannot, so a Codex worker spawns direct (with a
+  notice) unless `~/.codex/config.toml` has `[shell_environment_policy]`
+  `inherit = "all"`.
+- No `worker.log`: tokens come from the agents' own session logs, so the control
+  center's Claude cost-per-merge is empty for Orca runs.
 
 A scheduled task (Task Scheduler / cron) runs the `--execute` form with
 `CLICKUP_API_TOKEN` in its environment, never on the command line.
