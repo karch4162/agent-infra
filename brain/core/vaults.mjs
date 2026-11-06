@@ -44,6 +44,11 @@ function projectBinding(project) {
     if (existsSync(join(at, '.git')) || dirname(at) === at) break;
     at = dirname(at);
   }
+  // .brain/ is gitignored, so a linked worktree (wave, Orca, git worktree add) has none:
+  // read the main checkout's binding, found through the shared git dir.
+  const common = git(project, ['rev-parse', '--path-format=absolute', '--git-common-dir'], true);
+  const main = common && readJson(join(dirname(common), '.brain/config.json'));
+  if (main) return main;
   // Read-only migration path. Never rewrite the old Claude settings.
   const legacy = readJson(join(project, '.claude/settings.local.json'))?.env;
   return legacy?.BRAIN_ROOT ? { path: legacy.BRAIN_ROOT, reposDir: legacy.REPOS_DIR, legacy: true } : null;

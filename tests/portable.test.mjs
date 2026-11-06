@@ -67,6 +67,19 @@ test('URL init is repeatable and stores only a local binding in the project', t 
   assert.match(readFileSync(join(f.project, '.gitignore'), 'utf8'), /\.brain\//);
 });
 
+test('a linked worktree outside the project uses the main checkout binding', t => {
+  const f = fixture(t);
+  git(f.project, 'init', '-b', 'main');
+  const a = f.run('init', '--vault', f.source);
+  assert.equal(a.exit, 0, JSON.stringify(a));
+  git(f.project, 'add', '.gitignore'); git(f.project, '-c', 'user.name=T', '-c', 'user.email=t@example.invalid', 'commit', '-m', 'seed');
+  const wt = join(f.dir, 'elsewhere', 'worker'); git(f.project, 'worktree', 'add', '-b', 'worker', wt);
+  assert.equal(existsSync(join(wt, '.brain')), false);
+  const s = f.run('status', '--project', wt);
+  assert.equal(s.exit, 0, JSON.stringify(s));
+  assert.equal(resolve(s.vault?.path ?? s.path), resolve(a.vault.path));
+});
+
 test('sync advances clean snapshots and preserves dirty or diverged work', t => {
   const f = fixture(t); const a = f.run('init', '--vault', pathToFileURL(f.remote).href);
   assert.equal(a.exit, 0, JSON.stringify(a));
