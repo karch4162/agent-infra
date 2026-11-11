@@ -548,6 +548,15 @@ assert_not_contains "direct/summary-no-env-var" "$out" 'WAVE_RUN_DIR'
 assert_contains "direct/step-commit" "$out" "worker_step_commit.py"
 assert_not_contains "direct/no-orca-set" "$out" "orca worktree set"
 assert_contains "direct/same-pr-block" "$out" "## Wave"
+# The tick renders with WAVE_RUNTIME=direct; a config.env saying orca must not override it,
+# or Orca-terminal workers never write the summary.md the tick waits for.
+new_sandbox "$JIRA_CONFIG
+WAVE_RUNTIME=orca"
+spawn_dry WAVE_RUNTIME=direct >/dev/null
+assert_contains "direct-env-beats-config/summary-file" "$(cat "$BOX/out.txt")" 'summary.md'
+spawn_dry >/dev/null
+assert_contains "config-orca/orca-summary" "$(cat "$BOX/out.txt")" "orca worktree set --worktree active --comment"
+new_sandbox "$JIRA_CONFIG"
 st="$(spawn_dry WAVE_RUNTIME=bogus)"
 assert_eq "direct-bad/exit-1" "1" "$st"
 assert_contains "direct-bad/says" "$(cat "$BOX/out.txt")" "WAVE_RUNTIME must be orca or direct"

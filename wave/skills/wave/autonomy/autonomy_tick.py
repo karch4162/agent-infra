@@ -158,6 +158,8 @@ class Tick:
         os.environ["WAVE_REPO"] = str(repo)
         self.wave_dir = _wave_dir(repo)
         self.cfg = load_autonomy_config(self.wave_dir / "config.env")
+        # The worker runtimes read the prefix from the env; the tick does not source config.env.
+        os.environ["WAVE_BRANCH_PREFIX"] = self.cfg.branch_prefix
         self.execute = execute
         self.log = log
         self.runs = self.wave_dir / "runs"

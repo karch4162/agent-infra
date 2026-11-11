@@ -18,8 +18,12 @@ WAVE_NOTES_FILE="$ROOT/.claude/wave/notes.md"
   echo "wave: no $WAVE_CONFIG - write one with: bash $WAVE_HOME/bootstrap.sh --label <repo-label>" >&2
   exit 1
 }
+# An exported WAVE_RUNTIME beats the file: the tick renders the worker prompt with
+# WAVE_RUNTIME=direct (the summary.md contract) even when config.env says orca.
+_WAVE_RUNTIME_ENV="${WAVE_RUNTIME:-}"
 # shellcheck disable=SC1090
 . <(sed '1s/^\xef\xbb\xbf//' "$WAVE_CONFIG")  # Windows editors add a BOM; bash would read it as part of the first key
+[ -z "$_WAVE_RUNTIME_ENV" ] || WAVE_RUNTIME="$_WAVE_RUNTIME_ENV"
 
 for v in WAVE_TRACKER WAVE_QUEUE WAVE_STATE_START WAVE_STATE_DONE WAVE_FILE_TO; do
   eval "[ -n \"\${$v:-}\" ]" || { echo "wave: $v is not set in $WAVE_CONFIG" >&2; exit 1; }
