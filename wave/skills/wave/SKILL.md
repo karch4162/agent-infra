@@ -174,8 +174,9 @@ only window where nothing else runs, so this session may own shared state. Walk
 exactly what the summaries name (`NOT VERIFIED IN BROWSER: <route>`, anything needing a
 write or a multi-step flow) — no exploratory clicking. Never against production; the
 repo's `notes.md` says what is safe. Output is tracker issues filed to `WAVE_FILE_TO`,
-never fixes: the PRs are merged. Time-box ~15 min and report "walked N, M findings" —
-an empty report means it did not run. Repos with no UI (plugins, libraries) skip this.
+never fixes: the PRs are merged. Time-box ~15 min and report "walked N, M findings", or
+"BLOCKED - <why>" when it walked nothing (no browser, failed db reset): a walk that saw
+nothing never reports a route count. An empty report means it did not run. Repos with no UI (plugins, libraries) skip this.
 
 **4. Check the queue — the only step that needs you.** Run the config's `WAVE_QUEUE`
 against the tracker (Linear: `orca linear`; Jira: the Atlassian MCP JQL search).
