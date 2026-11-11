@@ -221,7 +221,7 @@ if [ -n "$MERGED_PRS" ] && [ -f "$ROOT/.claude/wave/walk.sh" ]; then
   else
     WALK_NAME="walk-$(date +%F)-${RUN#run_}"
     WALK_PROMPT="$(DRY_RUN=1 bash "$ROOT/.claude/wave/walk.sh" "$WALK_NAME" <<< "$CHECKLIST")
-You are a dispatched worker: after the DONE - WALK line, send worker_done exactly once per your preamble, --outcome succeeded with the N routes / M findings in the summary."
+You are a dispatched worker: after the DONE - WALK line, send worker_done exactly once per your preamble: --outcome succeeded with the N routes / M findings in the summary, or --outcome failed with the whole BLOCKED line (and every NOT WALKED line) as the summary when you walked nothing."
     orca orchestration worker-start --run "$RUN" --spec "$WALK_PROMPT" --worktree new-top-level --name "$WALK_NAME" \
       --repo "id:$REPO_ID" --base-branch "$WAVE_BASE" --agent claude --json >/dev/null \
       || { echo "walker failed to start; checklist:"; echo "$CHECKLIST"; exit 2; }
