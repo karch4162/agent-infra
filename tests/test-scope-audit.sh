@@ -278,7 +278,8 @@ else
 fi
 # Negative control: res/ or an XML glob here would silently drop the layouts and
 # manifests INNOV-427 is about to index.
-if [[ -f "$ANDROID_TPL" ]] && ! grep -qiE '^/?(.*/)?res/?$|^\*.*\.xml$' "$ANDROID_TPL"; then
+if [[ -f "$ANDROID_TPL" ]] && ! grep -vE '^[[:space:]]*#' "$ANDROID_TPL" \
+     | grep -qiE '(^|/)res(/|$)|\*.*\.xml$|androidmanifest'; then
   pass "templates/android-keeps-res-xml"
 else
   fail "templates/android-keeps-res-xml" "android template must not exclude res/ or *.xml (INNOV-427)"
