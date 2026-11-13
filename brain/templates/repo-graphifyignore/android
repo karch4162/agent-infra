@@ -1,0 +1,84 @@
+# .graphifyignore — Android / Kotlin / Java / Gradle (code graph carve-out)
+#
+# Copied into the repo checkout at build time from the VAULT-side copy at
+# graphify/<repo>/.graphifyignore, which is the reviewable, committed one.
+# PURE DENYLIST — never add a `!negation` line; negation is not available here.
+#
+# Scope for this stack is every module's `src/main/` (java/ and kotlin/), built
+# from the Gradle project root. res/ is deliberately NOT carved: graphify does not
+# index XML today, and INNOV-427 will make layouts and manifests count.
+
+# --- Gradle / IDE / native build state (never source) ----------------------
+build/
+.gradle/
+.idea/
+.cxx/
+.externalNativeBuild/
+captures/
+build-cache/
+local.properties
+
+# --- generated sources (kapt / ksp / databinding / BuildConfig) ------------
+generated/
+kapt/
+ksp/
+
+# --- binaries ----------------------------------------------------------------
+*.apk
+*.aab
+*.aar
+*.jar
+*.keystore
+*.jks
+
+# --- build & config manifests ----------------------------------------------
+*.gradle
+*.gradle.kts
+gradle/
+gradlew
+gradlew.bat
+gradle.properties
+proguard-rules.*
+*.pro
+google-services.json
+lint.xml
+lint-baseline.xml
+detekt*.yml
+ktlint*.yml
+Dockerfile
+Dockerfile.*
+entrypoint.sh
+.env
+.env.*
+
+# --- tests, test fixtures and benchmarks -----------------------------------
+test/
+tests/
+androidTest/
+testFixtures/
+shared-test/
+macrobenchmark/
+benchmark/
+baselineprofile/
+*Test.kt
+*Test.java
+*Tests.kt
+*Tests.java
+*.test.*
+*.spec.*
+
+# --- docs, images, media (not code) ----------------------------------------
+*.md
+docs/
+assets/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.webp
+*.json
+
+# --- editor / CI -----------------------------------------------------------
+.github/
+.vscode/

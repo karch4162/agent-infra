@@ -58,6 +58,7 @@ Scope is fixed **per stack**, never an engineer's per-run choice — otherwise t
 | Python | the importable package dir(s) |
 | C# / Unity | `Assets/Scripts/` |
 | C# / .NET | `src/` |
+| Android (Kotlin / Java / Gradle) | every module's `src/main/` (`java/`, `kotlin/`), built from the Gradle project root and carved back by the `android` carve-out — `res/` stays in (INNOV-427) |
 | Go | repo root, minus `vendor/` + `*_test.go` |
 | Unknown | the human picks **once** at `/brain:init`, recorded in the repo table below — never re-asked |
 
