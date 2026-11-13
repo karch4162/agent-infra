@@ -61,6 +61,12 @@ Do these in order; keep the summary tight (the user wants to start working, not 
    ```
    Put its line on the `Backlog:` output line **verbatim**; it prints nothing when the vault has no `chats/` digests and no drafts, and then the line is omitted. Harvest and ingest are both manual, so this is the only place a growing raw pile, a stalled harvest (`days old`), or drafts past the promote TTL show up. Context, not a gate: do not run `/brain:wiki-ingest` or `/brain:promote` from resume.
 
+   Then report which published graph mirrors are behind their source (INNOV-428):
+   ```bash
+   bash "$B" --mirrors             # e.g. BEHIND POS - built at 1a2b3c4d5e6f, 876 commits behind origin/main (configured in repos.json); rebuild from main and sync to refresh it - treat graph answers as leads
+   ```
+   Put each line on a `Mirrors:` output line **verbatim**; current and unmeasurable mirrors print nothing, and so does a vault with no mirrors, and then the line is omitted. This is the only session-start signal that a `graphify/<repo>/graph.json` answer may name files that no longer exist. Context, not a gate: do not rebuild or sync a mirror from resume.
+
 4. **Read the 3 most recent session logs.** `bash "$B" --logs` prints the newest 3 `logs/YYYY-MM-DD-*.md` paths; read each with `bash "$B" --cat <path>`. Pull out: decisions made, and anything under a "Pending / next steps" heading that is still open.
 
 5. **Pull relevant wiki notes.** Based on what the user says they're about to work on (or, if they said nothing, the focus in `hot.md`), again via `bash "$B" --cat <path>`:
@@ -82,6 +88,7 @@ Session: <the script's SESSION: WARN line, verbatim>   ← omit the line entirel
 In flight: #<n> <title> (<author>)      ← omit the line entirely if no PRs are open
 Open PRs: <each --prs line, verbatim>   ← omit the line entirely when --prs prints nothing
 Backlog: <the helper's --backlog line, verbatim>   ← omit the line entirely when it prints nothing
+Mirrors: <each --mirrors line, verbatim>   ← omit the line entirely when --mirrors prints nothing
 Open loops:
   - <pending item> (from <log>)
   - <pending item>

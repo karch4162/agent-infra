@@ -397,6 +397,56 @@ assert_eq "prs/gh-error-exit-0" "0" "$status"
 assert_eq "prs/gh-error-silent" "" "$(cat "$BOX/out.txt")"
 unset GH_PRS
 
+# ========= --mirrors: one line per BEHIND mirror, nothing else (INNOV-428) =====
+# The verdict is check-mirror-source.sh --behind's, relayed verbatim; resume
+# only filters. Sources sit in the flat $REPOS_DIR/<name> layout, the default
+# branch comes from each checkout's origin/HEAD (no repos.json, no network).
+src_commit() { # dir
+  echo "$RANDOM" >>"$1/f"
+  git -C "$1" add -A >/dev/null 2>&1
+  git -C "$1" -c user.email=t@example.invalid -c user.name=t commit -qm c >/dev/null 2>&1
+  git -C "$1" update-ref refs/remotes/origin/main HEAD
+}
+mirror_at() { # name nl  — vault mirror built at its source's current HEAD
+  mkdir -p "$VAULT/graphify/$1"
+  printf "{\"built_at_commit\": \"%s\",$2\"nodes\": [], \"links\": []}$2" \
+    "$(git -C "$BOX/repos/$1" rev-parse HEAD)" >"$VAULT/graphify/$1/graph.json"
+}
+new_src() { # name
+  git init -q -b main "$BOX/repos/$1" >/dev/null 2>&1
+  src_commit "$BOX/repos/$1"
+  git -C "$BOX/repos/$1" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+}
+run_mirrors() { # -> out.txt; echoes exit status
+  ( cd "$BOX" || exit 99; REPOS_DIR="$BOX/repos" BRAIN_ROOT="$VAULT" bash "$BRIEF" --mirrors ) \
+    >"$BOX/out.txt" 2>"$BOX/err.txt"
+  echo $?
+}
+
+# --- no graphify/ at all => silent, exit 0
+new_vault
+status="$(run_mirrors)"
+assert_eq "mirrors/none-exit-0" "0" "$status"
+assert_eq "mirrors/none-silent" "" "$(cat "$BOX/out.txt")"
+
+# --- one current mirror, one behind (CRLF graph.json) => only the behind one
+new_src cur; mirror_at cur '\n'
+new_src old; mirror_at old '\r\n'
+before="$(tree_state)"
+status="$(run_mirrors)"
+assert_eq "mirrors/current-only-exit-0" "0" "$status"
+assert_eq "mirrors/current-only-silent" "" "$(cat "$BOX/out.txt")"
+src_commit "$BOX/repos/old"; src_commit "$BOX/repos/old"
+status="$(run_mirrors)"
+out="$(cat "$BOX/out.txt")"
+assert_eq "mirrors/behind-exit-0" "0" "$status"
+assert_eq "mirrors/behind-one-line" "1" "$(grep -c . "$BOX/out.txt")"
+assert_contains "mirrors/behind-script-wording" "$out" "BEHIND old - built at "
+assert_contains "mirrors/behind-count" "$out" "2 commits behind origin/main"
+assert_contains "mirrors/behind-leads" "$out" "treat graph answers as leads"
+assert_not_contains "mirrors/current-not-listed" "$out" " cur "
+assert_eq "mirrors/read-only" "$before" "$(tree_state)"
+
 echo
 echo "$PASSED passed, $FAILED failed"
 [[ "$FAILED" -eq 0 ]]
