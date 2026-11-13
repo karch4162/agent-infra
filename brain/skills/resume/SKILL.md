@@ -63,9 +63,9 @@ Do these in order; keep the summary tight (the user wants to start working, not 
 
    Then report which published graph mirrors are behind their source (INNOV-428):
    ```bash
-   bash "$B" --mirrors             # e.g. BEHIND POS - built at 1a2b3c4d5e6f, 876 commits behind origin/main (configured in repos.json); rebuild from main and sync to refresh it - treat graph answers as leads
+   bash "$B" --mirrors             # e.g. BEHIND POS - built at 1a2b3c4d5e6f, 876 commits behind origin/main (configured in repos.json); rebuild from main and sync to refresh it
    ```
-   Put each line on a `Mirrors:` output line **verbatim**; current and unmeasurable mirrors print nothing, and so does a vault with no mirrors, and then the line is omitted. This is the only session-start signal that a `graphify/<repo>/graph.json` answer may name files that no longer exist. Context, not a gate: do not rebuild or sync a mirror from resume.
+   Put each line (`BEHIND` or `OFF-BRANCH`) on a `Mirrors:` output line **verbatim**, and treat graph answers from those mirrors as leads to confirm in the code, not facts; current and unmeasurable mirrors print nothing, and so does a vault with no mirrors, and then the line is omitted. This is the only session-start signal that a `graphify/<repo>/graph.json` answer may name files that no longer exist. Context, not a gate: do not rebuild or sync a mirror from resume.
 
 4. **Read the 3 most recent session logs.** `bash "$B" --logs` prints the newest 3 `logs/YYYY-MM-DD-*.md` paths; read each with `bash "$B" --cat <path>`. Pull out: decisions made, and anything under a "Pending / next steps" heading that is still open.
 

@@ -29,8 +29,8 @@
 #   resume-brief.sh --backlog    one "Harvest: ... · Drafts: ..." line, or nothing (INNOV-295)
 #   resume-brief.sh --prs        "Open PR #N (<age>h[, CONFLICTING]): <title> - <url>" per own
 #                                PR older than 12h or conflicting, or nothing (INNOV-389)
-#   resume-brief.sh --mirrors    check-mirror-source.sh --behind's BEHIND lines, verbatim,
-#                                one per stale graph mirror, or nothing (INNOV-428)
+#   resume-brief.sh --mirrors    check-mirror-source.sh --behind's BEHIND/OFF-BRANCH lines,
+#                                verbatim, one per stale mirror, or nothing (INNOV-428)
 # Always exit 0 except --cat on a missing path. Degrades to the working tree when
 # origin/<default> cannot be resolved — a briefing that cannot reach the remote is
 # still a briefing, it just must not claim to be current.
@@ -194,11 +194,12 @@ case "${1:-}" in
   --mirrors)
     # INNOV-428: only doctor check 6b measured mirror age, and nobody runs doctor
     # at session start, so an agent read a 870-commits-stale mirror unwarned.
-    # Relays check-mirror-source.sh --behind's BEHIND lines verbatim (that script
-    # owns the verdict and wording); current/skipped mirrors print nothing.
+    # Relays check-mirror-source.sh --behind's BEHIND and OFF-BRANCH lines
+    # verbatim (that script owns the verdict and wording); current/skipped
+    # mirrors print nothing.
     # Read-only and fetch-free like the rest of this helper; context, never a gate.
     BRAIN_ROOT="$VAULT" bash "$BIN_DIR/check-mirror-source.sh" --behind 2>/dev/null |
-      sed -n 's/\r$//; /^BEHIND /s/$/ - treat graph answers as leads/p'
+      sed -n 's/\r$//; /^BEHIND /p; /^OFF-BRANCH /p'
     exit 0
     ;;
 esac

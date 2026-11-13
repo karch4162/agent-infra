@@ -443,9 +443,18 @@ assert_eq "mirrors/behind-exit-0" "0" "$status"
 assert_eq "mirrors/behind-one-line" "1" "$(grep -c . "$BOX/out.txt")"
 assert_contains "mirrors/behind-script-wording" "$out" "BEHIND old - built at "
 assert_contains "mirrors/behind-count" "$out" "2 commits behind origin/main"
-assert_contains "mirrors/behind-leads" "$out" "treat graph answers as leads"
 assert_not_contains "mirrors/current-not-listed" "$out" " cur "
 assert_eq "mirrors/read-only" "$before" "$(tree_state)"
+
+# --- build commit not on origin/main (unmerged work) => OFF-BRANCH is relayed
+git -C "$BOX/repos/old" checkout -q -b feature >/dev/null 2>&1
+echo x >>"$BOX/repos/old/f"
+git -C "$BOX/repos/old" -c user.email=t@example.invalid -c user.name=t commit -qam c >/dev/null 2>&1
+mirror_at old '\r\n'
+status="$(run_mirrors)"
+assert_eq "mirrors/off-branch-exit-0" "0" "$status"
+assert_contains "mirrors/off-branch-relayed" "$(cat "$BOX/out.txt")" "OFF-BRANCH old - built at "
+assert_eq "mirrors/off-branch-one-line" "1" "$(grep -c . "$BOX/out.txt")"
 
 echo
 echo "$PASSED passed, $FAILED failed"
