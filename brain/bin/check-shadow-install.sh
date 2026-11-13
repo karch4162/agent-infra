@@ -69,9 +69,14 @@ LIVE="$(node -e '
   const isBrain = (k, installPath) => /(^|-)brain$/.test(nameOf(k)) ||
     [installPath, ...cacheDirs(k)].some(p => p && fs.existsSync(path.join(p, "bin", "vault-commit.sh")));
 
+  // INNOV-421: with the project dir at $HOME, its .claude/settings.json IS the
+  // user settings file; reading it at both scopes invents a project install.
+  const real = f => { try { return norm(fs.realpathSync(f)); } catch (e) { return norm(f); } };
+  const userSettings = path.join(claudeDir, "settings.json");
+  const projectSettings = path.join(project, ".claude", "settings.json");
   const settings = {
-    user: readJson(path.join(claudeDir, "settings.json")),
-    project: readJson(path.join(project, ".claude", "settings.json")),
+    user: readJson(userSettings),
+    project: real(projectSettings) === real(userSettings) ? null : readJson(projectSettings),
     local: readJson(path.join(project, ".claude", "settings.local.json")),
   };
   const enabled = (scope, k) => ((settings[scope] || {}).enabledPlugins || {})[k];

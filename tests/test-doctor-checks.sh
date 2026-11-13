@@ -727,6 +727,17 @@ run_shadow
 assert_eq "shadow/project-settings-exit-1" "1" "$STATUS" "$(evidence)"
 assert_contains "shadow/project-settings-scope" "tray-brain@tray-brain-marketplace ? (project scope" "$(out_all)" "$(evidence)"
 
+# --- 32b. INNOV-421: project dir == $HOME => its .claude/settings.json IS the
+# user settings file; counting it at both scopes invented a project install.
+# 32 above is the negative control: a distinct project settings file still counts.
+mk_shadow "$USER_REC"
+mv "$CFG/plugins" "$PROJ/.claude/plugins"; CFG="$PROJ/.claude"
+printf '{\r\n  "enabledPlugins": { "brain@agent-infra": true },\r\n  "extraKnownMarketplaces": { "agent-infra": { "source": { "source": "github", "repo": "x/agent-infra" } } }\r\n}\r\n' >"$CFG/settings.json"
+run_shadow
+assert_eq "shadow/home-project-exit-0" "0" "$STATUS" "$(evidence)"
+assert_prefix "shadow/home-project-ok" "SHADOW-INSTALL: OK - one brain-family plugin live here: brain@agent-infra 0.2.36 (user scope)" "$(first_line "$BOX/out.txt")" "$(evidence)"
+assert_not_contains "shadow/home-project-no-phantom" "project scope" "$(out_all)" "$(evidence)"
+
 # --- 33. explicitly disabled at its scope => not live -----------------------
 mk_shadow "$USER_REC, \"tray-brain@tray-brain-marketplace\": [ { \"scope\": \"user\", \"installPath\": \"/x/t\", \"version\": \"0.2.33\" } ]"
 printf '{ "enabledPlugins": { "tray-brain@tray-brain-marketplace": false } }\n' >"$CFG/settings.json"
