@@ -59,7 +59,9 @@ done
 # --- wait / gate / merge loop -----------------------------------------------
 export RUN STATE WAVE_HOME MAIN_CHECKOUT BASE_BRANCH WAVE_BASE WAVE_TRACKER
 export WAVE_STATE_HELD="${WAVE_STATE_HELD:-In Review}"
-python - <<'PY'
+# A crashed loop must not fall through to the report: that printed "merged 0; held 0"
+# as if the wave had settled, while every worker was still running unsupervised.
+python - <<'PY' || { echo "wave: coordinator loop crashed (traceback above); workers are unsupervised. Fix, then: bash \"\$WAVE/coordinator.sh\" --resume $RUN" >&2; exit 1; }
 import json, os, re, subprocess, sys, time
 RUN, STATE, WAVE, MAIN = (os.environ[k] for k in ('RUN','STATE','WAVE_HOME','MAIN_CHECKOUT'))
 BASE = os.environ['BASE_BRANCH']
@@ -123,7 +125,8 @@ def gate(pr):
 def consume(d):
     r = oj('orchestration', 'check', '--run', RUN, '--wait', '--types', 'worker_done,escalation,question', '--timeout-ms', '120000')
     for m in r.get('messages', []):
-        p = json.loads(m.get('payload') or '{}')
+        p = m.get('payload') or {}
+        p = json.loads(p) if isinstance(p, str) else p   # older Orca builds sent a JSON string
         if m.get('type') not in ('worker_done', 'question', 'escalation'):
             continue   # heartbeats ride in the same FIFO batch (--types is only the wake condition)
         k = by_dispatch(d, p.get('dispatchId'), p.get('taskId'))
