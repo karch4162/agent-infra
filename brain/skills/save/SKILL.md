@@ -100,7 +100,7 @@ Resolve the vault root as `$BRAIN_ROOT` (else the current project dir / cwd). Al
      # copy it into the checkout the build is about to read
      cp "$BRAIN_ROOT/graphify/<repo>/.graphifyignore" "$REPOS_DIR/<repo>/.graphifyignore"
      ```
-     `<stack>` is one of `templates/repo-graphifyignore/` (`nextjs`, `react`, `node-ts`, `flutter`, `python`, `dotnet`, `go`, `unity`) — match the repo's Stack column in the vault `CLAUDE.md` table. The templates are **pure denylists**; never add a `!negation` line. If the carve-out is edited, it is edited **vault-side** and committed there — the copy in the checkout is a disposable build input, not the source of truth.
+     `<stack>` is one of `templates/repo-graphifyignore/` (`nextjs`, `react`, `node-ts`, `flutter`, `python`, `dotnet`, `go`, `unity`, `android`) — match the repo's Stack column in the vault `CLAUDE.md` table. The templates are **pure denylists**; never add a `!negation` line. If the carve-out is edited, it is edited **vault-side** and committed there — the copy in the checkout is a disposable build input, not the source of truth.
    - **Build at the recorded scope, code-only (AST), never prompt for scope.** Read the repo's scope from the vault `CLAUDE.md` "Repos this brain covers" table (e.g. `lib/`) and build over exactly those source roots. Do a **full build on the first run** (no `graphify-out/graph.json` in the repo yet) and an **incremental `--update`** every time after:
      ```bash
      export PYTHONHASHSEED=0                                          # REQUIRED — see below; without it every rebuild re-mints community ids

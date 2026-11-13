@@ -255,13 +255,34 @@ fi
 
 # --- the stacks the init skill offers all exist ----------------------------
 missing_stacks=""
-for s in nextjs react node-ts flutter python dotnet go unity; do
+for s in nextjs react node-ts flutter python dotnet go unity android; do
   [[ -f "$IGNORE_TPL_DIR/$s" ]] || missing_stacks="$missing_stacks $s"
 done
 if [[ -z "$missing_stacks" ]]; then
   pass "templates/every-stack-has-a-carve-out"
 else
   fail "templates/every-stack-has-a-carve-out" "missing per-stack template(s):$missing_stacks"
+fi
+
+# --- android (INNOV-431): carves the Gradle build, keeps res/ XML for INNOV-427 ---
+ANDROID_TPL="$IGNORE_TPL_DIR/android"
+android_missing=""
+for p in build/ .gradle/ .idea/ .cxx/ captures/ generated/ kapt/ ksp/ '*.apk' '*.aab' \
+         local.properties androidTest/; do
+  grep -qxF "$p" "$ANDROID_TPL" 2>/dev/null || android_missing="$android_missing $p"
+done
+if [[ -z "$android_missing" ]]; then
+  pass "templates/android-carves-gradle-build"
+else
+  fail "templates/android-carves-gradle-build" "android template is missing:$android_missing"
+fi
+# Negative control: res/ or an XML glob here would silently drop the layouts and
+# manifests INNOV-427 is about to index.
+if [[ -f "$ANDROID_TPL" ]] && ! grep -vE '^[[:space:]]*#' "$ANDROID_TPL" \
+     | grep -qiE '(^|/)res(/|$)|\*.*\.xml$|androidmanifest'; then
+  pass "templates/android-keeps-res-xml"
+else
+  fail "templates/android-keeps-res-xml" "android template must not exclude res/ or *.xml (INNOV-427)"
 fi
 
 # ================================================================= PART C ===

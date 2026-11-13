@@ -10,6 +10,10 @@ different reasons and they are copied to different places.
 | `templates/graphifyignore` | `<vault>/.graphifyignore` | secrets / PII / private staging, for the wiki graph |
 | `templates/repo-graphifyignore/<stack>` | `<vault>/graphify/<repo>/.graphifyignore`, copied into the repo checkout at build time | build/config manifests, test scaffolding, deps, generated output — for the **code** graph |
 
+Stacks: `nextjs`, `react`, `node-ts`, `flutter`, `python`, `dotnet`, `go`,
+`unity`, `android` (Kotlin / Java / Gradle; keeps `res/` XML for INNOV-427).
+The file name is the value of the vault `CLAUDE.md` Stack column.
+
 ## Why the carve-out is a committed file
 
 graphify scans **one** positional root. So any multi-root scope is really

@@ -138,7 +138,7 @@ A user/org-level list of known vaults at **`~/.claude/brain/registry.json`** (cr
    [ -f "<vault>/graphify/<repo>/.graphifyignore" ] || \
      cp "${CLAUDE_PLUGIN_ROOT}/templates/repo-graphifyignore/<stack>" "<vault>/graphify/<repo>/.graphifyignore"
    ```
-   `<stack>` is one of `nextjs react node-ts flutter python dotnet go unity`. **Never overwrite an existing carve-out** — it may carry repo-specific exclusions someone reviewed. Record its path in the table's **Carve-out** column. The build copies it into the repo checkout as `.graphifyignore`; it is never committed to the product repo.
+   `<stack>` is one of `nextjs react node-ts flutter python dotnet go unity android`. **Never overwrite an existing carve-out** — it may carry repo-specific exclusions someone reviewed. Record its path in the table's **Carve-out** column. The build copies it into the repo checkout as `.graphifyignore`; it is never committed to the product repo.
 
    > **This is a DIFFERENT file from the vault's own `.graphifyignore`** (`templates/graphifyignore`, placed at `<vault>/.graphifyignore` in step 5). That one keeps secrets, `chats/` and `logs/` out of the **wiki** concept graph. This one keeps build manifests, test scaffolding and generated code out of a **repo's code** graph. Do not merge them, and step 5(a)'s "leave `.graphifyignore` untouched" refers to the vault's, not this one.
 
