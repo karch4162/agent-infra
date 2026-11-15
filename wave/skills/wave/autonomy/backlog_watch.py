@@ -120,6 +120,7 @@ def select_candidates(
     cfg,
     wave_dir: Path,
     slots: int,
+    trigger: str = "scheduled",
 ) -> tuple[list[Pick], list[dict[str, str]], list[dict[str, str]]]:
     picks: list[Pick] = []
     risky: list[dict[str, str]] = []
@@ -130,7 +131,7 @@ def select_candidates(
         title = getattr(t, "name", None) or t.get("name") or t.get("title") or ""
         tags = list(getattr(t, "tags", None) or t.get("tags") or [])
         body = getattr(t, "text", None) or t.get("text") or t.get("description") or ""
-        rating = rating_from_tags(tags) or "medium"
+        rating = rating_from_tags(tags)
 
         if "agent-ready" not in {x.lower() for x in tags}:
             skipped.append({"id": tid, "reason": "missing agent-ready"})
@@ -140,8 +141,14 @@ def select_candidates(
             risky.append({"id": tid, "title": title, "reason": "risky; needs Mason go"})
             continue
 
+        # Never guess a rating: an unrated ticket is not READY (INNOV-439).
         if rating not in {"low", "medium"}:
-            skipped.append({"id": tid, "reason": f"unrated/unsupported rating={rating}"})
+            skipped.append({"id": tid, "reason": f"unrated: needs a rating tag (got {rating or 'none'})"})
+            continue
+
+        # Unattended (scheduled) waves take low only; medium waits for an owner wave.
+        if rating == "medium" and trigger != "owner":
+            skipped.append({"id": tid, "reason": "medium: owner waves only"})
             continue
 
         ok_cap, why = can_start(tid, cfg.daily_ticket_cap, wave_dir)
@@ -192,6 +199,7 @@ def run_watch(
     preflight_path: Path | None = None,
     lock: RunLock | None = None,
     record_starts: bool = True,
+    trigger: str = "scheduled",
 ) -> WatchReport:
     """Select (and with execute, queue) the next tickets.
 
@@ -284,7 +292,7 @@ def run_watch(
             )
 
         picks, risky, skipped = select_candidates(
-            tickets, cfg=cfg, wave_dir=wave_dir, slots=slots
+            tickets, cfg=cfg, wave_dir=wave_dir, slots=slots, trigger=trigger
         )
         report.picks = picks
         report.flagged_risky = risky
@@ -339,6 +347,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--execute", action="store_true", default=False)
     ap.add_argument("--force-enabled", action="store_true", default=False)
     ap.add_argument("--out", default="", help="Write report JSON path")
+    ap.add_argument("--trigger", choices=("scheduled", "owner"), default="scheduled",
+                    help="scheduled (default) takes low only; owner also takes medium")
     args = ap.parse_args(argv)
 
     wave_dir = _default_wave_dir()
@@ -349,6 +359,7 @@ def main(argv: list[str] | None = None) -> int:
         dry_run=dry,
         execute=args.execute and not dry,
         force_enabled=args.force_enabled,
+        trigger=args.trigger,
     )
     out = json.dumps(report.to_dict(), indent=2)
     print(out)

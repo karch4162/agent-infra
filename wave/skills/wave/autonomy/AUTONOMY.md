@@ -79,7 +79,9 @@ Everything it stops on lands in `autonomy/human_*.md`; `wave_status.py` (or
 | Daily ticket starts | `WAVE_DAILY_TICKET_CAP=3` |
 | Concurrent implementers | `WAVE_MAX_IMPLEMENT_WORKERS=3` |
 | Plan revise rounds | `WAVE_PLAN_ROUNDS_CAP=2` |
-| Auto-merge low/medium | `WAVE_AUTO_MERGE_LOW_MEDIUM=1` |
+| Auto-merge at all | `WAVE_AUTO_MERGE=1` (0 holds every PR; the old `WAVE_AUTO_MERGE_LOW_MEDIUM=0` still means off) |
+| Auto-merge medium | `WAVE_AUTO_MERGE_MEDIUM=0`: owner-only, and it also needs `WAVE_CLEAN_WAVES_FOR_MEDIUM=3` green closeouts in a row (`autonomy/clean-waves.json`); a red closeout resets the streak and suspends it |
+| Picking by rating | the tick (scheduled) takes `rating:low` only; `backlog_watch.py --trigger owner` also takes medium. Unrated tickets are never picked |
 | Budget pause | `WAVE_BUDGET_GUARD=1` (reads `WAVE_CLAUDE_WEEKLY_PCT`, Codex preflight) |
 | Grok challenge | `WAVE_GROK_CHALLENGE=1` (`autonomy/grok_calls.jsonl` counts calls) |
 

@@ -5,11 +5,13 @@ Run: python .claude/wave/test_wave_autonomy.py
 from __future__ import annotations
 
 import json
+import os
 import time
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -343,7 +345,7 @@ class BacklogWatch(unittest.TestCase):
             )
             (p / "runs").mkdir()
             rep = backlog_watch.run_watch(
-                wave_dir=p, dry_run=True, force_enabled=True, tickets=tickets
+                wave_dir=p, dry_run=True, force_enabled=True, tickets=tickets, trigger="owner"
             )
             self.assertTrue(rep.ok)
             by = {x.ticket_id: x.action for x in rep.picks}
@@ -395,6 +397,28 @@ class AutoMergeDry(unittest.TestCase):
         )
         self.assertEqual(mr.action, "dry_run")
         self.assertEqual(mr.decision, "MERGE")
+
+    def _medium(self, td, env):
+        body = "## Wave\nRATING: medium\nMIGRATION: no\nREVIEWER: codex\n"
+        with mock.patch.dict(os.environ, {"WAVE_REPO": td, **env}):
+            return auto_merge.evaluate_and_maybe_merge(
+                repo="r/r", pr=1, rating="medium", primary_review="codex", primary_verdict="YES",
+                challenge={"ran": True, "verdict": "PASS", "unresolved_blocker": False}, dry_run=True,
+                snapshot={"body": body, "checks": [{"name": "Unit", "bucket": "pass"}], "mergeable": "MERGEABLE", "number": 1})
+
+    def test_medium_needs_switch_and_streak(self):
+        # INNOV-439: medium auto-merges only with the owner's switch AND N clean waves; a red closeout resets it.
+        with tempfile.TemporaryDirectory() as td:
+            wd = Path(td) / ".claude" / "wave"
+            on = {"WAVE_AUTO_MERGE_MEDIUM": "1", "WAVE_CLEAN_WAVES_FOR_MEDIUM": "2"}
+            self.assertEqual(self._medium(td, {}).action, "held")
+            auto_merge.record_closeout(wd, True)
+            self.assertEqual(self._medium(td, on).action, "held")   # streak 1 < 2
+            auto_merge.record_closeout(wd, True)
+            self.assertEqual(self._medium(td, on).decision, "MERGE")
+            auto_merge.record_closeout(wd, False)
+            self.assertEqual(auto_merge.clean_streak(wd), 0)
+            self.assertEqual(self._medium(td, on).action, "held")
 
 
 
@@ -563,6 +587,22 @@ class Phase1Fixes(unittest.TestCase):
             "WAVE_BUDGET_GUARD=0\nWAVE_CLICKUP_LIST=1\n" + extra,
             encoding="utf-8",
         )
+
+    def test_scheduled_takes_low_only_and_never_guesses_a_rating(self):
+        # INNOV-439: unrated is not READY; medium waits for an owner wave.
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td)
+            self._cfg(p)
+            t = self._tickets(3)
+            t[1]["tags"] = ["agent-ready", "rating:medium"]
+            t[2]["tags"] = ["agent-ready"]
+            rep = backlog_watch.run_watch(wave_dir=p, dry_run=True, force_enabled=True, tickets=t)
+            self.assertEqual([x.ticket_id for x in rep.picks], ["t0"])
+            reasons = {x["id"]: x["reason"] for x in rep.skipped}
+            self.assertEqual(reasons["t1"], "medium: owner waves only")
+            self.assertTrue(reasons["t2"].startswith("unrated"))
+            rep = backlog_watch.run_watch(wave_dir=p, dry_run=True, force_enabled=True, tickets=t, trigger="owner")
+            self.assertEqual(sorted(x.ticket_id for x in rep.picks), ["t0", "t1"])
 
     def test_one_pass_never_picks_past_daily_cap(self):
         with tempfile.TemporaryDirectory() as td:
