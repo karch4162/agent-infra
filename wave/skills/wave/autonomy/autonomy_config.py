@@ -35,6 +35,8 @@ DEFAULTS = {
     "WAVE_STATE_START": "",
     "WAVE_STATE_DONE": "",
     "WAVE_QUEUE_STATUS": "backlog",
+    "WAVE_QUEUE": "",
+    "WAVE_JIRA_SITE": "",
 }
 
 
@@ -121,6 +123,8 @@ class AutonomyConfig:
     state_start: str
     state_done: str
     queue_status: str
+    queue: str
+    jira_site: str
 
     @property
     def enabled(self) -> bool:
@@ -157,4 +161,6 @@ def load_autonomy_config(config_path: Path | None = None) -> AutonomyConfig:
         state_start=_get("WAVE_STATE_START", file_vals),
         state_done=_get("WAVE_STATE_DONE", file_vals),
         queue_status=_get("WAVE_QUEUE_STATUS", file_vals) or "backlog",
+        queue=_get("WAVE_QUEUE", file_vals),             # Jira: the JQL the picker runs verbatim
+        jira_site=_get("WAVE_JIRA_SITE", file_vals),
     )

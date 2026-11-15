@@ -285,14 +285,13 @@ def run_watch(
             return report
 
         if tickets is None:
-            # Live ClickUp fetch — token from env only; never print it.
-            from clickup_tracker import ClickUpTrackerAdapter
+            # Live fetch from the repo's tracker (ClickUp token / acli login stay out of logs).
+            from jira_tracker import tracker_for
 
-            adapter = ClickUpTrackerAdapter(
-                list_id=cfg.clickup_list,
-                space_id=cfg.clickup_space,
-                team_id=cfg.clickup_team,
-            )
+            adapter = tracker_for(cfg)
+            if adapter is None:
+                report.notices.append(f"automatic picking is not wired for tracker={cfg.tracker or 'unset'}")
+                return report
             tickets = adapter.fetch_queue(
                 statuses=[cfg.queue_status],
                 require_tags=["agent-ready"],
