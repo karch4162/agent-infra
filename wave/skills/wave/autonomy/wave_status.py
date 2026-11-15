@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from worker_runtime import pid_alive  # noqa: E402
+from worker_runtime import run_alive  # noqa: E402
 
 TERMINAL = {"done_merged", "done_held", "done_held_review_no", "stopped", "removed"}
 
@@ -68,7 +68,7 @@ def collect(runs: Path) -> list[dict]:
             continue
         run_dir = st_path.parent
         pid = int(st.get("pid") or 0)
-        alive = pid_alive(pid)
+        alive = run_alive(st, run_dir)
         state = st.get("state", "?")
         if state in {"running", "starting"} and not alive:
             state = "exited"
