@@ -19,6 +19,12 @@ Jira through the Atlassian CLI (`acli`, its own login): the picker runs the repo
 `WAVE_QUEUE` JQL verbatim, so put status, `agent-ready` and `assignee IS EMPTY` in it.
 Linear is not wired for automatic picking yet.
 
+**One engine for unattended runs (INNOV-444).** Anything scheduled (Task Scheduler,
+cron, an Orca automation, the control repo) runs `autonomy_tick.py`, never
+`coordinator.sh`. The tick is resumable from the status files, so a missed firing or
+a crash loses nothing. `coordinator.sh` is a long-lived loop for a wave a person starts
+and watches (SKILL.md, "Supervised wave"); do not schedule it.
+
 ## One tick
 
 ```bash

@@ -21,8 +21,11 @@ status.json files:
   6. closeout   WAVE_CLOSEOUT_CMD once nothing is live and something merged
 
 Stops and leaves a note under autonomy/ for a human on: risky tickets, a plan that
-needs a human, a held PR, a failed closeout. Only the clickup tracker is wired here;
-Orca/Linear/Jira waves use coordinator.sh.
+needs a human, a held PR, a failed closeout.
+
+This is the ONE engine for anything unattended (scheduled, control repo; INNOV-444),
+on either runtime. coordinator.sh is only for waves a person starts and watches.
+Automatic picking is wired for ClickUp and Jira (acli); Linear is not yet.
 """
 from __future__ import annotations
 

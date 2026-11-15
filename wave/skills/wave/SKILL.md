@@ -206,6 +206,10 @@ concurrent builds, not agents.
 
 ## Supervised wave (`coordinator.sh`, SPO-640)
 
+**Attended only.** Run it in a session you are watching. Never schedule it: unattended
+and scheduled waves use `autonomy/autonomy_tick.py` (INNOV-444), which survives a
+crash or a missed firing; this loop does not.
+
 Human PR review on quick/normal tiers caught nothing across the last waves, so the
 coordinator takes the human out of that merge path. One command replaces steps 5, 1,
 2 (merge listing + cost), 3 and 3.5 of the checklist:
