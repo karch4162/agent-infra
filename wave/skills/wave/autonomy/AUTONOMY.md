@@ -14,6 +14,12 @@ WAVE_BACKLOG_WATCH=1       # the tick may pick and spawn; keep 0 until you turn 
 Every command runs from inside the target repo with
 `WAVE="${CLAUDE_PLUGIN_ROOT}/skills/wave"`.
 
+**One engine for unattended runs (INNOV-444).** Anything scheduled (Task Scheduler,
+cron, an Orca automation, the control repo) runs `autonomy_tick.py`, never
+`coordinator.sh`. The tick is resumable from the status files, so a missed firing or
+a crash loses nothing. `coordinator.sh` is a long-lived loop for a wave a person starts
+and watches (SKILL.md, "Supervised wave"); do not schedule it.
+
 ## One tick
 
 ```bash
