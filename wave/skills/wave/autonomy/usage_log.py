@@ -9,7 +9,8 @@ from typing import Any
 
 
 TOKEN_RE = re.compile(r"tokens used\s*[\r\n]+\s*([\d,]+)", re.I)
-COST_RE = re.compile(r'"totalCostUSD":\s*([0-9.]+)')
+# Claude Code's stream-json result line says total_cost_usd; older builds said totalCostUSD.
+COST_RE = re.compile(r'"(?:totalCostUSD|total_cost_usd)":\s*([0-9.]+)')
 
 
 def parse_worker_log(text: str) -> dict[str, Any]:
