@@ -354,6 +354,47 @@ class BacklogWatch(unittest.TestCase):
             self.assertEqual(rep.flagged_risky[0]["id"], "2")
 
 
+class JiraPicking(unittest.TestCase):
+    """INNOV-440: the picker reads a Jira repo's WAVE_QUEUE through acli."""
+
+    RICH = "File src/a.ts:10.\nAcceptance: given a when b then c.\nExpected: test asserts behavior."
+
+    def _item(self, key, labels, assignee=None):
+        doc = {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": line}]}
+                                          for line in self.RICH.split("\n")]}
+        return {"key": key, "fields": {"summary": key, "status": {"name": "To Do"}, "labels": labels,
+                                       "assignee": {"displayName": assignee} if assignee else None,
+                                       "description": doc}}
+
+    def test_jira_queue_feeds_the_picker(self):
+        import subprocess
+        import jira_tracker
+        items = [self._item("INNOV-1", ["agent-ready", "rating:low"]),
+                 self._item("INNOV-2", ["agent-ready", "rating:low"], assignee="Mike"),
+                 self._item("INNOV-3", ["rating:low"])]
+        calls = []
+
+        def fake(args):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, json.dumps(items), "")
+
+        with tempfile.TemporaryDirectory() as td, mock.patch.object(jira_tracker, "_run", fake):
+            p = Path(td)
+            (p / "config.env").write_text(
+                "WAVE_BACKLOG_WATCH=1\nWAVE_BUDGET_GUARD=0\nWAVE_TRACKER=jira\n"
+                "WAVE_QUEUE='project = INNOV AND labels = agent-ready'\nWAVE_JIRA_SITE=x.atlassian.net\n",
+                encoding="utf-8")
+            with mock.patch.dict(os.environ, {"WAVE_TRACKER": "", "WAVE_QUEUE": ""}):
+                rep = backlog_watch.run_watch(wave_dir=p, dry_run=True, force_enabled=True)
+        self.assertIn("project = INNOV AND labels = agent-ready", calls[0])
+        self.assertEqual([x.ticket_id for x in rep.picks], ["INNOV-1"])        # INNOV-3 lacks agent-ready
+        self.assertIn({"id": "INNOV-2", "reason": "assigned to Mike"}, rep.skipped)
+
+    def test_adf_description_becomes_text(self):
+        import jira_tracker
+        self.assertEqual(jira_tracker.adf_text(self._item("K", [])["fields"]["description"]).strip(), self.RICH)
+
+
 class Config(unittest.TestCase):
     def test_state_names_come_from_config_env(self):
         # The tick runs from a scheduler: an env-only read left every tracker

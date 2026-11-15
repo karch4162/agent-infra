@@ -14,6 +14,11 @@ WAVE_BACKLOG_WATCH=1       # the tick may pick and spawn; keep 0 until you turn 
 Every command runs from inside the target repo with
 `WAVE="${CLAUDE_PLUGIN_ROOT}/skills/wave"`.
 
+**Trackers the picker reads.** ClickUp (`WAVE_CLICKUP_LIST`, token in `CLICKUP_API_TOKEN`) and
+Jira through the Atlassian CLI (`acli`, its own login): the picker runs the repo's
+`WAVE_QUEUE` JQL verbatim, so put status, `agent-ready` and `assignee IS EMPTY` in it.
+Linear is not wired for automatic picking yet.
+
 **One engine for unattended runs (INNOV-444).** Anything scheduled (Task Scheduler,
 cron, an Orca automation, the control repo) runs `autonomy_tick.py`, never
 `coordinator.sh`. The tick is resumable from the status files, so a missed firing or

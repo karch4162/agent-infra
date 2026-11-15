@@ -25,7 +25,7 @@ needs a human, a held PR, a failed closeout.
 
 This is the ONE engine for anything unattended (scheduled, control repo; INNOV-444),
 on either runtime. coordinator.sh is only for waves a person starts and watches.
-Automatic picking is wired for ClickUp only so far (Jira/Linear: INNOV-440).
+Automatic picking is wired for ClickUp and Jira (acli); Linear is not yet.
 """
 from __future__ import annotations
 
@@ -196,14 +196,13 @@ class Tick:
         return self._slug
 
     def tracker(self):
-        if self.cfg.tracker != "clickup":
-            return None
         if self._tracker is None:
-            from clickup_tracker import ClickUpTrackerAdapter
+            from jira_tracker import tracker_for
 
-            self._tracker = ClickUpTrackerAdapter(
-                list_id=self.cfg.clickup_list, space_id=self.cfg.clickup_space or None,
-                team_id=self.cfg.clickup_team or None)
+            try:
+                self._tracker = tracker_for(self.cfg)
+            except Exception as e:  # noqa: BLE001 - a missing token/JQL must not kill the tick; state lives in status.json
+                self.ev("-", "tracker_error", error=str(e)[:200])
         return self._tracker
 
     def track(self, ticket: str, *, status: str | None = None, comment: str | None = None) -> None:
