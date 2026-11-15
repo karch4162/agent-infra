@@ -15,7 +15,9 @@ DEFAULTS = {
     "WAVE_MAX_IMPLEMENT_WORKERS": "3",
     "WAVE_PLAN_ROUNDS_CAP": "2",
     "WAVE_REVIEW_ROUNDS_CAP": "3",
-    "WAVE_AUTO_MERGE_LOW_MEDIUM": "1",
+    "WAVE_AUTO_MERGE": "1",               # 0 = hold every PR for a human
+    "WAVE_AUTO_MERGE_MEDIUM": "0",        # owner-only switch; the tick never flips it
+    "WAVE_CLEAN_WAVES_FOR_MEDIUM": "3",
     "WAVE_BUDGET_GUARD": "1",
     "WAVE_GROK_CHALLENGE": "1",
     # Repo identity lives in <repo>/.claude/wave/config.env, never here.
@@ -100,7 +102,9 @@ class AutonomyConfig:
     max_implement_workers: int
     plan_rounds_cap: int
     review_rounds_cap: int
-    auto_merge_low_medium: bool
+    auto_merge: bool
+    auto_merge_medium: bool
+    clean_waves_for_medium: int
     budget_guard: bool
     grok_challenge: bool
     clickup_list: str
@@ -131,7 +135,10 @@ def load_autonomy_config(config_path: Path | None = None) -> AutonomyConfig:
         max_implement_workers=int(_get("WAVE_MAX_IMPLEMENT_WORKERS", file_vals) or "3"),
         plan_rounds_cap=int(_get("WAVE_PLAN_ROUNDS_CAP", file_vals) or "2"),
         review_rounds_cap=int(_get("WAVE_REVIEW_ROUNDS_CAP", file_vals) or "3"),
-        auto_merge_low_medium=_get("WAVE_AUTO_MERGE_LOW_MEDIUM", file_vals) != "0",
+        # WAVE_AUTO_MERGE_LOW_MEDIUM=0 is the pre-INNOV-439 spelling of "no auto-merge".
+        auto_merge=_get("WAVE_AUTO_MERGE", file_vals) != "0" and _get("WAVE_AUTO_MERGE_LOW_MEDIUM", file_vals) != "0",
+        auto_merge_medium=_get("WAVE_AUTO_MERGE_MEDIUM", file_vals) == "1",
+        clean_waves_for_medium=int(_get("WAVE_CLEAN_WAVES_FOR_MEDIUM", file_vals) or "3"),
         budget_guard=_get("WAVE_BUDGET_GUARD", file_vals) != "0",
         grok_challenge=_get("WAVE_GROK_CHALLENGE", file_vals) != "0",
         clickup_list=_get("WAVE_CLICKUP_LIST", file_vals),

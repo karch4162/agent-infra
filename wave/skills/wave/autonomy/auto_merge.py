@@ -12,7 +12,27 @@ from pathlib import Path
 from typing import Any, Callable
 
 import merge_policy
-from autonomy_config import load_autonomy_config
+from autonomy_config import load_autonomy_config, wave_dir as _wave_dir
+
+STREAK_NAME = "clean-waves.json"
+
+
+def clean_streak(wave_dir: Path) -> int:
+    """Consecutive green closeouts in this repo (INNOV-439)."""
+    try:
+        return int(json.loads((wave_dir / "autonomy" / STREAK_NAME).read_text(encoding="utf-8")).get("streak", 0))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return 0
+
+
+def record_closeout(wave_dir: Path, ok: bool) -> int:
+    """A green closeout extends the streak; a red one resets it to 0, which also suspends
+    medium auto-merge until the streak is rebuilt. Returns the new streak."""
+    n = clean_streak(wave_dir) + 1 if ok else 0
+    path = wave_dir / "autonomy" / STREAK_NAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"streak": n}) + "\n", encoding="utf-8")
+    return n
 
 
 @dataclass
@@ -129,13 +149,15 @@ def evaluate_and_maybe_merge(
     snapshot: dict[str, Any] | None = None,
 ) -> MergeResult:
     cfg = load_autonomy_config()
-    if not cfg.auto_merge_low_medium:
-        return MergeResult(
-            "held",
-            "HOLD: WAVE_AUTO_MERGE_LOW_MEDIUM=0",
-            pr,
-            {},
-        )
+    if not cfg.auto_merge:
+        return MergeResult("held", "HOLD: WAVE_AUTO_MERGE=0", pr, {})
+    # Low auto-merges when every gate passes. Medium needs the owner's switch AND an
+    # unbroken run of clean waves: a red closeout resets the streak, suspending it (INNOV-439).
+    if rating.lower().strip() == "medium":
+        streak = clean_streak(_wave_dir())
+        if not cfg.auto_merge_medium or streak < cfg.clean_waves_for_medium:
+            return MergeResult("held", f"HOLD: medium needs WAVE_AUTO_MERGE_MEDIUM=1 and {cfg.clean_waves_for_medium} "
+                               f"clean waves (switch {'on' if cfg.auto_merge_medium else 'off'}, streak {streak})", pr, {})
 
     snap = snapshot or fetch_pr_snapshot(repo, pr, gh=gh)
     payload = {

@@ -39,7 +39,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import ci_wait  # noqa: E402
-from auto_merge import evaluate_and_maybe_merge  # noqa: E402
+from auto_merge import evaluate_and_maybe_merge, record_closeout  # noqa: E402
 from autonomy_config import load_autonomy_config, repo_root, wave_dir as _wave_dir  # noqa: E402
 from backlog_watch import run_watch  # noqa: E402
 from daily_cap import ET, RunLock, record_start  # noqa: E402
@@ -466,9 +466,13 @@ class Tick:
         p = subprocess.run([_bash(), "-lc", self.cfg.closeout_cmd], cwd=str(self.repo), capture_output=True,
                            text=True, encoding="utf-8", errors="replace", timeout=3600)
         (self.auto / "closeout-last.log").write_text((p.stdout or "") + (p.stderr or ""), encoding="utf-8")
-        self.ev("-", "closeout", rc=p.returncode)
+        streak = record_closeout(self.wave_dir, p.returncode == 0)
+        self.ev("-", "closeout", rc=p.returncode, clean_streak=streak)
         if p.returncode != 0:
-            self.notice(f"closeout failed (rc={p.returncode}) after merging {self.merged_this_tick}; see autonomy/closeout-last.log")
+            self.notice(f"closeout failed (rc={p.returncode}) after merging {self.merged_this_tick}; see autonomy/closeout-last.log. "
+                        "Clean-wave streak reset to 0: medium auto-merge is suspended until it is rebuilt.")
+        elif streak == self.cfg.clean_waves_for_medium and not self.cfg.auto_merge_medium:
+            self.notice(f"{streak} clean waves in a row: medium auto-merge may be turned on (WAVE_AUTO_MERGE_MEDIUM=1). Owner's call.")
 
     # ---- run -------------------------------------------------------------------------
     def run(self) -> dict[str, Any]:
