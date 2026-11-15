@@ -564,6 +564,17 @@ class Phase1Fixes(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def test_assigned_ticket_is_never_picked(self):
+        # INNOV-438: agent-ready does not override a human owner.
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td)
+            self._cfg(p)
+            tickets = self._tickets(2)
+            tickets[0]["assignees"] = ["mike"]
+            rep = backlog_watch.run_watch(wave_dir=p, dry_run=True, force_enabled=True, tickets=tickets)
+            self.assertEqual([x.ticket_id for x in rep.picks], ["t1"])
+            self.assertIn({"id": "t0", "reason": "assigned to mike"}, rep.skipped)
+
     def test_one_pass_never_picks_past_daily_cap(self):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td)

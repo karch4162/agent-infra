@@ -137,6 +137,12 @@ def select_candidates(
             skipped.append({"id": tid, "reason": "missing agent-ready"})
             continue
 
+        # agent-ready never overrides an owner: a ticket someone is assigned to is theirs (INNOV-438).
+        owners = list(getattr(t, "assignees", None) or (t.get("assignees") if isinstance(t, dict) else None) or [])
+        if owners:
+            skipped.append({"id": tid, "reason": f"assigned to {', '.join(map(str, owners))}"})
+            continue
+
         if rating == "risky":
             risky.append({"id": tid, "title": title, "reason": "risky; needs Mason go"})
             continue
