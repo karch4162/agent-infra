@@ -33,7 +33,7 @@ from budget_guard import check_budget
 from daily_cap import ET, RunLock, can_start, load_daily, pause_for_day, record_start
 from model_roles import assign_roles, rating_from_tags
 from ticket_sufficiency import assess_ticket
-from worker_runtime import pid_alive
+from worker_runtime import run_alive
 
 
 AUDIT_NAME = "wave-autonomy.jsonl"
@@ -93,7 +93,7 @@ def _append_audit(wave_dir: Path, row: dict[str, Any]) -> None:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-def _active_worker_count(runs_dir: Path) -> int:
+def _active_worker_count(runs_dir: Path, orca=None) -> int:
     n = 0
     if not runs_dir.exists():
         return 0
@@ -109,7 +109,8 @@ def _active_worker_count(runs_dir: Path) -> int:
             continue
         # File state alone leaked slots: a worker that died without status() being
         # called stayed "running" forever and autonomy stalled at zero free slots.
-        if st.get("state") in {"running", "starting"} and pid_alive(int(st.get("pid") or 0)):
+        # Orca workers have no PID; a PID check counted them as zero and over-spawned (INNOV-437).
+        if st.get("state") in {"running", "starting"} and run_alive(st, child, orca):
             n += 1
     return n
 
@@ -135,6 +136,12 @@ def select_candidates(
 
         if "agent-ready" not in {x.lower() for x in tags}:
             skipped.append({"id": tid, "reason": "missing agent-ready"})
+            continue
+
+        # agent-ready never overrides an owner: a ticket someone is assigned to is theirs (INNOV-438).
+        owners = list(getattr(t, "assignees", None) or (t.get("assignees") if isinstance(t, dict) else None) or [])
+        if owners:
+            skipped.append({"id": tid, "reason": f"assigned to {', '.join(map(str, owners))}"})
             continue
 
         if rating == "risky":

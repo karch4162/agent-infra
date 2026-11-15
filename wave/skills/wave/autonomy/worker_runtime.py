@@ -617,5 +617,13 @@ def orca_worker_state(st: dict[str, Any], run_dir: Path, orca: OrcaFn | None = N
     return True, (time.time() * 1000 - last) / 1000 if last else None
 
 
+
+def run_alive(st: dict[str, Any], run_dir: Path, orca: OrcaFn | None = None) -> bool:
+    """Is this run's worker live? A direct worker while its PID is; an Orca worker (no PID)
+    until it writes summary.md or its terminal closes. Every live-worker count goes through here."""
+    if st.get("runtime") == "orca":
+        return orca_worker_state(st, run_dir, orca)[0]
+    return pid_alive(int(st.get("pid") or 0))
+
 # Back-compat alias used by spawn scripts after the Orca cut-over.
 WorkerRuntime = DirectWorkerRuntime
