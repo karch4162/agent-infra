@@ -4,6 +4,8 @@ Run: python .claude/wave/test_wave_autonomy.py
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import time
@@ -439,6 +441,85 @@ class SpendCap(unittest.TestCase):
                 rep = backlog_watch.run_watch(wave_dir=p, dry_run=True, force_enabled=True, tickets=tickets)
         self.assertEqual(len(rep.picks), 0)   # $4.50 spent + ~$2.25/run would cross $6
         self.assertTrue(any(n.startswith("spend cap: $4.50 of $6.00") for n in rep.notices), rep.notices)
+
+
+class WaveRun(unittest.TestCase):
+    """INNOV-443: one firing = one tick per allowlisted repo under machine-wide caps."""
+
+    def _control(self, td, extra=""):
+        import daily_cap
+        root = Path(td)
+        repos = []
+        for name, spent in (("a", 30.0), ("b", 0.0)):
+            r = root / name
+            (r / ".claude" / "wave" / "runs").mkdir(parents=True)
+            (r / ".claude" / "wave" / "config.env").write_text("WAVE_TRACKER=jira\n", encoding="utf-8")
+            if spent:   # repo a: one live direct worker, started today, that has cost $30
+                run = r / ".claude" / "wave" / "runs" / "t1"
+                run.mkdir()
+                (run / "status.json").write_text(json.dumps({"state": "running", "pid": os.getpid(), "agent": "claude"}), encoding="utf-8")
+                (run / "worker.log").write_text(json.dumps({"total_cost_usd": spent}) + "\n", encoding="utf-8")
+                daily_cap.record_start("T1", r / ".claude" / "wave")
+            repos.append(r)
+        control = root / "control"
+        control.mkdir()
+        (control / "config.env").write_text(
+            f"WAVE_CONTROL_REPOS={repos[0]};{repos[1]};{root / 'missing'}\nMAX_WORKERS=3\nDAILY_TICKET_CAP=3\n"
+            "BUDGET_PER_DAY=100\nCLAUDE_PAUSE_PCT=70\n" + extra, encoding="utf-8")
+        return control, repos
+
+    def _ctl(self, control, tick):
+        import wave_run
+        return wave_run.Control(wave_run.Config(control), tick=tick)
+
+    def test_gates(self):
+        with tempfile.TemporaryDirectory() as td, contextlib.redirect_stdout(io.StringIO()):
+            control, _ = self._control(td)
+            ctl = self._ctl(control, lambda *a: self.fail("must not tick"))
+            self.assertEqual(ctl.run("scheduled"), 3)        # SCHEDULE_WAVE empty
+            self.assertEqual(ctl.run("bogus"), 2)
+            (control / "STOP").write_text("", encoding="utf-8")
+            self.assertEqual(ctl.precheck("owner"), 3)
+
+    def test_each_repo_gets_what_the_machine_has_left(self):
+        seen = {}
+
+        def tick(repo, trigger, env):
+            seen[repo.name] = env
+            return 0, [], ""
+
+        with tempfile.TemporaryDirectory() as td, contextlib.redirect_stdout(io.StringIO()):
+            control, _ = self._control(td, "SCHEDULE_WAVE=0 10 * * *\nMAX_WAVES_PER_DAY=1\n")
+            ctl = self._ctl(control, tick)
+            self.assertEqual(ctl.run("scheduled"), 0)
+            self.assertEqual(ctl.run("scheduled"), 3)        # MAX_WAVES_PER_DAY=1 used up
+            audit = [json.loads(l) for l in (control / "state" / "audit.jsonl").read_text(encoding="utf-8").splitlines()]
+        # 1 live worker of 3, 1 start of 3 and $30 of $100 used machine-wide.
+        self.assertEqual((seen["a"]["WAVE_MAX_IMPLEMENT_WORKERS"], seen["b"]["WAVE_MAX_IMPLEMENT_WORKERS"]), ("3", "2"))
+        self.assertEqual((seen["a"]["WAVE_DAILY_TICKET_CAP"], seen["b"]["WAVE_DAILY_TICKET_CAP"]), ("3", "2"))
+        self.assertEqual((float(seen["a"]["WAVE_BUDGET_PER_DAY_USD"]), float(seen["b"]["WAVE_BUDGET_PER_DAY_USD"])), (100.0, 70.0))
+        self.assertEqual(seen["a"]["WAVE_CLAUDE_PAUSE_PCT"], "70")
+        self.assertEqual([r["stage"] for r in audit][:5], ["start", "tick", "tick", "repo", "end"])
+
+    def test_failed_tick_escalates_and_cools_down(self):
+        with tempfile.TemporaryDirectory() as td, contextlib.redirect_stdout(io.StringIO()):
+            control, _ = self._control(td, "SCHEDULE_WAVE=0 10 * * *\n")
+            ctl = self._ctl(control, lambda repo, t, e: (0, ["closeout failed (rc=1)"] if repo.name == "a" else [], ""))
+            self.assertEqual(ctl.run("scheduled"), 1)
+            self.assertIn("closeout failed", (control / "state" / "escalations.md").read_text(encoding="utf-8"))
+            ticked = []
+            ctl.tick = lambda repo, t, e: ticked.append(repo.name) or (0, [], "")
+            ctl.run("scheduled")
+        self.assertEqual(ticked, ["b"])                      # a is cooling down
+
+    def test_statusline_weekly_pct(self):
+        import budget_guard
+        with tempfile.TemporaryDirectory() as td:
+            f = Path(td) / "rate-limits.json"
+            f.write_text(json.dumps({"ts": time.time() * 1000, "rate_limits": {"seven_day": {"used_percentage": 72}}}), encoding="utf-8")
+            self.assertEqual(budget_guard._claude_weekly_from_statusline(f), "72")
+            f.write_text(json.dumps({"ts": (time.time() - 7 * 3600) * 1000, "rate_limits": {"seven_day": {"used_percentage": 72}}}), encoding="utf-8")
+            self.assertEqual(budget_guard._claude_weekly_from_statusline(f), "")   # stale is not headroom
 
 
 class Config(unittest.TestCase):

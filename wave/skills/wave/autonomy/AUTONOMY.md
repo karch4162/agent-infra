@@ -25,6 +25,25 @@ cron, an Orca automation, the control repo) runs `autonomy_tick.py`, never
 a crash loses nothing. `coordinator.sh` is a long-lived loop for a wave a person starts
 and watches (SKILL.md, "Supervised wave"); do not schedule it.
 
+## Scheduled waves across repos (`wave_run.py`, INNOV-443)
+
+One control folder (default `~/Projects/wave-control`; `--control` or `WAVE_CONTROL_DIR`)
+holds only `config.env` (repo allowlist, machine-wide caps, schedule, stop file) and `state/`
+(audit log, last run, escalations, cooldowns, lock). One scheduler automation runs:
+
+```bash
+python <control>/bin/wave_run.py precheck --trigger scheduled   # gates only; exit 3 = skip (cheap Orca precheck)
+python <control>/bin/wave_run.py run --trigger intake|scheduled|owner
+python <control>/bin/wave_run.py status
+```
+
+`bin/wave_run.py` is a small launcher that finds this plugin (`WAVE_HOME`, else the newest
+installed version) and runs `autonomy/wave_run.py`. Each firing takes the machine lock and
+runs **one tick per repo** with the caps the machine has left (`MAX_WORKERS`,
+`DAILY_TICKET_CAP`, `BUDGET_PER_DAY`, `CLAUDE_PAUSE_PCT`) handed to it as env overrides.
+Gates: stop file, trigger, empty `SCHEDULE_WAVE`, `MAX_WAVES_PER_DAY`, per-repo cooldown
+after a failed tick. Exit codes: 0 ok, 1 a repo failed (escalated), 2 config error, 3 skipped.
+
 ## One tick
 
 ```bash
