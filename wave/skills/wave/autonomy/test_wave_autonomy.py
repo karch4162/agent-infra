@@ -799,6 +799,18 @@ class Phase1Fixes(unittest.TestCase):
             rep = backlog_watch.run_watch(wave_dir=p, dry_run=True, force_enabled=True, tickets=t, trigger="owner")
             self.assertEqual(sorted(x.ticket_id for x in rep.picks), ["t0", "t1"])
 
+    def test_tickets_assigned_to_the_wave_owner_stay_pickable(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td)
+            self._cfg(p, "WAVE_SELF=Mason Beard\nWAVE_CODEX_IMPLEMENTS_LOW=0\n")
+            tickets = self._tickets(2)
+            tickets[0]["assignees"] = ["mason beard"]
+            tickets[1]["assignees"] = ["Pomesh"]
+            rep = backlog_watch.run_watch(wave_dir=p, dry_run=True, force_enabled=True, tickets=tickets)
+            self.assertEqual([x.ticket_id for x in rep.picks], ["t0"])
+            self.assertEqual(rep.picks[0].roles["implementer"], "claude")   # Claude implements low too
+            self.assertIn({"id": "t1", "reason": "assigned to Pomesh"}, rep.skipped)
+
     def test_assigned_ticket_is_never_picked(self):
         # INNOV-438: agent-ready does not override a human owner.
         with tempfile.TemporaryDirectory() as td:

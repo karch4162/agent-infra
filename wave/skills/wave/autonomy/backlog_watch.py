@@ -140,8 +140,11 @@ def select_candidates(
 
         # agent-ready never overrides an owner: a ticket someone is assigned to is theirs (INNOV-438).
         owners = list(getattr(t, "assignees", None) or (t.get("assignees") if isinstance(t, dict) else None) or [])
-        if owners:
-            skipped.append({"id": tid, "reason": f"assigned to {', '.join(map(str, owners))}"})
+        # Except the wave's own owner (WAVE_SELF): parking a ticket on yourself keeps people off it,
+        # and it stays fair game for your own wave while it is agent-ready.
+        others = [o for o in owners if str(o).strip().lower() not in cfg.self_names]
+        if others:
+            skipped.append({"id": tid, "reason": f"assigned to {', '.join(map(str, others))}"})
             continue
 
         if rating == "risky":
@@ -167,7 +170,7 @@ def select_candidates(
             skipped.append({"id": tid, "reason": "worker slots full"})
             continue
 
-        roles = assign_roles(rating).to_dict()
+        roles = assign_roles(rating, codex_implement_low=cfg.codex_implements_low).to_dict()
         suf = assess_ticket(title=title, body=body, tags=tags)
         if suf.plan_needed:
             picks.append(
