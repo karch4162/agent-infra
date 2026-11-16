@@ -104,7 +104,7 @@ def _active_worker_count(runs_dir: Path, orca=None) -> int:
         if not st_path.exists():
             continue
         try:
-            st = json.loads(st_path.read_text(encoding="utf-8"))
+            st = json.loads(st_path.read_text(encoding="utf-8-sig"))  # PowerShell writes a BOM
         except (OSError, json.JSONDecodeError):
             continue
         # File state alone leaked slots: a worker that died without status() being

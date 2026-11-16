@@ -222,6 +222,10 @@ class Tick:
     def statuses(self) -> list[tuple[Path, dict[str, Any]]]:
         out = []
         for p in sorted(self.runs.glob("*/status.json")):
+            # Walker runs (walk_spawn.py, ticket_id=walk-<date>) share runs/ but are not tickets:
+            # no PR, no CI, no merge. The closeout reads their summaries itself (INNOV-446).
+            if p.parent.name.startswith("walk-"):
+                continue
             st = _read(p)
             if st:
                 out.append((p, st))

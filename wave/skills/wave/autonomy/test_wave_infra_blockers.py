@@ -98,7 +98,9 @@ class OrcaRuntime(unittest.TestCase):
             self.rt.repo_id()
 
     def test_liveness(self):
-        st = {"path": "C:/wt/86bcabc"}
+        wt = Path(self.tmp.name) / "wt-86bcabc"
+        wt.mkdir()
+        st = {"path": str(wt)}
         self.run_dir.mkdir(parents=True)
         now_ms = time.time() * 1000
         alive, idle = self.wr.orca_worker_state(st, self.run_dir, FakeOrca({"terminal list": {"terminals": [{"lastOutputAt": now_ms - 90_000}]}}))
@@ -110,12 +112,21 @@ class OrcaRuntime(unittest.TestCase):
         (self.run_dir / "summary.md").write_text("TIER: quick", encoding="utf-8")
         self.assertEqual(self.wr.orca_worker_state(st, self.run_dir, FakeOrca({})), (False, None))
 
+    def test_swept_worktree_is_not_a_live_worker(self):
+        # A merged run's worktree was swept; Orca can't be asked about a deleted path, and
+        # "can't ask" used to read as alive, holding a slot forever (sportify 86bcuuhwk).
+        self.run_dir.mkdir(parents=True)
+        st = {"path": str(Path(self.tmp.name) / "swept")}
+        self.assertEqual(self.wr.orca_worker_state(st, self.run_dir, FakeOrca({})), (False, None))
+
     def test_orca_workers_count_toward_the_cap(self):
         # INNOV-437: Orca workers have no PID; a PID check counted them as zero and over-spawned.
         import backlog_watch
         self.run_dir.mkdir(parents=True)
-        (self.run_dir / "status.json").write_text(json.dumps(
-            {"state": "running", "runtime": "orca", "path": "C:/wt/86bcabc"}), encoding="utf-8")
+        wt = Path(self.tmp.name) / "wt-cap"
+        wt.mkdir()
+        (self.run_dir / "status.json").write_text("﻿" + json.dumps(   # BOM: PowerShell-written status
+            {"state": "running", "runtime": "orca", "path": str(wt)}), encoding="utf-8")
         live = FakeOrca({"terminal list": {"terminals": [{"lastOutputAt": time.time() * 1000}]}})
         self.assertEqual(backlog_watch._active_worker_count(self.run_dir.parent, live), 1)
         (self.run_dir / "summary.md").write_text("TIER: quick", encoding="utf-8")

@@ -604,6 +604,10 @@ def orca_worker_state(st: dict[str, Any], run_dir: Path, orca: OrcaFn | None = N
     a failed query must never mark a running worker exited."""
     if (run_dir / "summary.md").exists():
         return False, None
+    # A swept worktree has no worker in it. Without this, Orca's failed query on a deleted
+    # path read as "alive" and the run held a worker slot forever (sportify 86bcuuhwk).
+    if st.get("path") and not Path(st["path"]).exists():
+        return False, None
     p = (orca or _orca)(["terminal", "list", "--worktree", f"path:{st.get('path', '')}", "--json"])
     try:
         terms = json.loads(p.stdout)["result"]["terminals"] if p.returncode == 0 else None

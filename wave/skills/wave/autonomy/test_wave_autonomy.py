@@ -522,6 +522,20 @@ class WaveRun(unittest.TestCase):
             self.assertEqual(budget_guard._claude_weekly_from_statusline(f), "")   # stale is not headroom
 
 
+class TickIgnoresWalkers(unittest.TestCase):
+    def test_walk_runs_are_not_tickets(self):
+        # INNOV-446: walker runs share runs/ but have no PR; the tick reported each as "exited without a PR".
+        import autonomy_tick
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
+            runs = Path(td) / ".claude" / "wave" / "runs"
+            for name in ("innov-1", "walk-2026-11-11"):
+                (runs / name).mkdir(parents=True)
+                (runs / name / "status.json").write_text(json.dumps({"state": "running"}), encoding="utf-8")
+            (runs.parent / "config.env").write_text("WAVE_TRACKER=jira\n", encoding="utf-8")
+            tick = autonomy_tick.Tick(repo=Path(td), execute=False, log=lambda m: None)
+            self.assertEqual([p.parent.name for p, _ in tick.statuses()], ["innov-1"])
+
+
 class Config(unittest.TestCase):
     def test_state_names_come_from_config_env(self):
         # The tick runs from a scheduler: an env-only read left every tracker
