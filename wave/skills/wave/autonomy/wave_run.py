@@ -253,7 +253,7 @@ class Control:
             print(f"wave {trigger}: skipped (another wave run holds the machine lock)")
             return EXIT_SKIP
         lines: list[str] = []
-        failed = executed = False
+        failed = started = False
         try:
             self.audit({"run_id": run_id, "stage": "start", "trigger": trigger, "repos": [str(r) for r in cfg.repos]})
             for repo in cfg.repos:
@@ -273,13 +273,15 @@ class Control:
                 env_over = self.caps_for(repo)   # recounted per repo: the previous tick may have spawned
                 t0 = time.time()
                 trc, notices, tail = self.tick(repo, trigger, env_over)
-                executed = executed or trigger in EXECUTING
+                spawned = spawned_since(repo, t0)
+                started = started or bool(spawned)
                 if trc == 0 and notices is None:
                     trc, notices = 1, ["tick exited 0 but printed no report"]
                 notices = notices or []
                 bad = trc != 0 or any("closeout failed" in n for n in notices)
                 self.audit({"run_id": run_id, "stage": "tick", "trigger": trigger, "repo": str(repo), "rc": trc,
                             "decision": "failed" if bad else "ok", "caps": env_over, "notices": notices[:20],
+                            "spawned": spawned,
                             "seconds": round(time.time() - t0)})
                 lines.append(f"- {repo.name}: {'FAILED' if bad else 'ok'} (caps: {env_over['WAVE_MAX_IMPLEMENT_WORKERS']} workers, "
                              f"{env_over['WAVE_DAILY_TICKET_CAP']} starts today"
@@ -292,7 +294,9 @@ class Control:
                     if trigger in EXECUTING and cfg.cooldown_h > 0:
                         msg += f"; cooldown until {self.set_cooldown(repo)}"
                     self.escalate(run_id, msg)
-            if executed:
+            # A wave is a firing that started workers. Ticks that only advance CI, review and
+            # merge are not waves; counting them used up MAX_WAVES_PER_DAY in a few firings.
+            if started:
                 self.record_wave(run_id, trigger)
         finally:
             lock.release("wave_run")
@@ -321,6 +325,17 @@ class Control:
             print(f"  {r}: {'config ok' if has else 'NO CONFIG'}, live {self.live(r)}, starts today {self.starts(r)}, "
                   f"spent today ${self.spent(r):.2f}{', cooldown until ' + cd if cd else ''}")
         return EXIT_OK
+
+
+def spawned_since(repo: Path, t0: float) -> list[str]:
+    """Tickets this repo's tick spawned, from the tick-last.json it wrote after t0."""
+    try:
+        last = json.loads((repo / ".claude" / "wave" / "autonomy" / "tick-last.json").read_text(encoding="utf-8"))
+        if datetime.fromisoformat(last["ts"]).timestamp() < t0 - 1:
+            return []   # stale: this tick wrote no report (its repo lock was held)
+        return [e.get("ticket") for e in last.get("events") or [] if e.get("event") == "spawned"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
 
 
 def tick_notices(stdout: str) -> list[str] | None:
