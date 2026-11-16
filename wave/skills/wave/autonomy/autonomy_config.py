@@ -36,6 +36,8 @@ DEFAULTS = {
     "WAVE_STATE_DONE": "",
     "WAVE_QUEUE_STATUS": "backlog",
     "WAVE_QUEUE": "",
+    "WAVE_SELF": "",                     # the wave owner's tracker name; tickets assigned to them stay pickable
+    "WAVE_CODEX_IMPLEMENTS_LOW": "1",    # 0 = Claude implements every rating (Codex reviews)
     "WAVE_BUDGET_PER_DAY_USD": "",       # empty = no spend cap
     "WAVE_JIRA_SITE": "",
 }
@@ -125,6 +127,8 @@ class AutonomyConfig:
     state_done: str
     queue_status: str
     queue: str
+    self_names: tuple[str, ...]
+    codex_implements_low: bool
     budget_per_day_usd: float | None
     jira_site: str
 
@@ -164,6 +168,8 @@ def load_autonomy_config(config_path: Path | None = None) -> AutonomyConfig:
         state_done=_get("WAVE_STATE_DONE", file_vals),
         queue_status=_get("WAVE_QUEUE_STATUS", file_vals) or "backlog",
         budget_per_day_usd=float(_get("WAVE_BUDGET_PER_DAY_USD", file_vals)) if _get("WAVE_BUDGET_PER_DAY_USD", file_vals) else None,
+        self_names=tuple(n.strip().lower() for n in _get("WAVE_SELF", file_vals).split(",") if n.strip()),
+        codex_implements_low=_get("WAVE_CODEX_IMPLEMENTS_LOW", file_vals) != "0",
         queue=_get("WAVE_QUEUE", file_vals),             # Jira: the JQL the picker runs verbatim
         jira_site=_get("WAVE_JIRA_SITE", file_vals),
     )
