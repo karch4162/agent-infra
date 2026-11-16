@@ -88,7 +88,7 @@ def spend_usd(run_dir: Path, home: Path | None = None) -> tuple[float | None, st
     except (OSError, ValueError):
         usage = {}
     try:
-        st = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
+        st = json.loads((run_dir / "status.json").read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return None, "no status"
     if (st.get("agent") or "claude") != "claude":
