@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,8 +66,22 @@ def _codex_from_preflight(preflight_path: Path | None) -> dict[str, Any]:
     return {"readable": False, "ok": None, "preflight_ok": data.get("ok")}
 
 
+def _claude_weekly_from_statusline(path: Path | None = None, max_age_s: int = 6 * 3600) -> str:
+    """The subscription's 7-day used %, from the file Claude Code's status line writes
+    (~/.claude/rate-limits.json). Empty when missing or older than max_age_s: a stale
+    number must not read as headroom."""
+    path = path or Path(os.path.expanduser("~")) / ".claude" / "rate-limits.json"
+    try:
+        d = json.loads(path.read_text(encoding="utf-8"))
+        if time.time() - d["ts"] / 1000 > max_age_s:
+            return ""
+        return str(d["rate_limits"]["seven_day"]["used_percentage"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return ""
+
+
 def _claude_from_env() -> dict[str, Any]:
-    pct = os.environ.get("WAVE_CLAUDE_WEEKLY_PCT", "").strip()
+    pct = os.environ.get("WAVE_CLAUDE_WEEKLY_PCT", "").strip() or _claude_weekly_from_statusline()
     if not pct:
         return {"readable": False, "ok": None}
     try:
