@@ -7,6 +7,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+from datetime import datetime, timezone
 import os
 import time
 import sys
@@ -486,6 +487,10 @@ class WaveRun(unittest.TestCase):
 
         def tick(repo, trigger, env):
             seen[repo.name] = env
+            if repo.name == "a":   # repo a's tick starts a worker: this firing is a wave
+                (repo / ".claude" / "wave" / "autonomy").mkdir(exist_ok=True)
+                (repo / ".claude" / "wave" / "autonomy" / "tick-last.json").write_text(json.dumps(
+                    {"ts": datetime.now(timezone.utc).isoformat(), "events": [{"ticket": "X", "event": "spawned"}]}), encoding="utf-8")
             return 0, [], ""
 
         with tempfile.TemporaryDirectory() as td, contextlib.redirect_stdout(io.StringIO()):
@@ -500,6 +505,14 @@ class WaveRun(unittest.TestCase):
         self.assertEqual((float(seen["a"]["WAVE_BUDGET_PER_DAY_USD"]), float(seen["b"]["WAVE_BUDGET_PER_DAY_USD"])), (100.0, 70.0))
         self.assertEqual(seen["a"]["WAVE_CLAUDE_PAUSE_PCT"], "70")
         self.assertEqual([r["stage"] for r in audit][:5], ["start", "tick", "tick", "repo", "end"])
+
+    def test_ticks_that_start_nothing_are_not_waves(self):
+        with tempfile.TemporaryDirectory() as td, contextlib.redirect_stdout(io.StringIO()):
+            control, _ = self._control(td, "MAX_WAVES_PER_DAY=1\n")
+            ctl = self._ctl(control, lambda *a: (0, [], ""))
+            for _ in range(3):   # CI/merge-only ticks: no worker started, no wave used
+                self.assertEqual(ctl.run("owner"), 0)
+            self.assertEqual(ctl.waves_today(), [])
 
     def test_failed_tick_escalates_and_cools_down(self):
         with tempfile.TemporaryDirectory() as td, contextlib.redirect_stdout(io.StringIO()):
