@@ -93,6 +93,7 @@ Everything it stops on lands in `autonomy/human_*.md`; `wave_status.py` (or
 | Auto-merge at all | `WAVE_AUTO_MERGE=1` (0 holds every PR; the old `WAVE_AUTO_MERGE_LOW_MEDIUM=0` still means off) |
 | Auto-merge medium | `WAVE_AUTO_MERGE_MEDIUM=0`: owner-only, and it also needs `WAVE_CLEAN_WAVES_FOR_MEDIUM=3` green closeouts in a row (`autonomy/clean-waves.json`); a red closeout resets the streak and suspends it |
 | Picking by rating | the tick (scheduled) takes `rating:low` only; `backlog_watch.py --trigger owner` also takes medium. Unrated tickets are never picked |
+| Spend cap per day | `WAVE_BUDGET_PER_DAY_USD` (empty = none): today's runs at Claude API prices, from `worker.log` (direct) or the worktree's session logs (Orca, ~20% low). A start that would cross it, at today's mean per run, is refused. Codex runs are unpriced. Written to each run's `usage.json` (`cost_usd_last`, `cost_source`) |
 | Budget pause | `WAVE_BUDGET_GUARD=1` (reads `WAVE_CLAUDE_WEEKLY_PCT`, Codex preflight) |
 | Grok challenge | `WAVE_GROK_CHALLENGE=1` (`autonomy/grok_calls.jsonl` counts calls) |
 

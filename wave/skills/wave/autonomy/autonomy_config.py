@@ -36,6 +36,7 @@ DEFAULTS = {
     "WAVE_STATE_DONE": "",
     "WAVE_QUEUE_STATUS": "backlog",
     "WAVE_QUEUE": "",
+    "WAVE_BUDGET_PER_DAY_USD": "",       # empty = no spend cap
     "WAVE_JIRA_SITE": "",
 }
 
@@ -124,6 +125,7 @@ class AutonomyConfig:
     state_done: str
     queue_status: str
     queue: str
+    budget_per_day_usd: float | None
     jira_site: str
 
     @property
@@ -161,6 +163,7 @@ def load_autonomy_config(config_path: Path | None = None) -> AutonomyConfig:
         state_start=_get("WAVE_STATE_START", file_vals),
         state_done=_get("WAVE_STATE_DONE", file_vals),
         queue_status=_get("WAVE_QUEUE_STATUS", file_vals) or "backlog",
+        budget_per_day_usd=float(_get("WAVE_BUDGET_PER_DAY_USD", file_vals)) if _get("WAVE_BUDGET_PER_DAY_USD", file_vals) else None,
         queue=_get("WAVE_QUEUE", file_vals),             # Jira: the JQL the picker runs verbatim
         jira_site=_get("WAVE_JIRA_SITE", file_vals),
     )

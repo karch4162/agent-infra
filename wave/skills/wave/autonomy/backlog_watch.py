@@ -284,6 +284,25 @@ def run_watch(
             report.notices.append("no free slots (worker cap or daily cap)")
             return report
 
+        # Spend cap (INNOV-441): today's runs at Claude API prices. A start is refused when
+        # today's spend plus one more run (today's mean; 0 before the first) would cross it.
+        if cfg.budget_per_day_usd is not None:
+            from run_spend import runs_started_today, spend_for_runs, spend_usd
+
+            runs = runs_started_today(wave_dir)
+            spent = spend_for_runs(runs)
+            priced = [u for u in (spend_usd(r)[0] for r in runs) if u is not None]
+            est = sum(priced) / len(priced) if priced else 0.0
+            report.budget = {**(report.budget or {}), "spend_today_usd": spent,
+                             "cap_per_day_usd": cfg.budget_per_day_usd, "est_next_run_usd": round(est, 4)}
+            fits = int((cfg.budget_per_day_usd - spent) // est) if est > 0 else (slots if spent < cfg.budget_per_day_usd else 0)
+            if fits < slots:
+                slots = max(0, fits)
+                report.notices.append(f"spend cap: ${spent:.2f} of ${cfg.budget_per_day_usd:.2f} today "
+                                      f"(~${est:.2f}/run): {slots} start(s) left")
+            if slots == 0:
+                return report
+
         if tickets is None:
             # Live fetch from the repo's tracker (ClickUp token / acli login stay out of logs).
             from jira_tracker import tracker_for

@@ -395,6 +395,52 @@ class JiraPicking(unittest.TestCase):
         self.assertEqual(jira_tracker.adf_text(self._item("K", [])["fields"]["description"]).strip(), self.RICH)
 
 
+class SpendCap(unittest.TestCase):
+    """INNOV-441: per-day spend from worker.log (direct) and priced session logs (Orca)."""
+
+    def test_price_table(self):
+        import run_spend
+        u = {"output_tokens": 1_000_000, "cache_creation_input_tokens": 1_000_000,
+             "cache_creation": {"ephemeral_1h_input_tokens": 1_000_000}}
+        self.assertEqual(run_spend.claude_usd("claude-opus-5-5", u), 28)   # $20 output + $8 1-hour write
+        self.assertIsNone(run_spend.claude_usd("gpt-9", u))
+
+    def _setup(self, p, home):
+        import daily_cap
+        direct = p / "runs" / "innov-1"
+        direct.mkdir(parents=True)
+        (direct / "status.json").write_text(json.dumps({"agent": "claude", "runtime": "direct"}), encoding="utf-8")
+        (direct / "worker.log").write_text('{"type":"result","total_cost_usd":3.5}\n', encoding="utf-8")
+        orca = p / "runs" / "innov-2"
+        orca.mkdir(parents=True)
+        wt = "C:/wt/innov-2"
+        (orca / "status.json").write_text(json.dumps({"agent": "claude", "runtime": "orca", "path": wt}), encoding="utf-8")
+        proj = home / ".claude" / "projects" / "C--wt-innov-2"
+        proj.mkdir(parents=True)
+        msg = {"type": "assistant", "requestId": "r1", "message": {"id": "m1", "model": "claude-opus-5-5",
+                                                                   "usage": {"output_tokens": 50_000}}}
+        (proj / "s.jsonl").write_text(json.dumps(msg) + "\n" + json.dumps(msg) + "\n", encoding="utf-8")  # repeated: count once
+        daily_cap.record_start("INNOV-1", p)
+        daily_cap.record_start("INNOV-2", p)
+
+    def test_spend_today_and_the_gate(self):
+        import run_spend
+        with tempfile.TemporaryDirectory() as td:
+            p, home = Path(td) / "wave", Path(td) / "home"
+            self._setup(p, home)
+            with mock.patch.object(Path, "home", return_value=home), mock.patch.dict(os.environ, {"USERPROFILE": str(home), "HOME": str(home)}):
+                self.assertEqual(run_spend.spend_today(p), 4.5)   # 3.5 from worker.log + 1.0 (50k out at $20/M)
+                self.assertEqual(json.loads((p / "runs" / "innov-2" / "usage.json").read_text())["cost_source"], "session logs")
+                (p / "config.env").write_text("WAVE_BACKLOG_WATCH=1\nWAVE_BUDGET_GUARD=0\nWAVE_DAILY_TICKET_CAP=9\n"
+                                              "WAVE_BUDGET_PER_DAY_USD=6\n", encoding="utf-8")
+                tickets = [{"id": f"t{i}", "name": "x", "tags": ["agent-ready", "rating:low"],
+                            "text": "File src/a.ts:10.\nAcceptance: given a when b then c.\nExpected: test asserts behavior."}
+                           for i in range(3)]
+                rep = backlog_watch.run_watch(wave_dir=p, dry_run=True, force_enabled=True, tickets=tickets)
+        self.assertEqual(len(rep.picks), 0)   # $4.50 spent + ~$2.25/run would cross $6
+        self.assertTrue(any(n.startswith("spend cap: $4.50 of $6.00") for n in rep.notices), rep.notices)
+
+
 class Config(unittest.TestCase):
     def test_state_names_come_from_config_env(self):
         # The tick runs from a scheduler: an env-only read left every tracker
