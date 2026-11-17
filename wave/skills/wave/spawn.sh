@@ -165,7 +165,7 @@ $REVIEW_LOOP
      PLAN REVIEWER: <name>            (risk tier only)
      PLAN CRITIC: <name>              (risk tier only)
      REVIEWER: <name>
-     REVIEW VERDICT: YES|NO           (the primary reviewer's final answer; the merge gate reads it)
+     REVIEW VERDICT: YES|NO           (copy review.sh's REVIEW VERDICT line; never infer it - the merge gate reads it)
      ARCHITECTURE REVIEWER: <name>    (only if it ran)
      TIE-BREAKER: astra (plan|diff)   (only if it ran)
      REVIEW ROUNDS: <n>

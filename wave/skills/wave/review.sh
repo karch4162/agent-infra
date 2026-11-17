@@ -29,7 +29,13 @@ wave_exclude '.wave-plan*'   # a risk-tier plan is scratch, never part of the re
 } > "$DIFF_FILE"
 [ -s "$DIFF_FILE" ] || { echo "NO CODEX REVIEW: empty diff against $WAVE_BASE"; exit 1; }
 
-correctness_prompt="Review the unified diff supplied on stdin. It is this worktree's complete change against $WAVE_BASE, including untracked files. Report only high-confidence findings, most severe first, each with file:line. Check correctness, CLAUDE.md rules, security boundaries, and whether each changed test asserts behavior rather than only execution. No style nits or summary. End with TEST VERDICT: followed by either none, or one bullet per changed test naming behavior or execution."
+# The worker copies REVIEW VERDICT into the PR's ## Wave block and the merge gate reads it, so a
+# review without one is incomplete like one without TEST VERDICT: never inferred (INNOV-450).
+review_complete() {  # $1 = reviewer output
+  verdict_ok 'TEST VERDICT:' "$1" && grep -qE '^[[:space:]]*REVIEW VERDICT: (YES|NO)([^A-Za-z]|$)' <<< "$1"
+}
+
+correctness_prompt="Review the unified diff supplied on stdin. It is this worktree's complete change against $WAVE_BASE, including untracked files. Report only high-confidence findings, most severe first, each with file:line. Check correctness, CLAUDE.md rules, security boundaries, and whether each changed test asserts behavior rather than only execution. No style nits or summary. Then one line: REVIEW VERDICT: YES if nothing you found should block merging, else REVIEW VERDICT: NO. End with TEST VERDICT: followed by either none, or one bullet per changed test naming behavior or execution."
 
 architecture_prompt="Act as an adversarial architecture reviewer. This worktree's complete change against $WAVE_BASE, including untracked files, is the unified diff in .wave-review.diff at the repo root: read it first. You are read-only: do not edit, create, or delete any file. Look only for high-confidence failures in trust boundaries, tenant isolation, API contracts, concurrency, recovery, or operational behavior. Cite file:line. Do not repeat ordinary correctness findings or make style comments. End with ARCHITECTURE VERDICT: PASS, FINDINGS, or NEEDS HUMAN."
 
@@ -43,16 +49,16 @@ if [ "${WAVE_IMPLEMENTER:-claude}" = codex ]; then
   name=claude-opus
   opus_out="$(timeout 900 claude -p --model opus "$correctness_prompt" --allowedTools Read,Grep,Glob <"$DIFF_FILE" 2>"$ROOT/.wave-review.$name.err")"
   printf '%s\n' "$opus_out" > "$ROOT/.wave-review.$name.log"
-  if verdict_ok 'TEST VERDICT:' "$opus_out"; then
+  if review_complete "$opus_out"; then
     printf '%s\nREVIEWER: %s\n' "$opus_out" "$name"
   else
-    echo "NO OPUS REVIEW: Opus did not return a complete TEST VERDICT; see .wave-review.$name.log/.err"
+    echo "NO OPUS REVIEW: Opus did not return a complete REVIEW VERDICT and TEST VERDICT; see .wave-review.$name.log/.err"
     exit 1
   fi
 else
 codex_out="$(cat "$DIFF_FILE" | timeout 900 codex exec -s read-only --model gpt-5.6-terra "$correctness_prompt" 2>"$ROOT/.wave-review.codex-terra.err")"
 printf '%s\n' "$codex_out" > "$ROOT/.wave-review.codex-terra.log"
-if verdict_ok 'TEST VERDICT:' "$codex_out"; then
+if review_complete "$codex_out"; then
   printf '%s\nREVIEWER: codex-terra\n' "$codex_out"
 elif grep -qiE 'usage limit|usage_limit_exceeded|rate limit' "$ROOT/.wave-review.codex-terra.err"; then
   # Quota exhaustion only. A bad or missing verdict from a working Codex is never
@@ -67,18 +73,18 @@ elif grep -qiE 'usage limit|usage_limit_exceeded|rate limit' "$ROOT/.wave-review
     exit 1
   fi
   printf '%s\n' "$fb_out" > "$ROOT/.wave-review.$name.log"
-  if ! verdict_ok 'TEST VERDICT:' "$fb_out"; then
+  if ! review_complete "$fb_out"; then
     name=sonnet-fallback
     fb_out="$(timeout 900 claude -p --model sonnet "$fallback_prompt" --allowedTools Read,Grep,Glob 2>"$ROOT/.wave-review.$name.err")"
     printf '%s\n' "$fb_out" > "$ROOT/.wave-review.$name.log"
   fi
-  if ! verdict_ok 'TEST VERDICT:' "$fb_out"; then
-    echo "NO CODEX REVIEW: Codex quota exhausted and no fallback returned a complete TEST VERDICT (grok: $GROK_WHY); see .wave-review.*-fallback.log/.err"
+  if ! review_complete "$fb_out"; then
+    echo "NO CODEX REVIEW: Codex quota exhausted and no fallback returned a complete REVIEW VERDICT and TEST VERDICT (grok: $GROK_WHY); see .wave-review.*-fallback.log/.err"
     exit 1
   fi
   printf '%s\nREVIEWER: %s (codex quota exhausted)\n' "$fb_out" "$name"
 else
-  echo "NO CODEX REVIEW: Codex Terra did not return a complete TEST VERDICT; see .wave-review.codex-terra.log/.err"
+  echo "NO CODEX REVIEW: Codex Terra did not return a complete REVIEW VERDICT and TEST VERDICT; see .wave-review.codex-terra.log/.err"
   exit 1
 fi
 fi

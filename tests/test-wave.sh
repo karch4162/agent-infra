@@ -352,7 +352,7 @@ EOF
 cat >"$STUB/bin/codex" <<'EOF'
 #!/bin/sh
 cat >/dev/null
-case "$*" in *"PLAN VERDICT"*) echo "PLAN VERDICT: APPROVE" ;; *) echo "TEST VERDICT: none" ;; esac
+case "$*" in *"PLAN VERDICT"*) echo "PLAN VERDICT: APPROVE" ;; *) [ -n "${CODEX_NO_VERDICT:-}" ] || echo "REVIEW VERDICT: YES"; echo "TEST VERDICT: none" ;; esac
 EOF
 cat >"$STUB/bin/cygpath" <<'EOF'
 #!/bin/sh
@@ -398,6 +398,7 @@ echo "--- 26b. Orca worker, no WAVE_IMPLEMENTER: the run's status names Codex, s
 cat >"$STUB/bin/claude" <<'EOF'
 #!/bin/sh
 cat >/dev/null
+echo "REVIEW VERDICT: YES"
 echo "TEST VERDICT: none"
 EOF
 chmod +x "$STUB/bin/claude"
@@ -408,6 +409,13 @@ assert_eq "orca-implementer/exit-0" "0" "$st"
 assert_contains "orca-implementer/opus" "$(cat "$BOX/out.txt")" "REVIEWER: claude-opus"
 assert_not_contains "orca-implementer/no-terra" "$(cat "$BOX/out.txt")" "REVIEWER: codex-terra"
 rm -rf "$BOX/.claude/wave/runs" "$STUB/bin/claude"
+
+echo "--- 26c. Codex prints no REVIEW VERDICT: incomplete, never inferred (INNOV-450) ---"
+st="$(CODEX_NO_VERDICT=1 grok_run review.sh "$PASS_OUT")"
+assert_eq "no-review-verdict/exit-1" "1" "$st"
+assert_contains "no-review-verdict/says" "$(cat "$BOX/out.txt")" "NO CODEX REVIEW: Codex Terra did not return a complete REVIEW VERDICT"
+st="$(grok_run review.sh "$PASS_OUT")"
+assert_contains "review-verdict/passed-through" "$(cat "$BOX/out.txt")" "REVIEW VERDICT: YES"
 
 echo "--- 27. plan-review: REVISE still reported, timeouts fall back ---"
 st="$(grok_run plan-review.sh '0 the plan misses a caller\nPLAN VERDICT: REVISE')"
