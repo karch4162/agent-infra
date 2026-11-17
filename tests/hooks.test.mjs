@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { prepareGraph, recordGraph } from '../brain/core/graph-inputs.mjs';
 const hook = fileURLToPath(new URL('../brain/hooks/graph-before-grep.mjs', import.meta.url));
 test('hook recognizes Claude, Codex and Grok events without conflating repos', t => {
   const base = mkdtempSync(join(tmpdir(), 'brain-hooks-'));
@@ -58,6 +59,15 @@ test('reminder bounds caller lists and leads with exact-name commands (INNOV-356
   assert.ok(text.indexOf('graphify affected') >= 0 && text.indexOf('graphify affected') < text.indexOf('graphify query'));
   assert.match(text, /not in the graph/);
   assert.ok(text.split(/\s+/).length <= 100, `reminder is ${text.split(/\s+/).length} words`);
+  mkdirSync(join(root, 'src'));
+  writeFileSync(join(root, 'src/a.js'), 'export const a = 1;');
+  prepareGraph(root, ['src'], 'graphify-test');
+  recordGraph(root);
+  writeFileSync(join(root, 'src/a.js'), 'export const a = 2;');
+  const staleOut = spawnSync(process.execPath, [hook], { input: JSON.stringify({ cwd: root, session_id: randomUUID(), tool_name: 'Grep', tool_input: {} }), encoding: 'utf8' }).stdout;
+  const staleText = JSON.parse(staleOut).hookSpecificOutput.additionalContext;
+  assert.match(staleText, /Graph is STALE/);
+  assert.match(staleText, /advisory hints and verify against source/i);
 });
 test('vault template matches the reminder (INNOV-356)', () => {
   const tpl = readFileSync(fileURLToPath(new URL('../brain/templates/CLAUDE.brain.md', import.meta.url)), 'utf8').replace(/\r/g, '');
@@ -83,7 +93,10 @@ test('init offers the INNOV-356 graph wording to vaults that predate it (INNOV-3
   assert.ok(offer, 'init must offer the section to a CLAUDE.md lacking the heading');
   assert.match(offer, /Staleness rule/);
   assert.match(offer, /How to query the graph/);
-  assert.match(init, /INFERRED edge is a lead, not a fact/);
+  const inferredOffer = init.split('\n').find(l => l.includes('does **not** contain `INFERRED edge`'));
+  assert.ok(inferredOffer, 'init must offer the INFERRED-edge rule to vaults that already have the prior graph wording');
+  assert.match(inferredOffer, /lead, not a fact/);
+  assert.match(inferredOffer, /ask first/);
   assert.match(offer, /ask first/);
 });
 test('hook command tests for the graph in the shell before starting Node (INNOV-357)', t => {

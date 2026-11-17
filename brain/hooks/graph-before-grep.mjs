@@ -135,7 +135,7 @@ if (builtAt && head) {
 }
 
 const inputs = graphStatus(cwd);
-if (inputs.state === 'stale') freshness = `Graph is STALE: ${inputs.reason}`;
+if (inputs.state === 'stale') freshness = `Graph is STALE: ${inputs.reason} Treat graph answers as advisory hints and verify against source.`;
 else if (inputs.state === 'fresh') freshness = `Graph inputs match the recorded build (${inputs.files} files; ${inputs.extractor}).`;
 else if (existsSync(join(cwd, 'graphify-out/brain-inputs.json'))) freshness = `Graph freshness unknown: ${inputs.reason}`;
 
