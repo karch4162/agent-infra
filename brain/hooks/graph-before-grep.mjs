@@ -140,13 +140,12 @@ else if (inputs.state === 'fresh') freshness = `Graph inputs match the recorded 
 else if (existsSync(join(cwd, 'graphify-out/brain-inputs.json'))) freshness = `Graph freshness unknown: ${inputs.reason}`;
 
 const reminder =
-  `graph-before-grep (once per session): this repo has a graphify graph. ${freshness} ` +
-  'For structural questions run `graphify explain "<Symbol>"` or `graphify affected "<Symbol>"` ' +
-  'with the exact name (`graphify query "<question>"` only when you lack the name) before ' +
-  'sweeping raw source — graph-first when fresh, advisory otherwise. Caller and usage lists ' +
-  'are a minimum (calls through fields, cross-language calls and XML are missed): confirm ' +
-  'blast radius with raw search. No result naming your symbol means it is not in the graph: ' +
-  'search raw. (Non-blocking.)';
+  `graph-before-grep: graph detected. ${freshness} ` +
+  'For structural questions use `graphify explain "<Symbol>"` or `graphify affected "<Symbol>"` ' +
+  'before raw source (`graphify query "<question>"` only when you lack the name). Caller and usage ' +
+  'lists are a minimum (fields, cross-language calls and XML are missed): raw-search blast radius. ' +
+  'An INFERRED edge is a lead, not a fact: confirm it with search before relying on it and say it was ' +
+  'inferred. No result naming your symbol means it is not in the graph: search raw. (Non-blocking.)';
 
 process.stdout.write(
   JSON.stringify(sessionStart ? { additionalContext: reminder } : {

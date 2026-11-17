@@ -52,6 +52,8 @@ test('reminder bounds caller lists and leads with exact-name commands (INNOV-356
   assert.match(text, /FRESH/);
   assert.doesNotMatch(text, /authoritative|complete answer/i);
   assert.match(text, /minimum/);
+  assert.match(text, /INFERRED edge.*lead, not a fact/i);
+  assert.match(text, /confirm.*search.*say.*inferred/i);
   assert.ok(text.indexOf('graphify explain') >= 0 && text.indexOf('graphify explain') < text.indexOf('graphify query'));
   assert.ok(text.indexOf('graphify affected') >= 0 && text.indexOf('graphify affected') < text.indexOf('graphify query'));
   assert.match(text, /not in the graph/);
@@ -62,6 +64,8 @@ test('vault template matches the reminder (INNOV-356)', () => {
   const staleness = tpl.split('\n').find(l => l.includes('Staleness rule'));
   assert.doesNotMatch(staleness, /authoritative/);
   assert.match(staleness, /minimum/);
+  assert.match(tpl, /INFERRED edge.*lead, not a fact/i);
+  assert.match(tpl, /confirm.*search.*say.*inferred/i);
   assert.match(staleness, /not found in the graph/);
   assert.doesNotMatch(tpl, /natural language/);
   assert.ok(tpl.indexOf('graphify explain') >= 0 && tpl.indexOf('graphify explain') < tpl.indexOf('graphify query'));
@@ -79,6 +83,7 @@ test('init offers the INNOV-356 graph wording to vaults that predate it (INNOV-3
   assert.ok(offer, 'init must offer the section to a CLAUDE.md lacking the heading');
   assert.match(offer, /Staleness rule/);
   assert.match(offer, /How to query the graph/);
+  assert.match(init, /INFERRED edge is a lead, not a fact/);
   assert.match(offer, /ask first/);
 });
 test('hook command tests for the graph in the shell before starting Node (INNOV-357)', t => {
