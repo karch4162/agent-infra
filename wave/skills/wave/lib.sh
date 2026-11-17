@@ -57,8 +57,10 @@ case "$WAVE_TRACKER" in
    assignee. If I am not, drop it and pick the next agent-ready issue instead." ;;
   jira)
     TRACKER_NAME="Jira"
-    TRACKER_OPS="the Atlassian MCP Jira tools (site ${WAVE_JIRA_SITE:?set WAVE_JIRA_SITE in $WAVE_CONFIG})"
-    TRACKER_ATTACH="add the PR URL to the issue as a comment"
+    # acli, not the Atlassian MCP: a Codex worker has no Atlassian MCP, and the tick
+    # already reads Jira through acli (jira_tracker.py). One sign-in per machine.
+    TRACKER_OPS="the \`acli\` CLI (site ${WAVE_JIRA_SITE:?set WAVE_JIRA_SITE in $WAVE_CONFIG}; signed in on this machine; do not look for an Atlassian MCP or use a Jira API token): \`acli jira workitem view <KEY> --fields summary,description,comment,status,assignee --json\`, \`acli jira workitem assign --key <KEY> --assignee @me --yes\`, \`acli jira workitem transition --key <KEY> --status \"<state>\" --yes\`, \`acli jira workitem comment create --key <KEY> --body \"<text>\"\`, and \`acli jira workitem create --from-json <file>\` for follow-ups (description in ADF)"
+    TRACKER_ATTACH="add the PR URL to the issue as a comment (\`acli jira workitem comment create\`)"
     TRACKER_CLAIM="Assign it to me and set it \$WAVE_STATE_START via $TRACKER_OPS, then re-read the issue and confirm I am the
    assignee. If I am not, drop it and pick the next agent-ready issue instead." ;;
   clickup)

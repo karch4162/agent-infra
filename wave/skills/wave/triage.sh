@@ -13,7 +13,7 @@
 #   TRIAGER=agy bash "$WAVE/triage.sh" SPO-378      # grok (default) | agy | sonnet
 # --json takes a Jira search result ({"issues":{"nodes":[...]}} or a list), one Jira
 # issue, or Linear issue objects. Jira has no CLI here, so the host session fetches
-# the candidates with the Atlassian MCP (markdown body format) and saves them.
+# the candidates with acli (`acli jira workitem search --jql ... --json`) (markdown body format) and saves them.
 set -uo pipefail; shopt -s nullglob   # nullglob: an empty candidate set prints an empty table, not a bogus row
 
 TRIAGER="${TRIAGER:-grok}"

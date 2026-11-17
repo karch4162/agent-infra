@@ -74,9 +74,9 @@ A repo opts in with two committed files:
 The base ref comes from `origin/HEAD` (override with `WAVE_BASE`); the Orca repo is
 matched by the main checkout's path.
 
-Tracker access: Linear goes through `orca linear`; Jira through the Atlassian MCP,
-which has no shell CLI — so for Jira the host session does the queue query and
-`triage.sh` reads issues from saved JSON. ClickUp goes through
+Tracker access: Linear goes through `orca linear`; Jira through `acli` (signed in once
+per machine with `acli jira auth login`; workers of every agent use it, since a Codex
+worker has no Atlassian MCP), and `triage.sh` reads issues from saved JSON. ClickUp goes through
 `autonomy/clickup_tracker.py` (`get`, `status`, `comment`, `queue`, `followup`), a
 REST adapter that reads `CLICKUP_API_TOKEN` from the environment and throttles to the
 free-plan rate; `triage.sh <id>` and `--all` work directly with it.
@@ -180,7 +180,7 @@ never fixes: the PRs are merged. Time-box ~15 min and report "walked N, M findin
 nothing never reports a route count. An empty report means it did not run. Repos with no UI (plugins, libraries) skip this.
 
 **4. Check the queue — the only step that needs you.** Run the config's `WAVE_QUEUE`
-against the tracker (Linear: `orca linear`; Jira: the Atlassian MCP JQL search).
+against the tracker (Linear: `orca linear`; Jira: `acli jira workitem search --jql '<WAVE_QUEUE>' --json`).
 Choose the exact wave size before spawning. If the queue is thin, label first — see the
 criteria below — starting with the pre-grep, which does the mechanical half:
 ```bash
