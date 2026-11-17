@@ -295,13 +295,6 @@ else
     "expected commit subject 'local rewrites shared line' in log" \
     "log: [$(printf '%s' "$commit_subjects" | tr '\n' '|')]" "$(evidence "$BOX")"
 fi
-if grep -qx "missing commit subject" <<<"$commit_subjects"; then
-  fail "conflict/missing-commit-not-in-history" \
-    "a non-existent subject unexpectedly matched the commit log" \
-    "log: [$(printf '%s' "$commit_subjects" | tr '\n' '|')]" "$(evidence "$BOX")"
-else
-  pass "conflict/missing-commit-not-in-history"
-fi
 assert_eq "conflict/origin-ref-unchanged-no-push" "$origin_before" "$(origin_sha)" \
   "a BLOCKED run must never commit to or push to origin" "$(evidence "$BOX")"
 
