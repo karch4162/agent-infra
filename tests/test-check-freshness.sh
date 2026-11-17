@@ -287,12 +287,20 @@ assert_eq "conflict/no-unmerged-entries-in-status" "" "$unmerged" \
   "git status --porcelain: [$(git -C "$VAULT" status --porcelain 2>/dev/null | tr '\n' '|')]" \
   "$(evidence "$BOX")"
 assert_eq "conflict/own-commit-still-head" "$own_sha" "$(vault_sha)" "$(evidence "$BOX")"
-if git -C "$VAULT" log --format=%s 2>/dev/null | grep -qx "local rewrites shared line"; then
+commit_subjects="$(git -C "$VAULT" log --format=%s 2>/dev/null)"
+if grep -qx "local rewrites shared line" <<<"$commit_subjects"; then
   pass "conflict/own-commit-intact-in-history"
 else
   fail "conflict/own-commit-intact-in-history" \
     "expected commit subject 'local rewrites shared line' in log" \
-    "log: [$(git -C "$VAULT" log --format=%s 2>/dev/null | tr '\n' '|')]" "$(evidence "$BOX")"
+    "log: [$(printf '%s' "$commit_subjects" | tr '\n' '|')]" "$(evidence "$BOX")"
+fi
+if grep -qx "missing commit subject" <<<"$commit_subjects"; then
+  fail "conflict/missing-commit-not-in-history" \
+    "a non-existent subject unexpectedly matched the commit log" \
+    "log: [$(printf '%s' "$commit_subjects" | tr '\n' '|')]" "$(evidence "$BOX")"
+else
+  pass "conflict/missing-commit-not-in-history"
 fi
 assert_eq "conflict/origin-ref-unchanged-no-push" "$origin_before" "$(origin_sha)" \
   "a BLOCKED run must never commit to or push to origin" "$(evidence "$BOX")"
