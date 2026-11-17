@@ -526,6 +526,20 @@ class WaveRun(unittest.TestCase):
             ctl.run("scheduled")
         self.assertEqual(ticked, ["b"])                      # a is cooling down
 
+    def test_every_spawn_failing_fails_the_firing(self):
+        # Hub demo 2026-11-16: an hour of firings picked tickets, spawned none, and said ok.
+        import wave_run
+        fail = "ENT-1: spawn failed: spawn.sh DRY_RUN failed: line 27: Beard: command not found\n"
+        with tempfile.TemporaryDirectory() as td, contextlib.redirect_stdout(io.StringIO()):
+            control, _ = self._control(td, "")
+            ctl = self._ctl(control, lambda repo, t, e: (0, [fail] if repo.name == "a" else [], ""))
+            self.assertEqual(ctl.run("owner"), 1)
+            esc = (control / "state" / "escalations.md").read_text(encoding="utf-8")
+            self.assertIn("no worker started; ENT-1: spawn failed", esc)
+            # one failure beside a started worker is a notice, not a failed firing
+            with mock.patch.object(wave_run, "spawned_since", lambda repo, t0: ["ENT-2"]):
+                self.assertEqual(ctl.run("owner"), 0)
+
     def test_statusline_weekly_pct(self):
         import budget_guard
         with tempfile.TemporaryDirectory() as td:

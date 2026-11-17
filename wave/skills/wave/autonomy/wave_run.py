@@ -278,7 +278,11 @@ class Control:
                 if trc == 0 and notices is None:
                     trc, notices = 1, ["tick exited 0 but printed no report"]
                 notices = notices or []
-                bad = trc != 0 or any("closeout failed" in n for n in notices)
+                # Every pick failing to spawn is a broken repo (a bad config.env broke spawn.sh on
+                # each firing of the hub demo while the run said ok); one failure beside a started
+                # worker stays a notice (INNOV-449).
+                spawn_failed = [n for n in notices if ": spawn failed:" in n]
+                bad = trc != 0 or any("closeout failed" in n for n in notices) or bool(spawn_failed and not spawned)
                 self.audit({"run_id": run_id, "stage": "tick", "trigger": trigger, "repo": str(repo), "rc": trc,
                             "decision": "failed" if bad else "ok", "caps": env_over, "notices": notices[:20],
                             "spawned": spawned,
@@ -289,7 +293,9 @@ class Control:
                 lines.extend(f"    notice: {n}" for n in notices[:10])
                 if bad:
                     failed = True
-                    why = next((n for n in notices if "closeout failed" in n), None) or (notices[-1] if notices else tail[-300:].strip())
+                    why = (next((n for n in notices if "closeout failed" in n), None)
+                           or (f"no worker started; {spawn_failed[0].strip()}" if spawn_failed and not spawned else None)
+                           or (notices[-1] if notices else tail[-300:].strip()))
                     msg = f"{repo.name}: tick rc={trc}; {why}"
                     if trigger in EXECUTING and cfg.cooldown_h > 0:
                         msg += f"; cooldown until {self.set_cooldown(repo)}"
