@@ -23,3 +23,5 @@ Thumbs.db
 .impeccable/hook.cache.json
 .impeccable/live/*
 !.impeccable/live/config.json
+__pycache__/
+*.pyc
