@@ -19,6 +19,8 @@ status.json files:
   5. spawn      backlog_watch picks -> plan loop when thin -> DirectWorkerRuntime
                 (daily cap counted only after the spawn succeeded)
   6. closeout   WAVE_CLOSEOUT_CMD once nothing is live and something merged
+                (a held PR a human merges later counts: reconcile re-checks done_held)
+  7. sweep      remove merged worktrees once closeout no longer needs them
 
 Stops and leaves a note under autonomy/ for a human on: risky tickets, a plan that
 needs a human, a held PR, a failed closeout.
@@ -48,7 +50,7 @@ from backlog_watch import run_watch  # noqa: E402
 from daily_cap import ET, RunLock, record_start  # noqa: E402
 from grok_challenge import run_grok_challenge  # noqa: E402
 from plan_step import run_plan_loop, write_plan_artifacts  # noqa: E402
-from worker_runtime import DirectWorkerRuntime, OrcaWorkerRuntime, WorkerError, codex_inherits_all, orca_worker_state, build_claude_reviewer_cmd, build_codex_reviewer_cmd, _resolve_agent_bin, pid_alive  # noqa: E402
+from worker_runtime import DirectWorkerRuntime, OrcaWorkerRuntime, WorkerError, codex_inherits_all, orca_worker_state, _orca, build_claude_reviewer_cmd, build_codex_reviewer_cmd, _resolve_agent_bin, pid_alive  # noqa: E402
 
 LIVE = {"running", "starting"}
 IDLE_NOTICE_S = 20 * 60  # an Orca worker silent this long may be waiting at a prompt
@@ -173,6 +175,7 @@ class Tick:
         self._tracker = None
         self.merged_this_tick: list[str] = []
         self.merged_shas: list[str] = []
+        self.closeout_ok: bool | None = None  # None: closeout did not run this tick
 
     # ---- helpers -------------------------------------------------------------
     def ev(self, ticket: str, what: str, **kw: Any) -> None:
@@ -295,6 +298,33 @@ class Tick:
                     self.track(ticket, comment=f"wave: held — {why}")
                 if self.execute:
                     _write(path, st)
+            if state == "done_held" and st.get("pr_number") and not st.get("pr_closed"):
+                self.recheck_held(path, st, ticket)
+
+    def recheck_held(self, path: Path, st: dict[str, Any], ticket: str) -> None:
+        """A held PR is the human's to merge. Once they do, the tick takes the run back so
+        closeout and the sweep run for it; a closed PR stops being checked."""
+        p = _sh(["gh", "pr", "view", str(st["pr_number"]), "--repo", self.repo_slug(),
+                 "--json", "state,mergeCommit"], self.repo)
+        try:
+            pr = json.loads(p.stdout or "{}")
+        except ValueError:
+            return
+        if pr.get("state") == "MERGED":
+            sha = (pr.get("mergeCommit") or {}).get("oid") or ""
+            st.update(state="done_merged", note="merged by a human after the hold", merge_sha=sha)
+            self.merged_this_tick.append(ticket)
+            if sha:
+                self.merged_shas.append(sha)
+            self.ev(ticket, "merged_by_human", pr=st["pr_number"])
+            self.track(ticket, comment=f"wave: {st.get('pr')} merged; closeout and sweep follow")
+        elif pr.get("state") == "CLOSED":
+            st["pr_closed"] = True
+            self.ev(ticket, "pr_closed", pr=st["pr_number"])
+        else:
+            return
+        if self.execute:
+            _write(path, st)
 
     # ---- 2. ci ----------------------------------------------------------------
     def ci(self) -> None:
@@ -468,17 +498,54 @@ class Tick:
         if why:
             self.ev("-", "closeout_skipped", reason=why)
             self.notice(f"closeout not run after merging {self.merged_this_tick}: {why}")
+            self.closeout_ok = False
             return
         p = subprocess.run([_bash(), "-lc", self.cfg.closeout_cmd], cwd=str(self.repo), capture_output=True,
                            text=True, encoding="utf-8", errors="replace", timeout=3600)
         (self.auto / "closeout-last.log").write_text((p.stdout or "") + (p.stderr or ""), encoding="utf-8")
-        streak = record_closeout(self.wave_dir, p.returncode == 0)
+        self.closeout_ok = p.returncode == 0
+        streak = record_closeout(self.wave_dir, self.closeout_ok)
         self.ev("-", "closeout", rc=p.returncode, clean_streak=streak)
         if p.returncode != 0:
             self.notice(f"closeout failed (rc={p.returncode}) after merging {self.merged_this_tick}; see autonomy/closeout-last.log. "
                         "Clean-wave streak reset to 0: medium auto-merge is suspended until it is rebuilt.")
         elif streak == self.cfg.clean_waves_for_medium and not self.cfg.auto_merge_medium:
             self.notice(f"{streak} clean waves in a row: medium auto-merge may be turned on (WAVE_AUTO_MERGE_MEDIUM=1). Owner's call.")
+
+    # ---- 7. sweep --------------------------------------------------------------------
+    def sweep(self) -> None:
+        """Remove merged worktrees. The attended coordinator sweeps its own; unattended, nothing
+        else would. A failed closeout keeps them for debugging; a dirty one stays, with a notice."""
+        if self.closeout_ok is False:
+            return
+        rows = self.statuses()
+        if any(st.get("state") in LIVE and self.alive(p, st) for p, st in rows):
+            return
+        for path, st in rows:
+            if st.get("state") != "done_merged" or st.get("swept") or not st.get("path"):
+                continue
+            ticket = st.get("ticket_id") or path.parent.name
+            wt = Path(st["path"])
+            if not self.execute:
+                self.ev(ticket, "would_sweep", path=str(wt))
+                continue
+            if wt.exists():
+                if _sh(["git", "status", "--porcelain"], wt).stdout.strip():
+                    if not st.get("sweep_blocked"):
+                        self.notice(f"{ticket}: merged worktree has uncommitted changes, not swept: {wt}")
+                        st["sweep_blocked"] = _now()
+                        _write(path, st)
+                    continue
+                if st.get("runtime") == "orca":
+                    p = _orca(["worktree", "rm", "--worktree", f"name:{wt.name}", "--force", "--delete-branch", "--json"])
+                else:
+                    p = _sh(["git", "worktree", "remove", "--force", str(wt)], self.repo)
+                if p.returncode != 0:
+                    self.notice(f"{ticket}: sweep failed: {(p.stderr or p.stdout or '')[-200:]}")
+                    continue
+            st["swept"] = _now()
+            self.ev(ticket, "swept", path=str(wt))
+            _write(path, st)
 
     # ---- run -------------------------------------------------------------------------
     def run(self) -> dict[str, Any]:
@@ -494,6 +561,7 @@ class Tick:
             self.merge()
             self.spawn(lock)
             self.closeout()
+            self.sweep()
         finally:
             lock.release("autonomy_tick")
             (self.auto / "tick-last.json").write_text(json.dumps(self.report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
