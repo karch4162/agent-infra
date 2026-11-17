@@ -9,6 +9,7 @@ import io
 import json
 from datetime import datetime, timezone
 import os
+import subprocess
 import time
 import sys
 import tempfile
@@ -547,6 +548,53 @@ class TickIgnoresWalkers(unittest.TestCase):
             (runs.parent / "config.env").write_text("WAVE_TRACKER=jira\n", encoding="utf-8")
             tick = autonomy_tick.Tick(repo=Path(td), execute=False, log=lambda m: None)
             self.assertEqual([p.parent.name for p, _ in tick.statuses()], ["innov-1"])
+
+
+    def test_held_pr_merged_by_a_human_is_closed_out_and_swept(self):
+        # Hub demo 2026-11-17: three held PRs merged by hand stayed done_held forever;
+        # nothing ran closeout or removed their worktrees.
+        import autonomy_tick
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
+            runs = Path(td) / ".claude" / "wave" / "runs"
+            (runs.parent / "config.env").parent.mkdir(parents=True)
+            (runs.parent / "config.env").write_text("WAVE_TRACKER=jira\n", encoding="utf-8")
+            wts = {}
+            for name, n in (("ent-1", 1), ("ent-2", 2)):
+                (runs / name).mkdir(parents=True)
+                wts[name] = Path(td) / "wt" / name
+                wts[name].mkdir(parents=True)
+                (runs / name / "status.json").write_text(json.dumps({
+                    "ticket_id": name.upper(), "state": "done_held", "pr": f"u/{n}", "pr_number": n,
+                    "runtime": "orca", "path": str(wts[name])}), encoding="utf-8")
+            removed = []
+
+            def sh(args, cwd, **kw):
+                out = ""
+                if args[:3] == ["gh", "pr", "view"]:
+                    out = json.dumps({"state": "MERGED", "mergeCommit": {"oid": "abc" + args[3]}})
+                elif args[:2] == ["git", "status"] and Path(cwd).name == "ent-2":
+                    out = " M dirty.ts"
+                return subprocess.CompletedProcess(args, 0, out, "")
+
+            def orca(args):
+                removed.append(args[3])
+                return subprocess.CompletedProcess(args, 0, "{}", "")
+
+            with mock.patch.object(autonomy_tick, "_sh", sh), mock.patch.object(autonomy_tick, "_orca", orca):
+                tick = autonomy_tick.Tick(repo=Path(td), execute=True, log=lambda m: None)
+                tick._slug = "o/r"
+                tick.track = lambda *a, **k: None
+                tick.reconcile()
+                tick.sweep()
+            self.assertEqual(tick.merged_this_tick, ["ENT-1", "ENT-2"])
+            self.assertEqual(tick.merged_shas, ["abc1", "abc2"])
+            self.assertEqual(removed, ["name:ent-1"])  # the dirty worktree stays
+            st1 = json.loads((runs / "ent-1" / "status.json").read_text(encoding="utf-8"))
+            st2 = json.loads((runs / "ent-2" / "status.json").read_text(encoding="utf-8"))
+            self.assertEqual(st1["state"], "done_merged")
+            self.assertTrue(st1.get("swept"))
+            self.assertTrue(st2.get("sweep_blocked"))
+            self.assertIn("uncommitted", tick.report["notices"][0])
 
 
 class Config(unittest.TestCase):
