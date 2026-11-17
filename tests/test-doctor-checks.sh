@@ -1005,6 +1005,29 @@ run_mirror --behind
 assert_prefix "behind/subpath-verdict" "BEHIND brain-plugin " "$(first_line "$BOX/out.txt")" "$(evidence)"
 assert_contains "behind/subpath-scoped-count" "1 commit behind origin/development" "$(out_all)" "$(evidence)"
 
+# --- 52. fetch age bounds the count; a missing FETCH_HEAD is never CURRENT ---
+set_fetch_age() { # repo age-in-days
+  node -e 'const fs = require("fs"); const age = Number(process.argv[2]); const when = new Date(Date.now() - age * 86400000); fs.writeFileSync(process.argv[1] + "/.git/FETCH_HEAD", "fetch\\n"); fs.utimesSync(process.argv[1] + "/.git/FETCH_HEAD", when, when);' "$1" "$2"
+}
+mk_bvault
+built_at "$(git -C "$SRC" rev-parse HEAD)"
+set_fetch_age "$SRC" 0
+run_mirror --behind
+assert_prefix "behind/fresh-fetch-verdict" "CURRENT brain-plugin " "$(first_line "$BOX/out.txt")" "$(evidence)"
+assert_contains "behind/fresh-fetch-age" "as of a fetch 0 days ago" "$(out_all)" "$(evidence)"
+
+set_fetch_age "$SRC" 8
+run_mirror --behind
+assert_eq "behind/stale-fetch-exit-1" "1" "$STATUS" "$(evidence)"
+assert_prefix "behind/stale-fetch-verdict" "BEHIND brain-plugin " "$(first_line "$BOX/out.txt")" "$(evidence)"
+assert_contains "behind/stale-fetch-lower-bound" "at least 0 commits behind origin/development as of a fetch 8 days ago" "$(out_all)" "$(evidence)"
+
+rm -f "$SRC/.git/FETCH_HEAD"
+run_mirror --behind
+assert_eq "behind/never-fetch-exit-0" "0" "$STATUS" "$(evidence)"
+assert_prefix "behind/never-fetch-verdict" "SKIPPED brain-plugin " "$(first_line "$BOX/out.txt")" "$(evidence)"
+assert_contains "behind/never-fetch-reason" "has never been fetched" "$(out_all)" "$(evidence)"
+
 fi
 
 echo

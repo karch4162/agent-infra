@@ -44,11 +44,14 @@
 #                             is optional there (only the cwd query hook uses it)
 #   SKIPPED - <reason>        not measurable (no vault / no graphify/ / no node)
 # --behind lines:
-#   CURRENT <name> - ...      built at the reference branch's tip (0 behind)
-#   BEHIND <name> - ...       N commit(s) behind origin/<branch>
+#   CURRENT <name> - ...      built at the reference branch's tip (0 behind),
+#                              as of the checkout's recent fetch
+#   BEHIND <name> - ...       N commit(s) behind origin/<branch>; a stale fetch
+#                              reports this as "at least N" instead
 #   OFF-BRANCH <name> - ...   build commit is not on origin/<branch> at all
 #   SKIPPED <name> - <reason> unverifiable (no checkout, no/unknown commit, no
-#                             origin ref, shallow clone): never fails doctor
+#                             origin ref, shallow clone, or no FETCH_HEAD): never
+#                             fails doctor
 # exit 1 => at least one NO-GRAPH (or BEHIND / OFF-BRANCH) line. exit 0 otherwise. WARN polarity: doctor
 # relays the line, nothing is blocked. Read-only: the resolver cache is never
 # written (--print-paths without --write).
@@ -143,7 +146,7 @@ report() { # name
 
 # --behind: how old is what the vault already publishes? (INNOV-354)
 report_behind() { # name
-  local n="$1" src n_behind sha branch how _c
+  local n="$1" src n_behind sha branch how _c fetch_state fetch_age fetch_suffix
   if [[ ! -d "$VAULT/graphify/$n" ]]; then
     echo "NO-MIRROR $n - no graphify/$n/ in the vault"
     return 0
@@ -161,14 +164,26 @@ report_behind() { # name
   case "$PROV_VERDICT" in
     OK)
       read -r sha branch how <<<"$PROV_DETAIL"
-      if ! n_behind="$(git -C "$src" rev-list --count "$sha..refs/remotes/origin/$branch" -- . 2>/dev/null)" || [[ -z "$n_behind" ]]; then
+      fetch_state="$(fetch_age "$src")"
+      if [[ "$fetch_state" == "never" ]]; then
+        echo "SKIPPED $n - source checkout has never been fetched (no FETCH_HEAD), so lag against origin/$branch is not current"
+      elif ! n_behind="$(git -C "$src" rev-list --count "$sha..refs/remotes/origin/$branch" -- . 2>/dev/null)" || [[ -z "$n_behind" ]]; then
         echo "SKIPPED $n - git could not count commits from $sha to origin/$branch ($how)"
-      elif [[ "$n_behind" == "0" ]]; then
-        echo "CURRENT $n - built at $sha, 0 commits behind origin/$branch ($how)"
       else
         [[ "$n_behind" == "1" ]] && _c="commit" || _c="commits"
-        echo "BEHIND $n - built at $sha, $n_behind $_c behind origin/$branch ($how); rebuild from $branch and sync to refresh it"
-        FROZEN=1
+        fetch_age="${fetch_state#*:}"
+        fetch_suffix="as of a fetch $fetch_age day"
+        [[ "$fetch_age" == "1" ]] || fetch_suffix="${fetch_suffix}s"
+        fetch_suffix="$fetch_suffix ago"
+        if [[ "${fetch_state%%:*}" == "stale" ]]; then
+          echo "BEHIND $n - built at $sha, at least $n_behind $_c behind origin/$branch $fetch_suffix ($how); fetch, rebuild from $branch and sync to refresh it"
+          FROZEN=1
+        elif [[ "$n_behind" == "0" ]]; then
+          echo "CURRENT $n - built at $sha, 0 commits behind origin/$branch $fetch_suffix ($how)"
+        else
+          echo "BEHIND $n - built at $sha, $n_behind $_c behind origin/$branch $fetch_suffix ($how); rebuild from $branch and sync to refresh it"
+          FROZEN=1
+        fi
       fi
       ;;
     REFUSED)
@@ -182,6 +197,28 @@ report_behind() { # name
   esac
 }
 if [[ $BEHIND -eq 1 ]]; then
+  # A stale remote ref is an incomplete lower bound, never proof that a mirror
+  # is current. Keep this shell-only and read-only: FETCH_HEAD records when Git
+  # last fetched without contacting the remote.
+  DEFAULT_FETCH_STALE_DAYS=7
+  FETCH_STALE_DAYS="${MIRROR_FETCH_STALE_DAYS:-$DEFAULT_FETCH_STALE_DAYS}"
+  if ! [[ "$FETCH_STALE_DAYS" =~ ^[0-9]+$ ]]; then
+    echo "  note: MIRROR_FETCH_STALE_DAYS='$FETCH_STALE_DAYS' is not a non-negative integer; using $DEFAULT_FETCH_STALE_DAYS." >&2
+    FETCH_STALE_DAYS=$DEFAULT_FETCH_STALE_DAYS
+  fi
+  fetch_age() { # source checkout -> fresh:<days> | stale:<days> | never
+    local src="$1" fetch_head mtime now age
+    fetch_head="$(git -C "$src" rev-parse --git-path FETCH_HEAD 2>/dev/null || true)"
+    if [[ -z "$fetch_head" ]]; then printf 'never\n'; return 0; fi
+    if [[ "$fetch_head" != /* && ! "$fetch_head" =~ ^[A-Za-z]: ]]; then fetch_head="$src/$fetch_head"; fi
+    if [[ ! -f "$fetch_head" ]]; then printf 'never\n'; return 0; fi
+    mtime="$(stat -f %m "$fetch_head" 2>/dev/null || stat -c %Y "$fetch_head" 2>/dev/null || true)"
+    now="$(date +%s)"
+    if ! [[ "$mtime" =~ ^[0-9]+$ && "$now" =~ ^[0-9]+$ ]]; then printf 'never\n'; return 0; fi
+    age=$(( (now - mtime) / 86400 ))
+    [[ $age -lt 0 ]] && age=0
+    if [[ $age -gt $FETCH_STALE_DAYS ]]; then printf 'stale:%s\n' "$age"; else printf 'fresh:%s\n' "$age"; fi
+  }
   # shellcheck source=lib/provenance.sh
   source "$SCRIPT_DIR/lib/provenance.sh"
   load_reference_branches
