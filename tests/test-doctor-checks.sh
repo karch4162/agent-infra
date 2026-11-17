@@ -928,6 +928,8 @@ mk_bvault() { # [subPath]
   git -C "$SRC" init -q -b trunk >/dev/null 2>&1
   gcommit "$SRC" pkg/a
   git -C "$SRC" update-ref refs/remotes/origin/development HEAD
+  # A cached origin ref represents a real fetch only when FETCH_HEAD records it.
+  printf 'fetch\n' >"$SRC/.git/FETCH_HEAD"
   if [[ -n "${1:-}" ]]; then
     printf '{\r\n  "repos": {\r\n    "brain-plugin": { "subPath": "%s", "branch": "development" }\r\n  }\r\n}\r\n' "$1" >"$VAULT/repos.json"
     printf '{ "brain-plugin": "%s" }\n' "$(native_path "$SRC/$1")" >"$VAULT/repos.local.json"

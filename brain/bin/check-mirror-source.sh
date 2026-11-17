@@ -212,7 +212,9 @@ if [[ $BEHIND -eq 1 ]]; then
     if [[ -z "$fetch_head" ]]; then printf 'never\n'; return 0; fi
     if [[ "$fetch_head" != /* && ! "$fetch_head" =~ ^[A-Za-z]: ]]; then fetch_head="$src/$fetch_head"; fi
     if [[ ! -f "$fetch_head" ]]; then printf 'never\n'; return 0; fi
-    mtime="$(stat -f %m "$fetch_head" 2>/dev/null || stat -c %Y "$fetch_head" 2>/dev/null || true)"
+    # GNU stat accepts `-f` too, but treats it as filesystem format and returns
+    # a successful, non-epoch string. Try its file timestamp form first.
+    mtime="$(stat -c %Y "$fetch_head" 2>/dev/null || stat -f %m "$fetch_head" 2>/dev/null || true)"
     now="$(date +%s)"
     if ! [[ "$mtime" =~ ^[0-9]+$ && "$now" =~ ^[0-9]+$ ]]; then printf 'never\n'; return 0; fi
     age=$(( (now - mtime) / 86400 ))
