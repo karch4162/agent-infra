@@ -685,7 +685,7 @@ for want in \
   'build_merge' \
   'DETECT-NARROW:' \
   'never `--update` when a note was deleted' \
-  '5c: removed N stale graphify chunk file(s)' \
+  '5c: removed $removed stale graphify chunk file(s)' \
   'graphify-out/.graphify_chunk_*.json'; do
   assert_contains "save-5c/has:$want" "$want" "$STEP5C" \
     "brain/skills/save/SKILL.md step 5c must carry this sentence"
