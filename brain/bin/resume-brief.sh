@@ -25,7 +25,8 @@
 #                                "BRIEF: worktree - <why>"; then, only when the
 #                                checkout has drifted, one "DRIFT: ..." line
 #   resume-brief.sh --cat PATH   PATH's content from the briefing ref; exit 1 if absent
-#   resume-brief.sh --logs       the newest 3 logs/YYYY-MM-DD-*.md paths, oldest first
+#   resume-brief.sh --logs       newest 3 logs with tab-separated path, saver and MM-DD,
+#                                oldest first; saver is "you" when it matches git user.name
 #   resume-brief.sh --backlog    one "Harvest: ... · Drafts: ..." line, or nothing (INNOV-295)
 #   resume-brief.sh --prs        "Open PR #N (<age>h[, CONFLICTING]): <title> - <url>" per own
 #                                PR older than 12h or conflicting, or nothing (INNOV-389)
@@ -83,11 +84,27 @@ case "${1:-}" in
     exit 1
     ;;
   --logs)
+    # Shared vault logs are context, not assigned work.  Attach the author of
+    # each log's latest commit on the briefing ref so the skill can say whose
+    # save introduced an open loop without asking an agent to reconstruct it.
     if [[ -n "$REF" ]]; then
-      (cd "$VAULT" && MSYS_NO_PATHCONV=1 git ls-tree --name-only "$REF" logs/) 2>/dev/null
+      logs="$(cd "$VAULT" && MSYS_NO_PATHCONV=1 git ls-tree --name-only "$REF" logs/ 2>/dev/null)"
     else
-      (cd "$VAULT" 2>/dev/null && ls -1 logs/* 2>/dev/null)
-    fi | grep -E '^logs/[0-9]{4}-[0-9]{2}-[0-9]{2}-.*\.md$' | sort | tail -n 3
+      logs="$(cd "$VAULT" 2>/dev/null && ls -1 logs/* 2>/dev/null)"
+    fi
+    current_user="$(git -C "$VAULT" config user.name 2>/dev/null || true)"
+    printf '%s\n' "$logs" | grep -E '^logs/[0-9]{4}-[0-9]{2}-[0-9]{2}-.*\.md$' | sort | tail -n 3 |
+      while IFS= read -r path; do
+        if [[ -n "$REF" ]]; then
+          saver="$(cd "$VAULT" && MSYS_NO_PATHCONV=1 git log -1 --format=%an "$REF" -- "$path" 2>/dev/null)"
+        else
+          saver="$(git -C "$VAULT" log -1 --format=%an -- "$path" 2>/dev/null)"
+        fi
+        [[ -z "$saver" ]] && saver="unknown"
+        [[ -n "$current_user" && "$saver" == "$current_user" ]] && saver="you"
+        date="$(basename "$path" | sed -n 's/^[0-9][0-9][0-9][0-9]-\([0-9][0-9]-[0-9][0-9]\)-.*/\1/p')"
+        printf '%s\t%s\t%s\n' "$path" "$saver" "$date"
+      done
     exit 0
     ;;
   --backlog)
