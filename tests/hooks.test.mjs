@@ -67,7 +67,9 @@ test('reminder bounds caller lists and leads with exact-name commands (INNOV-356
   const staleOut = spawnSync(process.execPath, [hook], { input: JSON.stringify({ cwd: root, session_id: randomUUID(), tool_name: 'Grep', tool_input: {} }), encoding: 'utf8' }).stdout;
   const staleText = JSON.parse(staleOut).hookSpecificOutput.additionalContext;
   assert.match(staleText, /Graph is STALE/);
-  assert.match(staleText, /advisory hints and verify against source/i);
+  assert.match(staleText, /Advisory only: verify graph answers against source/);
+  assert.match(staleText, /INFERRED edge.*lead, not a fact/i);
+  assert.ok(staleText.split(/\s+/).length <= 100, `stale reminder is ${staleText.split(/\s+/).length} words`);
 });
 test('vault template matches the reminder (INNOV-356)', () => {
   const tpl = readFileSync(fileURLToPath(new URL('../brain/templates/CLAUDE.brain.md', import.meta.url)), 'utf8').replace(/\r/g, '');
@@ -93,7 +95,7 @@ test('init offers the INNOV-356 graph wording to vaults that predate it (INNOV-3
   assert.ok(offer, 'init must offer the section to a CLAUDE.md lacking the heading');
   assert.match(offer, /Staleness rule/);
   assert.match(offer, /How to query the graph/);
-  const inferredOffer = init.split('\n').find(l => l.includes('does **not** contain `INFERRED edge`'));
+  const inferredOffer = init.split('\n').find(l => l.includes('does **not** contain `lead, not a fact`'));
   assert.ok(inferredOffer, 'init must offer the INFERRED-edge rule to vaults that already have the prior graph wording');
   assert.match(inferredOffer, /lead, not a fact/);
   assert.match(inferredOffer, /ask first/);
