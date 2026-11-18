@@ -44,8 +44,11 @@
 #                             is optional there (only the cwd query hook uses it)
 #   SKIPPED - <reason>        not measurable (no vault / no graphify/ / no node)
 # --behind lines:
-#   CURRENT <name> - ...      built at the reference branch's tip (0 behind)
-#   BEHIND <name> - ...       N commit(s) behind origin/<branch>
+#   CURRENT <name> - ...      built at the reference branch's tip (0 behind),
+#                              as of the checkout's last fetch (or "fetch age
+#                              unknown" when no FETCH_HEAD exists)
+#   BEHIND <name> - ...       N commit(s) behind origin/<branch>; a stale fetch
+#                              reports this as "at least N" instead
 #   OFF-BRANCH <name> - ...   build commit is not on origin/<branch> at all
 #   SKIPPED <name> - <reason> unverifiable (no checkout, no/unknown commit, no
 #                             origin ref, shallow clone): never fails doctor
@@ -143,7 +146,7 @@ report() { # name
 
 # --behind: how old is what the vault already publishes? (INNOV-354)
 report_behind() { # name
-  local n="$1" src n_behind sha branch how _c
+  local n="$1" src n_behind sha branch how _c fetch_state fetch_age fetch_suffix
   if [[ ! -d "$VAULT/graphify/$n" ]]; then
     echo "NO-MIRROR $n - no graphify/$n/ in the vault"
     return 0
@@ -161,14 +164,30 @@ report_behind() { # name
   case "$PROV_VERDICT" in
     OK)
       read -r sha branch how <<<"$PROV_DETAIL"
+      fetch_state="$(fetch_age "$src")"
       if ! n_behind="$(git -C "$src" rev-list --count "$sha..refs/remotes/origin/$branch" -- . 2>/dev/null)" || [[ -z "$n_behind" ]]; then
         echo "SKIPPED $n - git could not count commits from $sha to origin/$branch ($how)"
-      elif [[ "$n_behind" == "0" ]]; then
-        echo "CURRENT $n - built at $sha, 0 commits behind origin/$branch ($how)"
       else
         [[ "$n_behind" == "1" ]] && _c="commit" || _c="commits"
-        echo "BEHIND $n - built at $sha, $n_behind $_c behind origin/$branch ($how); rebuild from $branch and sync to refresh it"
-        FROZEN=1
+        if [[ "$fetch_state" == "unknown" ]]; then
+          # No FETCH_HEAD (fresh clone, or fetched by a tool that does not write
+          # one): the count is still measurable, only its age is not.
+          fetch_suffix="(fetch age unknown: no FETCH_HEAD)"
+        else
+          fetch_age="${fetch_state#*:}"
+          fetch_suffix="as of a fetch $fetch_age day"
+          [[ "$fetch_age" == "1" ]] || fetch_suffix="${fetch_suffix}s"
+          fetch_suffix="$fetch_suffix ago"
+        fi
+        if [[ "${fetch_state%%:*}" == "stale" ]]; then
+          echo "BEHIND $n - built at $sha, at least $n_behind $_c behind origin/$branch $fetch_suffix ($how); fetch, rebuild from $branch and sync to refresh it"
+          FROZEN=1
+        elif [[ "$n_behind" == "0" ]]; then
+          echo "CURRENT $n - built at $sha, 0 commits behind origin/$branch $fetch_suffix ($how)"
+        else
+          echo "BEHIND $n - built at $sha, $n_behind $_c behind origin/$branch $fetch_suffix ($how); rebuild from $branch and sync to refresh it"
+          FROZEN=1
+        fi
       fi
       ;;
     REFUSED)
@@ -182,6 +201,39 @@ report_behind() { # name
   esac
 }
 if [[ $BEHIND -eq 1 ]]; then
+  # A stale remote ref is an incomplete lower bound, never proof that a mirror
+  # is current. Keep this shell-only and read-only: FETCH_HEAD records when Git
+  # last fetched without contacting the remote.
+  DEFAULT_FETCH_STALE_DAYS=7
+  FETCH_STALE_DAYS="${MIRROR_FETCH_STALE_DAYS:-$DEFAULT_FETCH_STALE_DAYS}"
+  if ! [[ "$FETCH_STALE_DAYS" =~ ^[0-9]+$ ]]; then
+    echo "  note: MIRROR_FETCH_STALE_DAYS='$FETCH_STALE_DAYS' is not a non-negative integer; using $DEFAULT_FETCH_STALE_DAYS." >&2
+    FETCH_STALE_DAYS=$DEFAULT_FETCH_STALE_DAYS
+  fi
+  fetch_age() { # source checkout -> fresh:<days> | stale:<days> | unknown
+    # origin/* refs are shared by every worktree of a repo, but FETCH_HEAD is
+    # written to the git dir of whichever worktree fetched. Take the newest of
+    # this worktree's FETCH_HEAD and the shared one, so a fetch from the main
+    # checkout counts for a linked worktree and vice versa.
+    local src="$1" f mtime newest="" now age
+    for f in "$(git -C "$src" rev-parse --git-path FETCH_HEAD 2>/dev/null)" \
+             "$(git -C "$src" rev-parse --git-common-dir 2>/dev/null)/FETCH_HEAD"; do
+      [[ -n "$f" && "$f" != /FETCH_HEAD ]] || continue
+      if [[ "$f" != /* && ! "$f" =~ ^[A-Za-z]: ]]; then f="$src/$f"; fi
+      [[ -f "$f" ]] || continue
+      # GNU stat accepts `-f` too, but treats it as filesystem format and returns
+      # a successful, non-epoch string. Try its file timestamp form first.
+      mtime="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || true)"
+      [[ "$mtime" =~ ^[0-9]+$ ]] || continue
+      if [[ -z "$newest" || $mtime -gt $newest ]]; then newest=$mtime; fi
+    done
+    now="$(date +%s)"
+    if [[ -z "$newest" || ! "$now" =~ ^[0-9]+$ ]]; then printf 'unknown\n'; return 0; fi
+    mtime=$newest
+    age=$(( (now - mtime) / 86400 ))
+    [[ $age -lt 0 ]] && age=0
+    if [[ $age -gt $FETCH_STALE_DAYS ]]; then printf 'stale:%s\n' "$age"; else printf 'fresh:%s\n' "$age"; fi
+  }
   # shellcheck source=lib/provenance.sh
   source "$SCRIPT_DIR/lib/provenance.sh"
   load_reference_branches

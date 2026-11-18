@@ -928,6 +928,8 @@ mk_bvault() { # [subPath]
   git -C "$SRC" init -q -b trunk >/dev/null 2>&1
   gcommit "$SRC" pkg/a
   git -C "$SRC" update-ref refs/remotes/origin/development HEAD
+  # A cached origin ref represents a real fetch only when FETCH_HEAD records it.
+  printf 'fetch\n' >"$SRC/.git/FETCH_HEAD"
   if [[ -n "${1:-}" ]]; then
     printf '{\r\n  "repos": {\r\n    "brain-plugin": { "subPath": "%s", "branch": "development" }\r\n  }\r\n}\r\n' "$1" >"$VAULT/repos.json"
     printf '{ "brain-plugin": "%s" }\n' "$(native_path "$SRC/$1")" >"$VAULT/repos.local.json"
@@ -1004,6 +1006,47 @@ git -C "$SRC" update-ref refs/remotes/origin/development HEAD
 run_mirror --behind
 assert_prefix "behind/subpath-verdict" "BEHIND brain-plugin " "$(first_line "$BOX/out.txt")" "$(evidence)"
 assert_contains "behind/subpath-scoped-count" "1 commit behind origin/development" "$(out_all)" "$(evidence)"
+
+# --- 52. fetch age bounds the count; a missing FETCH_HEAD still counts ---
+set_fetch_age() { # repo age-in-days
+  node -e 'const fs = require("fs"); const age = Number(process.argv[2]); const when = new Date(Date.now() - age * 86400000); fs.writeFileSync(process.argv[1] + "/.git/FETCH_HEAD", "fetch\\n"); fs.utimesSync(process.argv[1] + "/.git/FETCH_HEAD", when, when);' "$1" "$2"
+}
+mk_bvault
+built_at "$(git -C "$SRC" rev-parse HEAD)"
+set_fetch_age "$SRC" 0
+run_mirror --behind
+assert_prefix "behind/fresh-fetch-verdict" "CURRENT brain-plugin " "$(first_line "$BOX/out.txt")" "$(evidence)"
+assert_contains "behind/fresh-fetch-age" "as of a fetch 0 days ago" "$(out_all)" "$(evidence)"
+
+set_fetch_age "$SRC" 8
+run_mirror --behind
+assert_eq "behind/stale-fetch-exit-1" "1" "$STATUS" "$(evidence)"
+assert_prefix "behind/stale-fetch-verdict" "BEHIND brain-plugin " "$(first_line "$BOX/out.txt")" "$(evidence)"
+assert_contains "behind/stale-fetch-lower-bound" "at least 0 commits behind origin/development as of a fetch 8 days ago" "$(out_all)" "$(evidence)"
+
+# No FETCH_HEAD: the count is still measured and reported, with the age unknown.
+rm -f "$SRC/.git/FETCH_HEAD"
+run_mirror --behind
+assert_eq "behind/no-fetch-head-exit-0" "0" "$STATUS" "$(evidence)"
+assert_prefix "behind/no-fetch-head-verdict" "CURRENT brain-plugin " "$(first_line "$BOX/out.txt")" "$(evidence)"
+assert_contains "behind/no-fetch-head-age" "fetch age unknown: no FETCH_HEAD" "$(out_all)" "$(evidence)"
+gcommit "$SRC" pkg/a
+git -C "$SRC" update-ref refs/remotes/origin/development HEAD
+run_mirror --behind
+assert_prefix "behind/no-fetch-head-still-counts" "BEHIND brain-plugin " "$(first_line "$BOX/out.txt")" "$(evidence)"
+assert_contains "behind/no-fetch-head-count" "1 commit behind origin/development (fetch age unknown" "$(out_all)" "$(evidence)"
+
+# A linked worktree sees the main checkout's fetch: origin/* refs are shared, so
+# its fetch age must be too (FETCH_HEAD lives in the common git dir here).
+mk_bvault
+built_at "$(git -C "$SRC" rev-parse HEAD)"
+WT="$REPOS/agent-infra-wt"
+git -C "$SRC" worktree add -q --detach "$WT" >/dev/null 2>&1
+printf '{ "brain-plugin": "%s" }\n' "$(native_path "$WT")" >"$VAULT/repos.local.json"
+set_fetch_age "$SRC" 0
+run_mirror --behind
+assert_prefix "behind/worktree-shared-fetch-verdict" "CURRENT brain-plugin " "$(first_line "$BOX/out.txt")" "$(evidence)"
+assert_contains "behind/worktree-shared-fetch-age" "as of a fetch 0 days ago" "$(out_all)" "$(evidence)"
 
 fi
 
