@@ -686,6 +686,8 @@ for want in \
   'DETECT-NARROW:' \
   'never `--update` when a note was deleted' \
   '5c: removed $removed stale graphify chunk file(s)' \
+  '5c: REMOVE FAILED $chunk' \
+  'could not remove stale graphify chunk files' \
   'graphify-out/.graphify_chunk_*.json'; do
   assert_contains "save-5c/has:$want" "$want" "$STEP5C" \
     "brain/skills/save/SKILL.md step 5c must carry this sentence"
