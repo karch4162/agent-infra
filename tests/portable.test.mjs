@@ -190,11 +190,16 @@ test('save refuses an externally changed hot cache and never overwrites it', t =
 // INNOV-339: the portable resume carries the same Backlog: line /brain:resume
 // prints, from the one copy of the counting rules in resume-brief.sh --backlog.
 test('resume reports the harvest backlog, omits it when empty, and survives a failing helper', t => {
-  const f = fixture(t); const a = f.run('init', '--vault', pathToFileURL(f.remote).href);
+  const f = fixture(t);
+  mkdirSync(join(f.source, 'logs'), { recursive: true });
+  writeFileSync(join(f.source, 'logs/2026-11-18-seed.md'), 'Seed log\n');
+  git(f.source, 'add', 'logs/2026-11-18-seed.md'); git(f.source, 'commit', '-m', 'add resume log'); git(f.source, 'push', 'origin', 'main');
+  const a = f.run('init', '--vault', pathToFileURL(f.remote).href);
   assert.equal(a.exit, 0, JSON.stringify(a));
   const empty = f.run('resume');
   assert.equal(empty.exit, 0, JSON.stringify(empty));
   assert.equal('backlog' in empty, false, 'no digests and no drafts: the field is omitted');
+  assert.deepEqual(empty.logs, [{ path: 'logs/2026-11-18-seed.md', saver: 'Test', date: '11-18' }]);
   mkdirSync(join(a.vault.path, 'chats/app'), { recursive: true });
   // CRLF: the vault is autocrlf, so an LF-only digest would be a false green.
   writeFileSync(join(a.vault.path, 'chats/app/x.md'), '---\r\nstatus: raw\r\ndate: 2020-01-01\r\n---\r\n');
@@ -207,6 +212,7 @@ test('resume reports the harvest backlog, omits it when empty, and survives a fa
   assert.equal(broken.exit, 0, JSON.stringify(broken));
   assert.equal(broken.state, 'context');
   assert.equal('backlog' in broken, false);
+  assert.equal('logs' in broken, false, 'a failed helper drops attribution, not resume');
 });
 
 test('graph build without --session commits the mirror on a managed session branch and leaves the base clean (INNOV-415)', t => {
