@@ -45,13 +45,13 @@
 #   SKIPPED - <reason>        not measurable (no vault / no graphify/ / no node)
 # --behind lines:
 #   CURRENT <name> - ...      built at the reference branch's tip (0 behind),
-#                              as of the checkout's recent fetch
+#                              as of the checkout's last fetch (or "fetch age
+#                              unknown" when no FETCH_HEAD exists)
 #   BEHIND <name> - ...       N commit(s) behind origin/<branch>; a stale fetch
 #                              reports this as "at least N" instead
 #   OFF-BRANCH <name> - ...   build commit is not on origin/<branch> at all
 #   SKIPPED <name> - <reason> unverifiable (no checkout, no/unknown commit, no
-#                             origin ref, shallow clone, or no FETCH_HEAD): never
-#                             fails doctor
+#                             origin ref, shallow clone): never fails doctor
 # exit 1 => at least one NO-GRAPH (or BEHIND / OFF-BRANCH) line. exit 0 otherwise. WARN polarity: doctor
 # relays the line, nothing is blocked. Read-only: the resolver cache is never
 # written (--print-paths without --write).
@@ -165,16 +165,20 @@ report_behind() { # name
     OK)
       read -r sha branch how <<<"$PROV_DETAIL"
       fetch_state="$(fetch_age "$src")"
-      if [[ "$fetch_state" == "never" ]]; then
-        echo "SKIPPED $n - source checkout has never been fetched (no FETCH_HEAD), so lag against origin/$branch is not current"
-      elif ! n_behind="$(git -C "$src" rev-list --count "$sha..refs/remotes/origin/$branch" -- . 2>/dev/null)" || [[ -z "$n_behind" ]]; then
+      if ! n_behind="$(git -C "$src" rev-list --count "$sha..refs/remotes/origin/$branch" -- . 2>/dev/null)" || [[ -z "$n_behind" ]]; then
         echo "SKIPPED $n - git could not count commits from $sha to origin/$branch ($how)"
       else
         [[ "$n_behind" == "1" ]] && _c="commit" || _c="commits"
-        fetch_age="${fetch_state#*:}"
-        fetch_suffix="as of a fetch $fetch_age day"
-        [[ "$fetch_age" == "1" ]] || fetch_suffix="${fetch_suffix}s"
-        fetch_suffix="$fetch_suffix ago"
+        if [[ "$fetch_state" == "unknown" ]]; then
+          # No FETCH_HEAD (fresh clone, or fetched by a tool that does not write
+          # one): the count is still measurable, only its age is not.
+          fetch_suffix="(fetch age unknown: no FETCH_HEAD)"
+        else
+          fetch_age="${fetch_state#*:}"
+          fetch_suffix="as of a fetch $fetch_age day"
+          [[ "$fetch_age" == "1" ]] || fetch_suffix="${fetch_suffix}s"
+          fetch_suffix="$fetch_suffix ago"
+        fi
         if [[ "${fetch_state%%:*}" == "stale" ]]; then
           echo "BEHIND $n - built at $sha, at least $n_behind $_c behind origin/$branch $fetch_suffix ($how); fetch, rebuild from $branch and sync to refresh it"
           FROZEN=1
@@ -206,17 +210,26 @@ if [[ $BEHIND -eq 1 ]]; then
     echo "  note: MIRROR_FETCH_STALE_DAYS='$FETCH_STALE_DAYS' is not a non-negative integer; using $DEFAULT_FETCH_STALE_DAYS." >&2
     FETCH_STALE_DAYS=$DEFAULT_FETCH_STALE_DAYS
   fi
-  fetch_age() { # source checkout -> fresh:<days> | stale:<days> | never
-    local src="$1" fetch_head mtime now age
-    fetch_head="$(git -C "$src" rev-parse --git-path FETCH_HEAD 2>/dev/null || true)"
-    if [[ -z "$fetch_head" ]]; then printf 'never\n'; return 0; fi
-    if [[ "$fetch_head" != /* && ! "$fetch_head" =~ ^[A-Za-z]: ]]; then fetch_head="$src/$fetch_head"; fi
-    if [[ ! -f "$fetch_head" ]]; then printf 'never\n'; return 0; fi
-    # GNU stat accepts `-f` too, but treats it as filesystem format and returns
-    # a successful, non-epoch string. Try its file timestamp form first.
-    mtime="$(stat -c %Y "$fetch_head" 2>/dev/null || stat -f %m "$fetch_head" 2>/dev/null || true)"
+  fetch_age() { # source checkout -> fresh:<days> | stale:<days> | unknown
+    # origin/* refs are shared by every worktree of a repo, but FETCH_HEAD is
+    # written to the git dir of whichever worktree fetched. Take the newest of
+    # this worktree's FETCH_HEAD and the shared one, so a fetch from the main
+    # checkout counts for a linked worktree and vice versa.
+    local src="$1" f mtime newest="" now age
+    for f in "$(git -C "$src" rev-parse --git-path FETCH_HEAD 2>/dev/null)" \
+             "$(git -C "$src" rev-parse --git-common-dir 2>/dev/null)/FETCH_HEAD"; do
+      [[ -n "$f" && "$f" != /FETCH_HEAD ]] || continue
+      if [[ "$f" != /* && ! "$f" =~ ^[A-Za-z]: ]]; then f="$src/$f"; fi
+      [[ -f "$f" ]] || continue
+      # GNU stat accepts `-f` too, but treats it as filesystem format and returns
+      # a successful, non-epoch string. Try its file timestamp form first.
+      mtime="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || true)"
+      [[ "$mtime" =~ ^[0-9]+$ ]] || continue
+      if [[ -z "$newest" || $mtime -gt $newest ]]; then newest=$mtime; fi
+    done
     now="$(date +%s)"
-    if ! [[ "$mtime" =~ ^[0-9]+$ && "$now" =~ ^[0-9]+$ ]]; then printf 'never\n'; return 0; fi
+    if [[ -z "$newest" || ! "$now" =~ ^[0-9]+$ ]]; then printf 'unknown\n'; return 0; fi
+    mtime=$newest
     age=$(( (now - mtime) / 86400 ))
     [[ $age -lt 0 ]] && age=0
     if [[ $age -gt $FETCH_STALE_DAYS ]]; then printf 'stale:%s\n' "$age"; else printf 'fresh:%s\n' "$age"; fi
