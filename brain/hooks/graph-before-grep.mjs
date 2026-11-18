@@ -124,29 +124,31 @@ try {
 }
 
 const short = (c) => (c ? c.slice(0, 8) : '?');
+const ADVISORY = 'Advisory only: verify graph answers against source.';
+const TRUST = 'Trust it for where committed symbols are defined.';
 let freshness;
 if (builtAt && head) {
   freshness =
     builtAt === head
-      ? `Graph is FRESH (built at HEAD ${short(head)}) — trust it for where committed symbols are defined.`
-      : `Graph is STALE (built at ${short(builtAt)}, HEAD is ${short(head)}) — treat graph answers as advisory hints and verify against source.`;
+      ? `Graph is FRESH (built at HEAD ${short(head)}). ${TRUST}`
+      : `Graph is STALE (built at ${short(builtAt)}, HEAD is ${short(head)}). ${ADVISORY}`;
 } else {
-  freshness = 'Graph freshness unknown — treat graph answers as advisory.';
+  freshness = `Graph freshness unknown. ${ADVISORY}`;
 }
 
 const inputs = graphStatus(cwd);
-if (inputs.state === 'stale') freshness = `Graph is STALE: ${inputs.reason}`;
-else if (inputs.state === 'fresh') freshness = `Graph inputs match the recorded build (${inputs.files} files; ${inputs.extractor}).`;
-else if (existsSync(join(cwd, 'graphify-out/brain-inputs.json'))) freshness = `Graph freshness unknown: ${inputs.reason}`;
+// Every branch carries ADVISORY or TRUST; the longest (source-changed STALE) must keep the reminder <= 100 words.
+if (inputs.state === 'stale') freshness = `Graph is STALE: ${inputs.reason} ${ADVISORY}`;
+else if (inputs.state === 'fresh') freshness = `Graph is FRESH: inputs match the recorded build (${inputs.files} files; ${inputs.extractor}). ${TRUST}`;
+else if (existsSync(join(cwd, 'graphify-out/brain-inputs.json'))) freshness = `Graph freshness unknown: ${inputs.reason} ${ADVISORY}`;
 
 const reminder =
-  `graph-before-grep (once per session): this repo has a graphify graph. ${freshness} ` +
-  'For structural questions run `graphify explain "<Symbol>"` or `graphify affected "<Symbol>"` ' +
-  'with the exact name (`graphify query "<question>"` only when you lack the name) before ' +
-  'sweeping raw source — graph-first when fresh, advisory otherwise. Caller and usage lists ' +
-  'are a minimum (calls through fields, cross-language calls and XML are missed): confirm ' +
-  'blast radius with raw search. No result naming your symbol means it is not in the graph: ' +
-  'search raw. (Non-blocking.)';
+  `graph-before-grep: ${freshness} ` +
+  'For structural questions use `graphify explain "<Symbol>"` or `graphify affected "<Symbol>"` ' +
+  'before raw source (`graphify query "<question>"` only when you lack the name). Caller and usage ' +
+  'lists are a minimum (fields, cross-language calls and XML are missed): search raw for blast radius. ' +
+  'An INFERRED edge is a lead, not a fact: confirm it with search before relying on it and say it was ' +
+  'inferred. No result naming your symbol means it is not in the graph: search raw.';
 
 process.stdout.write(
   JSON.stringify(sessionStart ? { additionalContext: reminder } : {
