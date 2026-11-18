@@ -169,9 +169,7 @@ status="$(run_brief --logs)"
 logs="$(cat "$BOX/out.txt")"
 assert_eq "stale/logs-exit-0" "0" "$status"
 assert_eq "stale/logs-newest-3-from-origin" \
-  "logs/2026-09-02-b.md\tyou\t09-02
-logs/2026-09-21-c.md\tRemote Saver\t09-21
-logs/2026-09-22-d.md\tRemote Saver\t09-22" "$logs"
+  $'logs/2026-09-02-b.md\tyou\t09-02\nlogs/2026-09-21-c.md\tRemote Saver\t09-21\nlogs/2026-09-22-d.md\tRemote Saver\t09-22' "$logs"
 assert_not_contains "stale/logs-skip-gitkeep" "$logs" ".gitkeep"
 
 # The metadata makes shared-vault saves attributable. A saver whose name matches
