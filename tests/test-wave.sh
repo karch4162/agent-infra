@@ -155,7 +155,12 @@ echo "--- 10. TIER=quick runs one round and escalates on a risk trigger ---"
 st="$(spawn_dry TIER=quick)"
 out="$(cat "$BOX/out.txt")"
 assert_eq "tier-quick/exit-0" "0" "$st"
-assert_contains "tier-quick/one-round" "$out" "one correctness round, no loop (Codex Terra, or Opus when Codex wrote the diff)"
+assert_contains "tier-quick/one-round" "$out" "one correctness round, plus one re-review after a NO"
+assert_contains "tier-quick/rereview-on-no" "$out" "re-run
+   the same review command once on the fixed diff (REVIEW ROUNDS: 2)"
+assert_contains "tier-quick/pr-only-on-yes" "$out" "Open the PR only if the last round says REVIEW VERDICT: YES"
+assert_contains "tier-quick/no-pr-marker" "$out" "NO PR - review NO after 2 rounds"
+assert_contains "verdict-no-is-not-incomplete" "$out" "REVIEW VERDICT: NO is different"
 assert_contains "tier-quick/escalates" "$out" "TIER: quick -> normal"
 assert_not_contains "tier-quick/no-plan" "$out" "plan-review.sh"
 
