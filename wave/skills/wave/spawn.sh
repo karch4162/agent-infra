@@ -49,14 +49,19 @@ FULL_LOOP="   If you fixed anything, re-run the same review command on the new d
 PLAN_STEP=""
 case "$TIER" in
   quick)
-    REVIEW_SELECT="   Tier quick: one correctness round, no loop (Codex Terra, or Opus when Codex wrote the diff):
+    REVIEW_SELECT="   Tier quick: one correctness round, plus one re-review after a NO (Codex Terra, or Opus when Codex wrote the diff):
      bash \"$WAVE_HOME/review.sh\" $ISSUE
    If the diff turns out to change $RISK_TRIGGERS,
    it is not a quick task: run the normal tier's risk review instead,
      RISK_REVIEW=1 bash \"$WAVE_HOME/review.sh\" $ISSUE
    with the 3-round loop, and record TIER: quick -> normal - <why>."
-    REVIEW_LOOP="   Fix the real findings and run the narrow affected test. Do not re-run the review
-   unless you escalated: then loop up to 3 rounds in total and say REVIEW ROUNDS: <n>.
+    REVIEW_LOOP="   Fix the real findings and run the narrow affected test. If the round said
+   REVIEW VERDICT: YES, do not re-run the review. If it said REVIEW VERDICT: NO, re-run
+   the same review command once on the fixed diff (REVIEW ROUNDS: 2) and triage again.
+   Open the PR only if the last round says REVIEW VERDICT: YES. If round 2 still says NO,
+   do not open a PR: push the branch, write NO PR - review NO after 2 rounds in the
+   summary with the open findings, and end with DONE - $ISSUE - NO PR (review NO).
+   If you escalated, loop up to 3 rounds in total instead and say REVIEW ROUNDS: <n>.
    Then re-run /preflight once before opening the PR." ;;
   normal)
     REVIEW_SELECT="   Codex Terra is the required correctness reviewer. If the diff changes
@@ -141,8 +146,11 @@ $REVIEW_SELECT
    cannot resolve them from code and tests, run one Astra tie-break - at most one
    Astra call in this whole run, plan or diff:
      bash \"$WAVE_HOME/tiebreak.sh\" $ISSUE
-   If any required review prints NO ..., do not open a PR; record it in the summary
-   and stop for human review. ARCHITECTURE REVIEWER: grok-timeout (fallback) or
+   If a required review prints a line STARTING with NO (NO CODEX REVIEW, NO OPUS REVIEW,
+   NO GROK ARCHITECTURE REVIEW, ...), the review did not complete: do not open a PR; record
+   it in the summary and stop for human review. REVIEW VERDICT: NO is different: the
+   review ran and found blocking problems. Triage and fix them below; the review loop
+   decides whether a PR opens. ARCHITECTURE REVIEWER: grok-timeout (fallback) or
    PLAN CRITIC: grok-timeout (fallback) is not a NO: Grok timed out twice, so carry
    on and copy that line into the summary.
 
