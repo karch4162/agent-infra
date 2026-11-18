@@ -126,6 +126,9 @@ def select_candidates(
     picks: list[Pick] = []
     risky: list[dict[str, str]] = []
     skipped: list[dict[str, str]] = []
+    # Implementer rotation: today's starts in this repo so far, so the share holds
+    # across firings, not only within one (WAVE_CODEX_IMPLEMENT_EVERY).
+    started_today = len(load_daily(wave_dir).started)
 
     for t in tickets:
         tid = getattr(t, "id", None) or t.get("id")
@@ -170,7 +173,10 @@ def select_candidates(
             skipped.append({"id": tid, "reason": "worker slots full"})
             continue
 
-        roles = assign_roles(rating, codex_implement_low=cfg.codex_implements_low).to_dict()
+        # Codex takes every Nth start of the day (the Nth, 2Nth, ...); Claude the rest.
+        nth = started_today + len(picks) + 1
+        codex_turn = cfg.codex_implements_low and nth % cfg.codex_implement_every == 0
+        roles = assign_roles(rating, codex_implement_low=codex_turn).to_dict()
         suf = assess_ticket(title=title, body=body, tags=tags)
         if suf.plan_needed:
             picks.append(
