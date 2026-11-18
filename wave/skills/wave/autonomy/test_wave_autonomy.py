@@ -861,6 +861,19 @@ class Phase1Fixes(unittest.TestCase):
             rep = backlog_watch.run_watch(wave_dir=p, dry_run=True, force_enabled=True, tickets=t, trigger="owner")
             self.assertEqual(sorted(x.ticket_id for x in rep.picks), ["t0", "t1"])
 
+    def test_codex_implements_every_nth_start_of_the_day(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td)
+            self._cfg(p, "WAVE_CODEX_IMPLEMENT_EVERY=3\nWAVE_MAX_IMPLEMENT_WORKERS=4\nWAVE_DAILY_TICKET_CAP=10\n")
+            rep = backlog_watch.run_watch(wave_dir=p, dry_run=True, force_enabled=True, tickets=self._tickets(4))
+            self.assertEqual([x.roles["implementer"] for x in rep.picks], ["claude", "claude", "codex", "claude"])
+            # the count carries across firings: two starts already today makes the next pick the 3rd
+            from daily_cap import record_start
+            record_start("x1", p)
+            record_start("x2", p)
+            rep = backlog_watch.run_watch(wave_dir=p, dry_run=True, force_enabled=True, tickets=self._tickets(1))
+            self.assertEqual(rep.picks[0].roles["implementer"], "codex")
+
     def test_tickets_assigned_to_the_wave_owner_stay_pickable(self):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td)
