@@ -181,6 +181,7 @@ EXPECTED_VER=""
 SOURCE_DESC=""
 CLONE_DIR=""
 CLONE_UPDATED=""
+MANIFEST=""        # this plugin's plugin.json inside the marketplace clone
 
 if [[ -n "$EXPECT" ]]; then
   EXPECTED_VER="$EXPECT"
@@ -201,7 +202,7 @@ else
           const fs=require("fs");
           try { process.stdout.write(String(JSON.parse(fs.readFileSync(process.argv[1],"utf8")).version||"")); }
           catch(e){ process.exit(3); }' "$cand" 2>/dev/null)"
-        [[ -n "$EXPECTED_VER" ]] && { SOURCE_DESC="marketplace clone"; break; }
+        [[ -n "$EXPECTED_VER" ]] && { SOURCE_DESC="marketplace clone"; MANIFEST="$cand"; break; }
       fi
     done
     if [[ -z "$EXPECTED_VER" ]]; then
@@ -212,6 +213,7 @@ else
           try { process.stdout.write(String(JSON.parse(fs.readFileSync(process.argv[1],"utf8")).version||"")); }
           catch(e){ process.exit(3); }' "$found" 2>/dev/null)"
         SOURCE_DESC="marketplace clone"
+        MANIFEST="$found"
       fi
     fi
   fi
@@ -249,6 +251,7 @@ fi
 # `wait -n` is bash 4.3+.
 FETCH_STATE="not-attempted"   # ok | failed | timeout | no-git-repo | not-attempted
 BEHIND=""
+UPSTREAM_VER=""   # this plugin's version on the remote; empty = could not read it
 if [[ "$SOURCE_DESC" == "marketplace clone" && -n "$CLONE_DIR" ]]; then
   if git -C "$CLONE_DIR" rev-parse --git-dir >/dev/null 2>&1 \
      && git -C "$CLONE_DIR" remote get-url origin >/dev/null 2>&1; then
@@ -277,6 +280,15 @@ if [[ "$SOURCE_DESC" == "marketplace clone" && -n "$CLONE_DIR" ]]; then
       if [[ -n "$upstream" ]]; then
         BEHIND="$(git -C "$CLONE_DIR" rev-list --count "HEAD..$upstream" 2>/dev/null)"
         [[ "$BEHIND" =~ ^[0-9]+$ ]] || { BEHIND=""; FETCH_STATE="failed"; }
+        # A marketplace can hold several plugins: commits for another plugin leave
+        # this one's version alone, and `claude plugin update` would find nothing.
+        # Read THIS plugin's version on the remote so only its releases count.
+        if [[ -n "$BEHIND" && "$BEHIND" -gt 0 && -n "$MANIFEST" ]]; then
+          rel="${MANIFEST#"$CLONE_DIR"/}"
+          UPSTREAM_VER="$(git -C "$CLONE_DIR" show "$upstream:$rel" 2>/dev/null | node -e '
+            let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
+              try { process.stdout.write(String(JSON.parse(s).version||"")); } catch(e){ process.exit(3); } });' 2>/dev/null)"
+        fi
       else
         FETCH_STATE="failed"   # fetched, but nothing to compare against
       fi
@@ -307,12 +319,13 @@ remote_qualifier() {
 
 # --- 3. verdict -------------------------------------------------------------
 if [[ "$INSTALLED_VER" == "$EXPECTED_VER" ]]; then
-  if [[ "$SOURCE_DESC" == "marketplace clone" && "$FETCH_STATE" == "ok" && -n "$BEHIND" && "$BEHIND" -gt 0 ]]; then
+  if [[ "$SOURCE_DESC" == "marketplace clone" && "$FETCH_STATE" == "ok" && -n "$BEHIND" && "$BEHIND" -gt 0 ]] \
+     && [[ -z "$UPSTREAM_VER" || "$UPSTREAM_VER" != "$INSTALLED_VER" ]]; then
     # Install matches the clone, but the clone itself is provably behind. This
     # is the exact trap the age advisory could only guess at: `claude plugin
     # update` would find nothing new and report success-shaped output.
     {
-      echo "PLUGIN-VERSION: STALE-CLONE - $PLUGIN_KEY install matches clone ($INSTALLED_VER) but the clone is $BEHIND commit(s) behind its remote"
+      echo "PLUGIN-VERSION: STALE-CLONE - $PLUGIN_KEY install matches clone ($INSTALLED_VER) but the clone is $BEHIND commit(s) behind its remote${UPSTREAM_VER:+, which offers $UPSTREAM_VER}"
       echo "  installed at: ${INSTALL_PATH:-?}"
       echo "  The install can only be as fresh as the clone it came from, and the clone"
       echo "  is behind. Guards shipped since then are simply not here."
@@ -326,7 +339,11 @@ if [[ "$INSTALLED_VER" == "$EXPECTED_VER" ]]; then
     exit 1
   fi
   if [[ "$SOURCE_DESC" == "marketplace clone" ]]; then
-    if [[ "$FETCH_STATE" == "ok" ]]; then
+    if [[ "$FETCH_STATE" == "ok" && -n "$BEHIND" && "$BEHIND" -gt 0 ]]; then
+      # Behind only by commits that do not change this plugin's version (another
+      # plugin's release, say): nothing to update, so not stale.
+      echo "PLUGIN-VERSION: OK - $PLUGIN_KEY installed $INSTALLED_VER == marketplace clone $EXPECTED_VER (clone is $BEHIND commit(s) behind its remote, none of them a $PLUGIN_NAME release)"
+    elif [[ "$FETCH_STATE" == "ok" ]]; then
       echo "PLUGIN-VERSION: OK - $PLUGIN_KEY installed $INSTALLED_VER == marketplace clone $EXPECTED_VER (clone current with remote)"
     else
       echo "PLUGIN-VERSION: OK - $PLUGIN_KEY installed $INSTALLED_VER == marketplace clone $EXPECTED_VER ($(remote_qualifier))"

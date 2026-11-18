@@ -182,7 +182,7 @@ assert_eq "version/one-verdict-line" "1" \
 # Turns the clone dir into a real git repo with a LOCAL bare origin (no network,
 # resolves instantly). origin/HEAD is deliberately absent (remote add + fetch
 # never sets it), so this also exercises the origin/main fallback.
-gitify_clone() { # "unreachable" | <n commits ahead on origin>
+gitify_clone() { # "unreachable" | <n commits ahead on origin> [bump: the last one releases brain <version>]
   local clone="$CFG/plugins/marketplaces/agent-infra"
   local origin="$BOX/origin.git"
   ( cd "$clone" \
@@ -202,21 +202,35 @@ gitify_clone() { # "unreachable" | <n commits ahead on origin>
     while [[ $i -lt $1 ]]; do
       i=$((i + 1)); echo "$i" >"$w/f$i"
       git -C "$w" add "f$i" >/dev/null 2>&1
+      if [[ $i -eq $1 && -n "${2:-}" ]]; then
+        printf '{ "name": "brain", "version": "%s" }\n' "$2" >"$w/brain/.claude-plugin/plugin.json"
+        git -C "$w" add -A >/dev/null 2>&1
+      fi
       git -C "$w" -c user.email=t@t -c user.name=t commit -qm "ahead $i" >/dev/null 2>&1
     done
     git -C "$w" push -q origin main >/dev/null 2>&1
   fi
 }
 
-# (a) origin has 3 newer commits, install == clone => STALE-CLONE, exit 1
+# (a) origin has 3 newer commits, the last a brain release => STALE-CLONE, exit 1
 mk_config "0.2.22" "0.2.22"
-gitify_clone 3
+gitify_clone 3 0.2.23
 run_version
 assert_eq "version/stale-clone-remote-exit-1" "1" "$STATUS" "$(evidence)"
 assert_prefix "version/stale-clone-remote-verdict" "PLUGIN-VERSION: STALE-CLONE" "$(first_line "$BOX/err.txt")" "$(evidence)"
 assert_contains "version/stale-clone-remote-says-behind" "behind" "$(out_all)" "$(evidence)"
 assert_contains "version/stale-clone-remote-remedy-marketplace-first" "plugin marketplace update" "$(out_all)" "$(evidence)"
 assert_contains "version/stale-clone-remote-remedy-plugin-update" "plugin update brain@agent-infra" "$(out_all)" "$(evidence)"
+assert_contains "version/stale-clone-remote-names-version" "which offers 0.2.23" "$(out_all)" "$(evidence)"
+
+# (a2) origin is ahead only by another plugin's commits (a wave release): brain's
+# version is unchanged, `claude plugin update` would find nothing => OK, exit 0.
+mk_config "0.2.22" "0.2.22"
+gitify_clone 4
+run_version
+assert_eq "version/other-plugin-commits-exit-0" "0" "$STATUS" "$(evidence)"
+assert_prefix "version/other-plugin-commits-OK" "PLUGIN-VERSION: OK" "$(first_line "$BOX/out.txt")" "$(evidence)"
+assert_contains "version/other-plugin-commits-says-why" "none of them a brain release" "$(first_line "$BOX/out.txt")" "$(evidence)"
 
 # (b) origin unreachable => OK, exit 0, but SAYS the remote was not checked.
 # Offline machines must never fail the health check — hard requirement.
