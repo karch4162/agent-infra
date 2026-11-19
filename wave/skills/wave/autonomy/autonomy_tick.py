@@ -515,13 +515,12 @@ class Tick:
     # ---- 7. sweep --------------------------------------------------------------------
     def sweep(self) -> None:
         """Remove merged worktrees. The attended coordinator sweeps its own; unattended, nothing
-        else would. A failed closeout keeps them for debugging; a dirty one stays, with a notice."""
+        else would. A failed closeout keeps them for debugging; a dirty one stays, with a notice.
+        Other workers still running do not hold it back: a merged ticket's worktree is its own,
+        and only closeout (which tests the merged base) has to wait for them."""
         if self.closeout_ok is False:
             return
-        rows = self.statuses()
-        if any(st.get("state") in LIVE and self.alive(p, st) for p, st in rows):
-            return
-        for path, st in rows:
+        for path, st in self.statuses():
             if st.get("state") != "done_merged" or st.get("swept") or not st.get("path"):
                 continue
             ticket = st.get("ticket_id") or path.parent.name
