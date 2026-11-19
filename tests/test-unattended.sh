@@ -167,6 +167,13 @@ run_commit "1"
 assert_eq "commit/on-current-exit-0" "0" "$STATUS" "$(evidence)"
 assert_eq "commit/on-current-committed" "test save" "$(git -C "$VAULT" log -1 --format=%s)"
 
+# 9. mode on, SKIPPED (no install record: a from-source copy) => commits.
+# Deliberate: SKIPPED is "cannot tell", not "behind" (see vault-commit.sh 2b).
+mk_install "0.2.22" ""; mk_vault
+run_commit "1"
+assert_eq "commit/on-skipped-exit-0" "0" "$STATUS" "$(evidence)"
+assert_eq "commit/on-skipped-committed" "test save" "$(git -C "$VAULT" log -1 --format=%s)"
+
 echo "--- C. /brain:resume step 0 wires the gate ---"
 RESUME_SKILL="$REPO_ROOT/brain/skills/resume/SKILL.md"
 step0="$(awk '/^0\. \*\*/{f=1} /^1\. \*\*/{f=0} f' "$RESUME_SKILL")"
