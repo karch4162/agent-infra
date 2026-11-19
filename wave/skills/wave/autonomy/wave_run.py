@@ -218,7 +218,9 @@ class Control:
         if trigger in EXECUTING:
             args.append("--execute")
         try:
-            p = subprocess.run(args, cwd=str(repo), env={**os.environ, **env_over}, capture_output=True, text=True,
+            # The tick reads WAVE_TRIGGER: without it an owner run picked like a scheduled one.
+            p = subprocess.run(args, cwd=str(repo), env={**os.environ, **env_over, "WAVE_TRIGGER": trigger},
+                               capture_output=True, text=True,
                                encoding="utf-8", errors="replace", timeout=self.cfg.tick_timeout_s)
         except subprocess.TimeoutExpired:
             return 124, None, f"tick timed out after {self.cfg.tick_timeout_s // 60} min"

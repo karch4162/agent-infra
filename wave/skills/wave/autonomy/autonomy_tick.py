@@ -432,8 +432,10 @@ class Tick:
         return review
 
     def spawn(self, lock: RunLock) -> None:
+        # wave_run passes the firing's trigger; only "owner" lifts the scheduled limits.
+        trigger = "owner" if os.environ.get("WAVE_TRIGGER") == "owner" else "scheduled"
         rep = run_watch(wave_dir=self.wave_dir, dry_run=not self.execute, execute=self.execute,
-                        lock=lock, record_starts=False)
+                        lock=lock, record_starts=False, trigger=trigger)
         self.report["watch"] = rep.to_dict()
         for n in rep.notices:
             self.log("watch: " + n)

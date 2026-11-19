@@ -38,6 +38,7 @@ DEFAULTS = {
     "WAVE_QUEUE": "",
     "WAVE_SELF": "",                     # the wave owner's tracker name; tickets assigned to them stay pickable
     "WAVE_CODEX_IMPLEMENTS_LOW": "1",    # 0 = Claude implements every rating (Codex reviews)
+    "WAVE_SCHEDULED_MEDIUM": "0",        # medium tickets a scheduled firing may take (0 = owner runs only)
     "WAVE_CODEX_IMPLEMENT_EVERY": "1",   # Codex implements every Nth low start of the day; 1 = all low, 3 = 1 in 3
     "WAVE_BUDGET_PER_DAY_USD": "",       # empty = no spend cap
     "WAVE_JIRA_SITE": "",
@@ -131,6 +132,7 @@ class AutonomyConfig:
     self_names: tuple[str, ...]
     codex_implements_low: bool
     codex_implement_every: int
+    scheduled_medium: int
     budget_per_day_usd: float | None
     jira_site: str
 
@@ -173,6 +175,7 @@ def load_autonomy_config(config_path: Path | None = None) -> AutonomyConfig:
         self_names=tuple(n.strip().lower() for n in _get("WAVE_SELF", file_vals).split(",") if n.strip()),
         codex_implements_low=_get("WAVE_CODEX_IMPLEMENTS_LOW", file_vals) != "0",
         codex_implement_every=max(1, int(_get("WAVE_CODEX_IMPLEMENT_EVERY", file_vals) or "1")),
+        scheduled_medium=max(0, int(_get("WAVE_SCHEDULED_MEDIUM", file_vals) or "0")),
         queue=_get("WAVE_QUEUE", file_vals),             # Jira: the JQL the picker runs verbatim
         jira_site=_get("WAVE_JIRA_SITE", file_vals),
     )

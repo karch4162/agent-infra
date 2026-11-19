@@ -884,6 +884,39 @@ class Phase1Fixes(unittest.TestCase):
             rep = backlog_watch.run_watch(wave_dir=p, dry_run=True, force_enabled=True, tickets=t, trigger="owner")
             self.assertEqual(sorted(x.ticket_id for x in rep.picks), ["t0", "t1"])
 
+    def test_scheduled_firing_takes_up_to_n_medium_tickets(self):
+        tickets = [{"id": f"m{i}", "name": "x", "tags": ["agent-ready", "rating:medium"], "text": self.RICH} for i in range(2)]
+        tickets += self._tickets(1)
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td)
+            self._cfg(p)
+            rep = backlog_watch.run_watch(wave_dir=p, dry_run=True, force_enabled=True, tickets=tickets)
+            self.assertEqual([x.ticket_id for x in rep.picks], ["t0"])            # default: low only
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td)
+            self._cfg(p, "WAVE_SCHEDULED_MEDIUM=1\n")
+            rep = backlog_watch.run_watch(wave_dir=p, dry_run=True, force_enabled=True, tickets=tickets)
+            self.assertEqual([x.ticket_id for x in rep.picks], ["m0", "t0"])      # one medium per firing
+            self.assertIn({"id": "m1", "reason": "medium: 1 per scheduled firing already picked"}, rep.skipped)
+            rep = backlog_watch.run_watch(wave_dir=p, dry_run=True, force_enabled=True, tickets=tickets, trigger="owner")
+            self.assertEqual([x.ticket_id for x in rep.picks], ["m0", "m1", "t0"])  # owner: no medium limit
+
+    def test_tick_passes_the_firing_trigger_to_the_picker(self):
+        import autonomy_tick
+        seen = {}
+
+        def fake_watch(**kw):
+            seen["trigger"] = kw.get("trigger")
+            raise RuntimeError("stop")
+
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {"WAVE_TRIGGER": "owner"}):
+            (Path(td) / ".claude" / "wave").mkdir(parents=True)
+            (Path(td) / ".claude" / "wave" / "config.env").write_text("WAVE_TRACKER=jira\n", encoding="utf-8")
+            tick = autonomy_tick.Tick(repo=Path(td), execute=False, log=lambda m: None)
+            with mock.patch.object(autonomy_tick, "run_watch", fake_watch), self.assertRaises(RuntimeError):
+                tick.spawn(None)
+        self.assertEqual(seen["trigger"], "owner")
+
     def test_codex_implements_every_nth_start_of_the_day(self):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td)
