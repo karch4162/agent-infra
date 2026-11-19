@@ -57,6 +57,8 @@ Find your situation, run the commands in order. Legend: **`/brain:*`** = this pl
 ```
 Updates key off the version in `brain/.claude-plugin/plugin.json` — releases must bump it or `/plugin update` will skip.
 
+`/brain:resume` stops on an install that is behind, so a person can update and restart. A session nobody watches can set **`BRAIN_UNATTENDED=1`** in its environment instead: resume then prints the same warning and still briefs, read-only, and `bin/vault-commit.sh` refuses every vault commit from that install until it is updated. Only the exact value `1` turns it on. Portable hosts (`brain.mjs version`) still stop.
+
 ### Scenarios
 
 | Your situation | Run, in order | Notes |
