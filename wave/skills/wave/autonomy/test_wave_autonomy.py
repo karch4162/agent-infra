@@ -564,6 +564,29 @@ class TickIgnoresWalkers(unittest.TestCase):
             self.assertEqual([p.parent.name for p, _ in tick.statuses()], ["innov-1"])
 
 
+    def test_a_live_worker_does_not_hold_back_another_tickets_sweep(self):
+        # 2026-11-18 17:00: INNOV-422 was merged, but its worktree stayed because INNOV-457 was still running.
+        import autonomy_tick
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
+            runs = Path(td) / ".claude" / "wave" / "runs"
+            (runs.parent).mkdir(parents=True)
+            (runs.parent / "config.env").write_text("WAVE_TRACKER=jira\n", encoding="utf-8")
+            wt = Path(td) / "wt" / "ent-1"
+            wt.mkdir(parents=True)
+            (runs / "ent-1").mkdir(parents=True)
+            (runs / "ent-1" / "status.json").write_text(json.dumps({
+                "ticket_id": "ENT-1", "state": "done_merged", "runtime": "orca", "path": str(wt)}), encoding="utf-8")
+            (runs / "ent-2").mkdir(parents=True)
+            (runs / "ent-2" / "status.json").write_text(json.dumps({
+                "ticket_id": "ENT-2", "state": "running", "runtime": "direct", "pid": os.getpid()}), encoding="utf-8")
+            removed = []
+            with mock.patch.object(autonomy_tick, "_sh", lambda args, cwd, **kw: subprocess.CompletedProcess(args, 0, "", "")), \
+                 mock.patch.object(autonomy_tick, "_orca", lambda args: removed.append(args[3]) or subprocess.CompletedProcess(args, 0, "{}", "")):
+                tick = autonomy_tick.Tick(repo=Path(td), execute=True, log=lambda m: None)
+                tick.sweep()
+            self.assertEqual(removed, ["name:ent-1"])
+            self.assertTrue(json.loads((runs / "ent-1" / "status.json").read_text(encoding="utf-8")).get("swept"))
+
     def test_held_pr_merged_by_a_human_is_closed_out_and_swept(self):
         # Hub demo 2026-11-17: three held PRs merged by hand stayed done_held forever;
         # nothing ran closeout or removed their worktrees.
