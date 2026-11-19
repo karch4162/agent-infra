@@ -106,7 +106,7 @@ advance_remote() { # default-branch
   printf 'new log 3\n' >"$SEED/logs/2026-09-21-c.md"
   printf 'new log 4\n' >"$SEED/logs/2026-09-22-d.md"
   git -C "$SEED" add -A >/dev/null 2>&1
-  git -C "$SEED" commit -q -m "other sessions landed" >/dev/null 2>&1
+  git -C "$SEED" -c user.name="Remote Saver" commit -q -m "other sessions landed" >/dev/null 2>&1
   git -C "$SEED" push -q origin "$1" >/dev/null 2>&1
   git -C "$VAULT" fetch -q --prune origin >/dev/null 2>&1
 }
@@ -169,10 +169,21 @@ status="$(run_brief --logs)"
 logs="$(cat "$BOX/out.txt")"
 assert_eq "stale/logs-exit-0" "0" "$status"
 assert_eq "stale/logs-newest-3-from-origin" \
-  "logs/2026-09-02-b.md
-logs/2026-09-21-c.md
-logs/2026-09-22-d.md" "$logs"
+  $'logs/2026-09-02-b.md\tyou\t09-02\nlogs/2026-09-21-c.md\tRemote Saver\t09-21\nlogs/2026-09-22-d.md\tRemote Saver\t09-22' "$logs"
 assert_not_contains "stale/logs-skip-gitkeep" "$logs" ".gitkeep"
+
+# The metadata makes shared-vault saves attributable. A saver whose name matches
+# the current git user is deliberately rendered as "you" for personal vaults.
+git -C "$SEED" config user.name "Harness"
+printf 'new log 5\n' >"$SEED/logs/2026-09-23-e.md"
+git -C "$SEED" add -A >/dev/null 2>&1
+git -C "$SEED" commit -q -m "my session landed" >/dev/null 2>&1
+git -C "$SEED" push -q origin main >/dev/null 2>&1
+git -C "$VAULT" fetch -q --prune origin >/dev/null 2>&1
+run_brief --logs >/dev/null
+logs="$(cat "$BOX/out.txt")"
+assert_contains "logs/other-saver-named" "$logs" $'logs/2026-09-22-d.md\tRemote Saver\t09-22'
+assert_contains "logs/current-saver-is-you" "$logs" $'logs/2026-09-23-e.md\tyou\t09-23'
 
 status="$(run_brief --cat logs/2026-09-22-d.md)"
 assert_eq "stale/log-body-from-origin" "new log 4" "$(cat "$BOX/out.txt")"
@@ -230,8 +241,8 @@ status="$(run_brief --cat wiki/hot.md)"
 assert_eq "noremote/cat-exit-0" "0" "$status"
 assert_eq "noremote/hot-from-tree" "# hot OLD" "$(cat "$BOX/out.txt")"
 run_brief --logs >/dev/null
-assert_eq "noremote/logs-from-tree" "logs/2026-09-01-a.md
-logs/2026-09-02-b.md" "$(cat "$BOX/out.txt")"
+assert_eq "noremote/logs-from-tree" $'logs/2026-09-01-a.md\tyou\t09-01
+logs/2026-09-02-b.md\tyou\t09-02' "$(cat "$BOX/out.txt")"
 
 # ======================================= missing file => exit 1, not empty ====
 new_vault

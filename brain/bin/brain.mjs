@@ -81,9 +81,18 @@ try {
       const sync = options.session ? { state: 'session-snapshot' } : syncVault(vault);
       // Same line /brain:resume prints as Backlog:, from the one copy of the counting
       // rules. Context, never a gate: a failing helper drops the field, not resume.
-      let backlog;
+      let backlog, logs;
       try { backlog = bashScript('resume-brief.sh', ['--backlog'], target.path, options.session) || undefined; } catch {}
-      result = { ...context(target, options.task, options.budget ? Number(options.budget) : undefined), sync, backlog };
+      // The portable briefing uses the same attribution as the legacy skill.
+      // Keep it structured so hosts do not need to parse the tab-separated helper output.
+      try {
+        const output = bashScript('resume-brief.sh', ['--logs'], target.path, options.session);
+        logs = output ? output.split(/\r?\n/).filter(Boolean).map(line => {
+          const [path, saver, date] = line.split('\t');
+          return { path, saver, date };
+        }) : undefined;
+      } catch {}
+      result = { ...context(target, options.task, options.budget ? Number(options.budget) : undefined), sync, backlog, logs };
     }
     else if (command === 'publish') result = publishSession(vault, options.session);
     else if (command === 'land') {

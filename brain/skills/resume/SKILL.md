@@ -67,20 +67,20 @@ Do these in order; keep the summary tight (the user wants to start working, not 
    ```
    Put each line (`BEHIND` or `OFF-BRANCH`) on a `Mirrors:` output line **verbatim**, and treat graph answers from those mirrors as leads to confirm in the code, not facts; current and unmeasurable mirrors print nothing, and so does a vault with no mirrors, and then the line is omitted. This is the only session-start signal that a `graphify/<repo>/graph.json` answer may name files that no longer exist. Context, not a gate: do not rebuild or sync a mirror from resume.
 
-4. **Read the 3 most recent session logs.** `bash "$B" --logs` prints the newest 3 `logs/YYYY-MM-DD-*.md` paths; read each with `bash "$B" --cat <path>`. Pull out: decisions made, and anything under a "Pending / next steps" heading that is still open.
+4. **Read the 3 most recent session logs.** `bash "$B" --logs` prints the newest 3 `logs/YYYY-MM-DD-*.md` records as tab-separated `<path> <saver> <MM-DD>`; read each path with `bash "$B" --cat <path>`. Pull out: decisions made, and anything under a "Pending / next steps" heading that is still open. The saver is the author of the log's commit on the briefing ref, rendered as `you` when it matches the current git user.
 
 5. **Pull relevant wiki notes.** Based on what the user says they're about to work on (or, if they said nothing, the focus in `hot.md`), again via `bash "$B" --cat <path>`:
    - Skim `wiki/index.md` for the area's notes.
    - Read the specific notes that match the task. Honor the [[3-step query rule]]: if the task is structural, also note which `graphify/<repo>/graph.json` mirror to query.
 
-6. **Surface open loops.** If any recent log has unresolved "Open decision" / "NEXT" items, list them — these are the things most likely to have been forgotten between sessions.
+6. **Surface recent updates.** If any recent log has unresolved "Open decision" / "NEXT" items, list them with the saver and date from `--logs`. They are context from recent saves, not work assigned to the reader.
 
 ## Output format
 
 Keep it to ~10 lines:
 
 ```
-Resumed. Last session: <date> — <one-line what happened>.
+Caught up on <vault>. Latest save: <date> by <saver> - <what happened>.
 Briefed from: <the helper's BRIEF: line, verbatim>
 Drift: <the helper's DRIFT: line, verbatim>   ← omit the line entirely when there is none
 Focus: <from hot.md>.
@@ -89,13 +89,13 @@ In flight: #<n> <title> (<author>)      ← omit the line entirely if no PRs are
 Open PRs: <each --prs line, verbatim>   ← omit the line entirely when --prs prints nothing
 Backlog: <the helper's --backlog line, verbatim>   ← omit the line entirely when it prints nothing
 Mirrors: <each --mirrors line, verbatim>   ← omit the line entirely when --mirrors prints nothing
-Open loops:
-  - <pending item> (from <log>)
-  - <pending item>
+Updated since you were last here (from recent saves, not assigned to you):
+  - <pending item> - <saver>, <MM-DD>
+  - <pending item> - <saver>, <MM-DD>
 Relevant notes for "<this task>": [[note]], [[note]]; graph mirror: graphify/<repo>/graph.json
 ```
 
-Then ask what they want to tackle, or proceed if they already said.
+Then ask "Pick one of these up, or start something new?", or proceed if they already said.
 
 ## Notes
 
