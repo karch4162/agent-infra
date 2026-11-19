@@ -159,10 +159,14 @@ def select_candidates(
             skipped.append({"id": tid, "reason": f"unrated: needs a rating tag (got {rating or 'none'})"})
             continue
 
-        # Unattended (scheduled) waves take low only; medium waits for an owner wave.
+        # Unattended (scheduled) waves take low, plus up to WAVE_SCHEDULED_MEDIUM medium
+        # tickets per firing; otherwise medium waits for an owner wave. Medium PRs are still
+        # held for a human unless WAVE_AUTO_MERGE_MEDIUM and the clean-wave streak allow it.
         if rating == "medium" and trigger != "owner":
-            skipped.append({"id": tid, "reason": "medium: owner waves only"})
-            continue
+            if sum(1 for x in picks if x.rating == "medium") >= cfg.scheduled_medium:
+                skipped.append({"id": tid, "reason": "medium: owner waves only" if not cfg.scheduled_medium
+                                else f"medium: {cfg.scheduled_medium} per scheduled firing already picked"})
+                continue
 
         ok_cap, why = can_start(tid, cfg.daily_ticket_cap, wave_dir)
         if not ok_cap:
