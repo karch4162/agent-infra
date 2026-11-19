@@ -32,7 +32,12 @@
 #                                PR older than 12h or conflicting, or nothing (INNOV-389)
 #   resume-brief.sh --mirrors    check-mirror-source.sh --behind's BEHIND/OFF-BRANCH lines,
 #                                verbatim, one per stale mirror, or nothing (INNOV-428)
-# Always exit 0 except --cat on a missing path. Degrades to the working tree when
+#   resume-brief.sh --version-gate   check-plugin-version.sh, output and exit code
+#                                passed through; with BRAIN_UNATTENDED=1 a behind
+#                                install adds "RESUME-GATE: UNATTENDED - ..." and
+#                                exits 0 (INNOV-429)
+# Always exit 0 except --cat on a missing path and --version-gate on a behind
+# install with the unattended mode off. Degrades to the working tree when
 # origin/<default> cannot be resolved — a briefing that cannot reach the remote is
 # still a briefing, it just must not claim to be current.
 set -uo pipefail
@@ -217,6 +222,21 @@ case "${1:-}" in
     # Read-only and fetch-free like the rest of this helper; context, never a gate.
     BRAIN_ROOT="$VAULT" bash "$BIN_DIR/check-mirror-source.sh" --behind 2>/dev/null |
       sed -n 's/\r$//; /^BEHIND /p; /^OFF-BRANCH /p'
+    exit 0
+    ;;
+  --version-gate)
+    # INNOV-429: resume step 0. Runs check-plugin-version.sh with its output and
+    # exit code passed through untouched, so with the mode off a DRIFTED or
+    # STALE-CLONE install still stops resume (INNOV-417). With BRAIN_UNATTENDED=1
+    # — a session nobody is watching, which cannot update and restart itself —
+    # a behind install adds one RESUME-GATE line and exits 0: brief read-only.
+    # The write side is closed separately: vault-commit.sh refuses every commit
+    # in that mode on that install.
+    bash "$BIN_DIR/check-plugin-version.sh"
+    rc=$?
+    [[ $rc -eq 0 ]] && exit 0
+    [[ "${BRAIN_UNATTENDED:-}" == "1" ]] || exit "$rc"
+    echo "RESUME-GATE: UNATTENDED - briefing from an out-of-date plugin (BRAIN_UNATTENDED=1); read only, vault-commit.sh refuses every commit until the plugin is updated"
     exit 0
     ;;
 esac

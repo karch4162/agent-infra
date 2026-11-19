@@ -20,10 +20,11 @@ Do these in order; keep the summary tight (the user wants to start working, not 
 
 0. **Refuse to brief from a stale plugin install (INNOV-417).** A behind install behaves like an older, worse version of itself silently: saves written by old code, guards shipped since then not running. `/brain:doctor` check 7 diagnoses this; resume is the command every session starts with, so it gates on it. **Run the script, don't reason about it, and never pass `--plugin`:**
    ```bash
-   bash "${CLAUDE_PLUGIN_ROOT}/bin/check-plugin-version.sh"
+   bash "${CLAUDE_PLUGIN_ROOT}/bin/resume-brief.sh" --version-gate   # runs check-plugin-version.sh, output and exit code passed through
    ```
-   - **Exit `0` (`PLUGIN-VERSION: OK` or `PLUGIN-VERSION: SKIPPED`) →** print nothing about it and go on to step 1. SKIPPED is a machine running from source (`--plugin-dir`) or a portable host whose registry the script does not read; neither is drift.
+   - **Exit `0`, no `RESUME-GATE:` line (`PLUGIN-VERSION: OK` or `PLUGIN-VERSION: SKIPPED`) →** print nothing about it and go on to step 1. SKIPPED is a machine running from source (`--plugin-dir`) or a portable host whose registry the script does not read; neither is drift.
    - **Exit `1` (`PLUGIN-VERSION: DRIFTED` or `PLUGIN-VERSION: STALE-CLONE`) →** relay the script's output **verbatim** (it names both versions and the two-command remedy, in the order that matters) and **stop: no session check, no brief.** Add one line: update, restart the session (or `/reload-plugins`), then run `/brain:resume` again. **Do not update the plugin yourself** — an updated copy is not live until restart, and resume is read-only. Do not work around the block.
+   - **Exit `0` with a last line `RESUME-GATE: UNATTENDED` (INNOV-429) →** the session opted into unattended mode (`BRAIN_UNATTENDED=1`): nobody is there to update and restart, so a stale install briefs instead of idling. Relay the version warning **verbatim**, put the `RESUME-GATE:` line on the `Plugin:` output line, and carry on with step 1. The brief is read-only and comes from old code: do not update the plugin in this mode either, and expect every vault write to refuse, because `vault-commit.sh` rejects each commit from a stale install while the mode is on. Never set `BRAIN_UNATTENDED` yourself to get past the interactive stop; only the launcher of an unattended session sets it.
 1. **Check whether another session is already live in this checkout.** `/brain:resume` is read-only, so it uses **`--status` only — never `--start`, never `--end`.** `--start` would create a branch, and creating a branch is a write; resume must never do that.
    ```bash
    bash "${CLAUDE_PLUGIN_ROOT}/bin/session.sh" --status   # from the vault root, or with BRAIN_ROOT=<vault> set
@@ -81,6 +82,7 @@ Keep it to ~10 lines:
 
 ```
 Caught up on <vault>. Latest save: <date> by <saver> - <what happened>.
+Plugin: <the RESUME-GATE: line, verbatim>   ← unattended mode on a stale install only; omit otherwise
 Briefed from: <the helper's BRIEF: line, verbatim>
 Drift: <the helper's DRIFT: line, verbatim>   ← omit the line entirely when there is none
 Focus: <from hot.md>.
