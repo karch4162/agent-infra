@@ -253,8 +253,10 @@ echo "--- A2. /brain:resume gates on check-plugin-version.sh (INNOV-417) ---"
 # before the session check, with the script's own remedy, and never auto-update.
 RESUME_SKILL="$REPO_ROOT/brain/skills/resume/SKILL.md"
 step0="$(awk '/^0\. \*\*/{f=1} /^1\. \*\*/{f=0} f' "$RESUME_SKILL")"
-assert_eq "resume/step0-runs-version-check" "1" "$(printf '%s\n' "$step0" | grep -c 'bin/check-plugin-version.sh"')" \
-  "the resume skill must run check-plugin-version.sh as step 0, before the session check"
+# INNOV-429: through resume-brief.sh --version-gate, which runs the checker and
+# passes its output and exit code through (tests/test-unattended.sh).
+assert_eq "resume/step0-runs-version-check" "1" "$(printf '%s\n' "$step0" | grep -c 'bin/resume-brief.sh" --version-gate')" \
+  "the resume skill must run the version gate as step 0, before the session check"
 assert_eq "resume/step0-stops-on-drift" "1" "$(printf '%s\n' "$step0" | grep -c 'DRIFTED.*STALE-CLONE.*stop')" \
   "DRIFTED / STALE-CLONE must stop resume"
 assert_eq "resume/step0-never-auto-updates" "1" "$(printf '%s\n' "$step0" | grep -c 'Do not update the plugin yourself')" \

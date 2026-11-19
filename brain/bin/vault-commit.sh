@@ -271,6 +271,20 @@ if [[ $PRINT_ALLOWLIST -eq 1 ]]; then
   exit 0
 fi
 
+# --- 2b. a stale unattended install may read, never write (INNOV-429) --------
+# BRAIN_UNATTENDED=1 lets /brain:resume brief from a behind install instead of
+# stopping, because nobody is there to update and restart. This is the other
+# half of that bargain: every vault write lands here, so refusing here keeps the
+# old code from writing. Interactive sessions (mode off) are unaffected — resume
+# already stopped them before any write.
+if [[ "${BRAIN_UNATTENDED:-}" == "1" ]]; then
+  if ! VERSION_OUT="$(bash "$BIN_DIR/check-plugin-version.sh" 2>&1)"; then
+    refuse "unattended session (BRAIN_UNATTENDED=1) on an out-of-date plugin: a stale install may read but must not write" \
+      "  $(printf '%s\n' "$VERSION_OUT" | head -n 1 | tr -d '\r')" \
+      "  Update the plugin (see /brain:doctor check 7), restart the session, then run the command again."
+  fi
+fi
+
 # path_is_allowed / path_is_allowed_by come from lib/allowlist.sh.
 
 # --- 3. what are we staging? ------------------------------------------------
