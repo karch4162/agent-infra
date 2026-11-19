@@ -46,4 +46,7 @@ if [ "$actual" != "$GRAPHIFY_SHA256" ]; then
 fi
 
 mv -f "$tmp/$wheel" "$dest/$wheel"
-uv tool install "$dest/$wheel" "$@"
+# INNOV-460: pin the interpreter. Unpinned, uv picks the newest CPython it can
+# find (3.15 on win32), where tree-sitter has no wheel and the source build
+# needs MSVC. GRAPHIFY_PYTHON overrides it.
+uv tool install --python "${GRAPHIFY_PYTHON:-3.12}" "$dest/$wheel" "$@"
