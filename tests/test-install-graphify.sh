@@ -68,10 +68,10 @@ if ! curl -fsSI https://pypi.org/simple/graphifyy/ > /dev/null 2>&1; then
 elif run --reinstall; then
   args=$(cat "$UV_LOG")
   case "$args" in
-    "tool install "*graphifyy-*-py3-none-any.whl" --reinstall") ok "pinned hash matches PyPI; uv gets the local wheel" ;;
-    *) bad "unexpected uv args: '$args'" ;;
+    "tool install --python 3.12 "*graphifyy-*-py3-none-any.whl" --reinstall") ok "pinned hash matches PyPI; uv gets the local wheel on Python 3.12" ;;
+    *) bad "unexpected uv args (want --python 3.12 by default, INNOV-460): '$args'" ;;
   esac
-  whl=${args#tool install }; whl=${whl% --reinstall}
+  whl=${args#tool install --python 3.12 }; whl=${whl% --reinstall}
   case "$whl" in
     "$BRAIN_HOME"/wheels/*) ;;
     *) bad "wheel not under \$BRAIN_HOME/wheels: $whl" ;;
@@ -80,6 +80,16 @@ elif run --reinstall; then
     ok "installed wheel kept for the uv receipt"
   else
     bad "installed wheel $whl is gone after the script exits"
+  fi
+  # INNOV-460: GRAPHIFY_PYTHON overrides the default interpreter.
+  : > "$UV_LOG"
+  if GRAPHIFY_PYTHON=3.11 run; then
+    case "$(cat "$UV_LOG")" in
+      "tool install --python 3.11 "*graphifyy-*-py3-none-any.whl) ok "GRAPHIFY_PYTHON overrides the interpreter" ;;
+      *) bad "GRAPHIFY_PYTHON ignored: '$(cat "$UV_LOG")'" ;;
+    esac
+  else
+    bad "GRAPHIFY_PYTHON run failed: $(cat "$tmp/out")"
   fi
 else
   bad "real wheel refused: $(cat "$tmp/out")"
