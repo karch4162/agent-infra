@@ -55,6 +55,20 @@ from worker_runtime import DirectWorkerRuntime, OrcaWorkerRuntime, WorkerError, 
 LIVE = {"running", "starting"}
 IDLE_NOTICE_S = 20 * 60  # an Orca worker silent this long may be waiting at a prompt
 PENDING_NAME = "closeout-pending.json"  # merges whose closeout has not finished (INNOV-447)
+CLOSEOUT_TIMEOUT_S = 3600
+
+
+def _kill_tree(p: subprocess.Popen) -> None:
+    """`bash -lc` forks the closeout's real commands; killing only the wrapper orphans them."""
+    if not p.pid:
+        return
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(p.pid), "/T", "/F"], capture_output=True, timeout=60)
+    else:
+        try:
+            os.killpg(p.pid, 9)
+        except OSError:
+            p.kill()
 
 
 def _now() -> str:
@@ -528,11 +542,16 @@ class Tick:
         if not self.execute:
             self.ev("-", "would_closeout", cmd=self.cfg.closeout_cmd)
             return
-        if pid_alive(int(pend.get("pid") or 0)):
-            # A killed tick does not kill its closeout's process; never run a second one beside it.
-            self.ev("-", "closeout_deferred", reason=f"earlier closeout pid {pend['pid']} still running")
+        # A killed tick does not kill the closeout it started: never run a second one beside it.
+        # The hold is bounded by the closeout timeout, so a recycled pid cannot wedge it for good.
+        pid = int(pend.get("pid") or 0)
+        age = time.time() - float(pend.get("started_at") or 0)
+        if age < CLOSEOUT_TIMEOUT_S and (not pid or pid_alive(pid)):
+            self.ev("-", "closeout_deferred", reason=f"earlier closeout (pid {pid or '?'}) started {int(age)}s ago")
             self.closeout_ok = False
             return
+        if pid and pid_alive(pid):
+            self.notice(f"earlier closeout pid {pid} still alive after {int(age // 60)} min; starting a new one anyway")
         unresolved = []
         for n in pend.get("unresolved_prs") or []:  # a merge sha gh did not report at merge time
             p = _sh(["gh", "pr", "view", str(n), "--repo", self.repo_slug(),
@@ -557,15 +576,19 @@ class Tick:
             self.notice(f"closeout for {tickets}: {attempts} earlier attempt(s) never finished "
                         "(tick killed or timed out mid-closeout); retrying")
         pend.pop("skip_reason", None)
-        pend["attempts"] = attempts + 1
+        pend.pop("pid", None)
+        pend.update(attempts=attempts + 1, started_at=time.time())  # before the launch: no unguarded window
         self._write_pending(pend)
         p = subprocess.Popen([_bash(), "-lc", self.cfg.closeout_cmd], cwd=str(self.repo), stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+                             stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+                             start_new_session=os.name != "nt")
         self._write_pending({**pend, "pid": p.pid})
         try:
-            out, err = p.communicate(timeout=3600)
+            out, err = p.communicate(timeout=CLOSEOUT_TIMEOUT_S)
         except subprocess.TimeoutExpired:
-            p.kill()  # the marker stays: the next tick retries, and notices the earlier attempt
+            _kill_tree(p)  # the marker stays: the next tick retries, and notices the earlier attempt
+            pend.pop("started_at", None)  # killed here, so nothing is left running to hold for
+            self._write_pending(pend)
             raise
         (self.auto / "closeout-last.log").write_text((out or "") + (err or ""), encoding="utf-8")
         self.closeout_ok = p.returncode == 0

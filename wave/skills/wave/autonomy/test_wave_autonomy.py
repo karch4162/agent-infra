@@ -701,13 +701,28 @@ class CloseoutSurvivesTickDeath(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
             self._merging_tick(td)
             tick = autonomy_tick.Tick(repo=Path(td), execute=True, log=lambda m: None)
-            tick._write_pending({**self._pending(td), "pid": os.getpid()})
+            dead = subprocess.Popen([sys.executable, "-c", "pass"])
+            dead.wait()
+            now = time.time()
+            for pid, started, runs in ((os.getpid(), now, False),  # still running: hold
+                                       (0, now, False),            # killed between launch and pid write
+                                       (dead.pid, now, True)):     # it finished: retry now
+                tick._write_pending({**self._pending(td), "pid": pid, "started_at": started})
+                t, ran, _ = self._closeout(td)
+                self.assertEqual(len(ran), int(runs), (pid, runs))
+                if not runs:
+                    self.assertFalse(t.closeout_ok)
+
+    def test_the_overlap_hold_expires_so_a_recycled_pid_cannot_wedge_closeout(self):
+        import autonomy_tick
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
+            self._merging_tick(td)
+            tick = autonomy_tick.Tick(repo=Path(td), execute=True, log=lambda m: None)
+            tick._write_pending({**self._pending(td), "pid": os.getpid(),
+                                 "started_at": time.time() - autonomy_tick.CLOSEOUT_TIMEOUT_S - 1})
             t, ran, _ = self._closeout(td)
-            self.assertEqual(ran, [])
-            self.assertFalse(t.closeout_ok)
-            tick._write_pending({**self._pending(td), "pid": 0})
-            _, ran, _ = self._closeout(td)
             self.assertEqual(len(ran), 1)
+            self.assertTrue(any("still alive" in n for n in t.report["notices"]))
 
     def test_an_unknown_merge_sha_is_looked_up_again_before_closeout(self):
         with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
