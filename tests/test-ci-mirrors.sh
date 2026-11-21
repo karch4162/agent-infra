@@ -30,7 +30,12 @@ WF="$REPO_ROOT/brain/templates/github/workflows/brain-mirrors.yml"
 PASSED=0
 FAILED=0
 TMPROOT="$(mktemp -d)"
-cleanup() { rm -rf "$TMPROOT" 2>/dev/null || true; }
+# Bounded: on the Windows runner this suite once never exited after its last line,
+# with the temp tree's removal as the only step left.
+cleanup() {
+  if command -v timeout >/dev/null 2>&1; then timeout 60 rm -rf "$TMPROOT" 2>/dev/null || true
+  else rm -rf "$TMPROOT" 2>/dev/null || true; fi
+}
 trap cleanup EXIT
 
 pass() { PASSED=$((PASSED + 1)); echo "PASS $1"; }
@@ -128,8 +133,12 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 
 # The template must at least be valid YAML; the repo's CI never executes it.
-if command -v python3 >/dev/null 2>&1 && python3 -c 'import yaml' </dev/null >/dev/null 2>&1; then
-  if python3 -c 'import sys, yaml; yaml.safe_load(open(sys.argv[1]))' "$WF" </dev/null 2>/dev/null; then
+# Windows' python3 is often the WindowsApps store stub, which can block; never call it,
+# and bound any real interpreter.
+py3=$(command -v python3 2>/dev/null || true)
+if [[ -n "$py3" && "$py3" != *WindowsApps* ]] && command -v timeout >/dev/null 2>&1 &&
+   timeout 20 python3 -c 'import yaml' </dev/null >/dev/null 2>&1; then
+  if timeout 20 python3 -c 'import sys, yaml; yaml.safe_load(open(sys.argv[1]))' "$WF" </dev/null 2>/dev/null; then
     pass "template: parses as YAML"
   else
     fail "template: does not parse as YAML"
@@ -149,6 +158,12 @@ cat > "$GIT_CONFIG_GLOBAL" <<EOF
 	defaultBranch = main
 [core]
 	autocrlf = false
+[gc]
+	auto = 0
+[maintenance]
+	auto = false
+[fetch]
+	writeCommitGraph = false
 [url "file:///${NATIVE#/}/remotes/"]
 	insteadOf = https://
 EOF
