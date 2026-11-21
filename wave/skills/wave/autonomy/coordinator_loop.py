@@ -61,7 +61,8 @@ def pr_number(v):
 _TRACKER = []   # memo: [adapter or None]
 def tracker():
     # The tick's adapter (jira_tracker.tracker_for), picked by WAVE_TRACKER: Jira via acli,
-    # ClickUp via REST, None for linear or unset. Never raises: a crash here leaves every
+    # ClickUp via REST; linear gets the write-only linear_tracker (not in tracker_for, so
+    # the tick is unchanged); unset gets None. Never raises: a crash here leaves every
     # worker unsupervised, and the ticket is a courtesy copy of state that lives on GitHub.
     if not _TRACKER:
         t = None
@@ -70,7 +71,11 @@ def tracker():
             from autonomy_config import load_autonomy_config
             from jira_tracker import tracker_for
             cfg = load_autonomy_config(Path(CONFIG) if CONFIG else None)
-            t = tracker_for(cfg)
+            if cfg.tracker == 'linear':
+                from linear_tracker import LinearTrackerAdapter
+                t = LinearTrackerAdapter()
+            else:
+                t = tracker_for(cfg)
             if t is None:
                 log(f"tracker: no adapter for WAVE_TRACKER={cfg.tracker or '(unset)'}; tickets are not updated")
         except Exception as e:  # noqa: BLE001
@@ -90,6 +95,11 @@ def track_hold(k, v):
     pr = f" (PR #{v['pr']})" if v.get('pr') else ''
     track(k, status=os.environ.get('WAVE_STATE_HELD') or os.environ.get('WAVE_STATE_START'),
           comment=f"wave: held{pr} - {v['reason']}")
+def pr_merged(pr):
+    # A PR merged outside this loop (by hand, or the merge landed but gh exited non-zero)
+    # is merged, not held: a hold would rewind its ticket from done.
+    try: return json.loads(gh('pr', 'view', str(pr), '--json', 'state') or '{}').get('state') == 'MERGED'
+    except ValueError: return False
 def merge_sha(pr):
     try: return (json.loads(gh('pr', 'view', str(pr), '--json', 'mergeCommit') or '{}').get('mergeCommit') or {}).get('oid') or ''
     except ValueError: return ''
@@ -135,10 +145,14 @@ def settle(d):
         if not pr:
             v['status'], v['reason'] = 'held', 'worker_done without a PR number'; track_hold(k, v); continue
         v['pr'] = pr
+        if pr_merged(pr):
+            v['status'] = 'merged'; log(k, f'PR #{pr} merged outside the loop; not gating')
+            oj('orchestration', 'worker-release', '--dispatch', v['dispatch']); continue
         verdict = gate(pr)
         log(k, f'PR #{pr}', verdict)
         if verdict == 'MERGE':
-            if subprocess.run(['gh', 'pr', 'merge', str(pr), '--merge'], cwd=MAIN, capture_output=True).returncode == 0:
+            if subprocess.run(['gh', 'pr', 'merge', str(pr), '--merge'], cwd=MAIN, capture_output=True).returncode == 0 \
+                    or pr_merged(pr):
                 v['status'] = 'merged'; oj('orchestration', 'worker-release', '--dispatch', v['dispatch'])
                 sha = merge_sha(pr)
                 track(k, comment=f"wave: PR #{pr} merged" + (f" as {sha}" if sha else ''))
