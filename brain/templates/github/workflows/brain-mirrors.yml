@@ -1,0 +1,220 @@
+# brain-mirrors.yml: rebuild this vault's code mirrors on a schedule (INNOV-355).
+#
+# A mirror is only current if someone saves after each merge. This workflow
+# rebuilds every repos.json entry that has a graphify/<name>/ mirror from that
+# repo's reference branch (`branch` in repos.json, else the remote's default),
+# publishes through sync-graph.sh (provenance gate, scope audit, label guard,
+# --reconcile), and opens ONE vault PR per run. That PR merges itself only when
+# every changed path is under graphify/. Anything else waits for a human.
+# No PR is opened when nothing changed.
+#
+# ADOPT: copy this file to <vault>/.github/workflows/brain-mirrors.yml, then:
+#   1. Source-repo access. One read-only credential, stored only in this vault.
+#      Team vault: an org-owned GitHub App installed on the source repos with
+#      read-only Contents. Set repository variables BRAIN_SOURCE_APP_ID and
+#      BRAIN_SOURCE_OWNER (the org) and secret BRAIN_SOURCE_APP_KEY (its private key).
+#      Personal vault: a fine-grained personal token with read-only Contents on
+#      the named repos, as secret BRAIN_SOURCE_TOKEN. Delete the "Mint source-repo
+#      token" step and use the BRAIN_SOURCE_TOKEN line under "Build and sync".
+#   2. Vault setting: Settings > Actions > General > "Allow GitHub Actions to
+#      create and approve pull requests". If main requires reviews, the PR stays
+#      open for a human instead of merging.
+#   3. Schedule: the cron below is UTC. Builds stay on one runner image
+#      (ubuntu-24.04): community ids are stable per platform only.
+#   4. Plugin pin: PLUGIN_REF is the brain release this vault runs. Pin it to a
+#      release commit SHA, and bump it when the vault upgrades the plugin.
+#   5. Every mirrored repos.json entry needs a machine-readable scope and a
+#      vault-side carve-out, or that row fails and the others still run:
+#        "web": { "remote": "github.com/acme/mono", "subPath": "apps/web",
+#                 "branch": "main", "scopes": ["src"] }
+#      plus graphify/web/.graphifyignore. ["."] builds the whole checkout (or
+#      subPath) minus the carve-out. The scope audit reads only that vault-side
+#      carve-out, so any sibling directory holding source that a narrowed scope
+#      leaves out must be listed there too, or the row is refused.
+#   6. Copy templates/github/dependabot.yml to <vault>/.github/dependabot.yml so
+#      the action SHA pins below stay current.
+#
+# Run it by hand (Actions > brain mirrors > Run workflow) with dry_run on first:
+# it builds, syncs, commits locally and prints the auto-merge verdict, but
+# pushes nothing.
+name: brain mirrors
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build and sync, but push no branch and open no PR
+        type: boolean
+        default: true
+      force:
+        description: Rebuild rows whose source has not changed (e.g. after a carve-out edit)
+        type: boolean
+        default: false
+      only:
+        description: Comma-separated mirror names (empty = all)
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: brain-mirrors
+  cancel-in-progress: false
+
+jobs:
+  mirrors:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      PLUGIN_REPO: karch4162/agent-infra
+      # FILL-IN: the 40-hex commit SHA of a brain release (git rev-parse brain--vX.Y.Z^{commit}).
+      # Never a tag or branch: this job holds a source token and merges its own PRs.
+      PLUGIN_REF: FILL-IN-brain-release-commit-sha
+      PLUGIN_DIR: .brain-ci/plugin
+      PYTHONHASHSEED: '0'
+      GRAPHIFY_NO_AUTO_REFRESH: '1'
+      GRAPHIFY_NO_TIPS: '1'
+      DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
+    steps:
+      - name: Require an immutable plugin pin
+        run: |
+          if ! [[ "$PLUGIN_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::PLUGIN_REF must be a 40-hex brain release commit SHA, not '$PLUGIN_REF'"
+            exit 1
+          fi
+
+      # No credential left in .git/config while graphify and its dependencies run;
+      # the publish step authenticates its one push itself.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out the brain plugin
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.PLUGIN_REPO }}
+          ref: ${{ env.PLUGIN_REF }}
+          path: ${{ env.PLUGIN_DIR }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
+      - name: Install graphify (pinned version, hash-checked)
+        run: |
+          python -m pip install uv
+          bash "$PLUGIN_DIR/brain/bin/install-graphify.sh"
+          uv tool dir --bin >> "$GITHUB_PATH"
+
+      - name: Mint source-repo token
+        id: source
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          app-id: ${{ vars.BRAIN_SOURCE_APP_ID }}
+          private-key: ${{ secrets.BRAIN_SOURCE_APP_KEY }}
+          owner: ${{ vars.BRAIN_SOURCE_OWNER }}
+          # Read-only, whatever the installation grants. Narrow further with a
+          # `repositories:` list of the source repos if the app sees more than those.
+          permission-contents: read
+
+      - name: Build and sync
+        id: build
+        env:
+          SOURCE_TOKEN: ${{ steps.source.outputs.token }}
+          # Personal vault: SOURCE_TOKEN: ${{ secrets.BRAIN_SOURCE_TOKEN }}
+          FORCE: ${{ inputs.force && '--force' || '' }}
+          ONLY: ${{ inputs.only }}
+        run: |
+          graphify --version
+          # The credential goes to the driver as a header value, never a clone URL or any
+          # git config file. The driver hands it to clone/fetch/checkout only and removes
+          # it from its environment, so graphify and sync-graph.sh never see it.
+          BRAIN_SOURCE_AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$SOURCE_TOKEN" | base64 -w0)"
+          export BRAIN_SOURCE_AUTH
+          unset SOURCE_TOKEN
+          args=(--vault "$GITHUB_WORKSPACE" --work "$RUNNER_TEMP/brain-src")
+          [ -n "$FORCE" ] && args+=("$FORCE")
+          [ -n "$ONLY" ] && args+=(--only "$ONLY")
+          set +e
+          node "$PLUGIN_DIR/brain/bin/ci-mirrors.mjs" "${args[@]}" | tee "$RUNNER_TEMP/ci-mirrors.log"
+          echo "rc=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Open the vault PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.repository.default_branch }}
+          RC: ${{ steps.build.outputs.rc }}
+        run: |
+          # 0 = all rows OK, 1 = some rows failed (each reverted; the rest still
+          # publish). Anything else means the driver itself broke: publish nothing.
+          if [ "$RC" != 0 ] && [ "$RC" != 1 ]; then
+            echo "::error::ci-mirrors.mjs exited ${RC:-?}; no PR opened"
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          branch="brain-ci/mirrors-$GITHUB_RUN_ID"
+          git switch -c "$branch"
+          # graphify/ only: the sync's wiki/log.md line and .brain/ state stay behind.
+          git add -- graphify/
+          if git diff --cached --quiet; then
+            echo "No mirror changed; no PR." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git commit -q -m "chore(brain): rebuild graph mirrors (CI run $GITHUB_RUN_ID)"
+          git show --stat --format='%s' HEAD | tail -n 5
+          set +e
+          verdict=$(node "$PLUGIN_DIR/brain/bin/ci-mirrors.mjs" --gate HEAD~1 HEAD --vault .)
+          gate=$?
+          set -e
+          echo "$verdict"
+          if [ "$DRY_RUN" = 1 ]; then
+            echo "Dry run: would push $branch and open a PR ($verdict)." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # The vault checkout kept no credential; authenticate this one push only.
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.$GITHUB_SERVER_URL/.extraheader" \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
+            git push -q origin "$branch"
+          {
+            echo "Scheduled mirror rebuild, run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID."
+            echo
+            echo '```'
+            grep '^CI-MIRRORS:' "$RUNNER_TEMP/ci-mirrors.log" || true
+            echo "$verdict"
+            echo '```'
+          } > "$RUNNER_TEMP/pr-body.md"
+          url=$(gh pr create --base "$BASE" --head "$branch" \
+            --title "chore(brain): rebuild graph mirrors" --body-file "$RUNNER_TEMP/pr-body.md")
+          echo "PR: $url" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$gate" -eq 0 ]; then
+            # Merge exactly the commit the gate judged, not whatever the branch holds now.
+            gh pr merge "$url" --squash --delete-branch --match-head-commit "$(git rev-parse HEAD)" ||
+              echo "Merge refused (branch protection?); the PR stays open for a human." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Not auto-merged: $verdict" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Report
+        if: always()
+        env:
+          RC: ${{ steps.build.outputs.rc }}
+        run: |
+          {
+            echo '## brain mirrors'
+            echo '```'
+            grep '^CI-MIRRORS:' "$RUNNER_TEMP/ci-mirrors.log" 2>/dev/null || echo '(no build log)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "${RC:-1}" != 0 ]; then
+            echo "::error::one or more mirrors failed to build or sync; see CI-MIRRORS: FAILED lines"
+            exit 1
+          fi

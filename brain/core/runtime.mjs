@@ -35,11 +35,15 @@ export function git(cwd, args, optional = false) {
   }
   return args.includes('-z') ? r.stdout : r.stdout.trim();
 }
-export function bashScript(script, args, vault, session) {
+export function bashBin() {
   const bash = process.env.BRAIN_BASH || (process.platform === 'win32'
     ? [join(process.env.ProgramFiles || 'C:/Program Files', 'Git/bin/bash.exe'), join(homedir(), 'AppData/Local/Programs/Git/bin/bash.exe')].find(existsSync)
     : 'bash');
   if (!bash) throw new Error('Git Bash is required on Windows. Set BRAIN_BASH to its bash.exe.');
+  return bash;
+}
+export function bashScript(script, args, vault, session) {
+  const bash = bashBin();
   const r = spawnSync(bash, [join(pluginRoot, 'bin', script).replace(/\\/g, '/'), ...args], {
     cwd: vault, encoding: 'utf8', timeout: 60000, windowsHide: true, maxBuffer: 16 * 1024 * 1024,
     env: { ...process.env, BRAIN_ROOT: vault.replace(/\\/g, '/'), BRAIN_SESSION_ID: session || '', BRAIN_PLUGIN_ROOT: pluginRoot.replace(/\\/g, '/') },
