@@ -634,6 +634,256 @@ class TickIgnoresWalkers(unittest.TestCase):
             self.assertIn("uncommitted", tick.report["notices"][0])
 
 
+class CloseoutSurvivesTickDeath(unittest.TestCase):
+    """INNOV-447: sportify 2026-11-16 merged #489, then the tick was killed before closeout
+    finished; no later tick merged anything, so closeout never ran."""
+
+    def _repo(self, td: str) -> Path:
+        wave = Path(td) / ".claude" / "wave"
+        (wave / "runs").mkdir(parents=True)
+        (wave / "config.env").write_text("WAVE_TRACKER=jira\nWAVE_CLOSEOUT_CMD=echo closeout\n", encoding="utf-8")
+        return wave
+
+    def _merging_tick(self, td: str):
+        """A tick that takes a human-merged held PR back (reconcile), then dies: no closeout()."""
+        import autonomy_tick
+        wave = self._repo(td)
+        (wave / "runs" / "ent-1").mkdir()
+        (wave / "runs" / "ent-1" / "status.json").write_text(json.dumps({
+            "ticket_id": "ENT-1", "state": "done_held", "pr": "u/1", "pr_number": 1}), encoding="utf-8")
+
+        def sh(args, cwd, **kw):
+            out = json.dumps({"state": "MERGED", "mergeCommit": {"oid": "abc1"}}) if args[:3] == ["gh", "pr", "view"] else ""
+            return subprocess.CompletedProcess(args, 0, out, "")
+
+        with mock.patch.object(autonomy_tick, "_sh", sh):
+            tick = autonomy_tick.Tick(repo=Path(td), execute=True, log=lambda m: None)
+            tick._slug = "o/r"
+            tick.track = lambda *a, **k: None
+            tick.reconcile()
+        return wave
+
+    def _closeout(self, td: str, rc=0, raises=None, not_ready=None, gh_sha=""):
+        import autonomy_tick
+        ran = []
+
+        class Popen:
+            pid = 0  # never alive: a finished fake must not look like a running closeout
+
+            def __init__(self, args, **kw):
+                ran.append(args)
+                self.returncode = rc
+
+            def communicate(self, timeout=None):
+                if raises:
+                    raise raises
+                return "out", ""
+
+            def kill(self):
+                pass
+
+        synced = []
+        sh = lambda args, cwd, **kw: subprocess.CompletedProcess(args, 0, gh_sha, "")
+        with mock.patch.object(autonomy_tick, "sync_base", lambda repo, base, shas: synced.append(shas) or not_ready), \
+             mock.patch.object(autonomy_tick, "_sh", sh), \
+             mock.patch.object(autonomy_tick.subprocess, "Popen", Popen):
+            tick = autonomy_tick.Tick(repo=Path(td), execute=True, log=lambda m: None)
+            tick._slug = "o/r"
+            tick.closeout()
+        return tick, ran, synced
+
+    def _pending(self, td: str) -> dict:
+        return json.loads((Path(td) / ".claude" / "wave" / "autonomy" / "closeout-pending.json").read_text(encoding="utf-8"))
+
+    def test_a_running_earlier_closeout_is_not_started_twice(self):
+        # Killing a tick does not kill the closeout it started.
+        import autonomy_tick
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
+            self._merging_tick(td)
+            tick = autonomy_tick.Tick(repo=Path(td), execute=True, log=lambda m: None)
+            dead = subprocess.Popen([sys.executable, "-c", "pass"])
+            dead.wait()
+            now = time.time()
+            for pid, started, runs in ((os.getpid(), now, False),  # still running: hold
+                                       (0, now, False),            # killed between launch and pid write
+                                       (dead.pid, now, True)):     # it finished: retry now
+                tick._write_pending({**self._pending(td), "pid": pid, "started_at": started})
+                t, ran, _ = self._closeout(td)
+                self.assertEqual(len(ran), int(runs), (pid, runs))
+                if not runs:
+                    self.assertFalse(t.closeout_ok)
+
+    def test_a_closeout_alive_past_its_timeout_still_holds_and_is_noticed_once(self):
+        # Never two closeouts on one checkout; a stuck (or recycled) pid goes to the human instead.
+        import autonomy_tick
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
+            self._merging_tick(td)
+            tick = autonomy_tick.Tick(repo=Path(td), execute=True, log=lambda m: None)
+            tick._write_pending({**self._pending(td), "pid": os.getpid(),
+                                 "started_at": time.time() - autonomy_tick.CLOSEOUT_TIMEOUT_S - 1})
+            t1, ran1, _ = self._closeout(td)
+            t2, ran2, _ = self._closeout(td)
+            self.assertEqual((ran1, ran2), ([], []))
+            self.assertTrue(any("still alive past" in n for n in t1.report["notices"]))
+            self.assertEqual(t2.report["notices"], [])
+
+    def test_a_timed_out_closeout_keeps_its_pid_so_a_failed_kill_still_holds(self):
+        import autonomy_tick
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
+            self._merging_tick(td)
+            with mock.patch.object(autonomy_tick, "_kill_tree", lambda p: None), \
+                 self.assertRaises(subprocess.TimeoutExpired):
+                self._closeout(td, raises=subprocess.TimeoutExpired("bash", 3600))
+            pend = self._pending(td)
+            self.assertIn("pid", pend)
+            self.assertNotIn("started_at", pend)
+
+    def test_an_unknown_merge_sha_is_looked_up_again_before_closeout(self):
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
+            self._auto_merge_tick(td, "")
+            _, ran, synced = self._closeout(td, gh_sha="")  # still unknown: never run unverified
+            self.assertEqual((ran, synced), ([], []))
+            self.assertEqual(self._pending(td)["unresolved_prs"], [1])
+            _, ran, synced = self._closeout(td, gh_sha="fed3\n")
+            self.assertEqual(synced, [["fed3"]])
+            self.assertEqual(len(ran), 1)
+
+    def test_next_tick_runs_the_closeout_a_dead_tick_owed(self):
+        import auto_merge
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
+            wave = self._merging_tick(td)
+            self.assertTrue((wave / "autonomy" / "closeout-pending.json").exists())
+            tick, ran, synced = self._closeout(td)
+            self.assertEqual(len(ran), 1)
+            self.assertEqual(synced, [["abc1"]])  # the next tick checks the base holds the merged sha
+            self.assertTrue(tick.closeout_ok)
+            self.assertEqual(auto_merge.clean_streak(wave), 1)
+            self.assertFalse((wave / "autonomy" / "closeout-pending.json").exists())
+
+    def test_a_failed_closeout_also_clears_the_marker(self):
+        import auto_merge
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
+            wave = self._merging_tick(td)
+            tick, ran, _ = self._closeout(td, rc=1)
+            self.assertEqual(len(ran), 1)
+            self.assertFalse(tick.closeout_ok)
+            self.assertEqual(auto_merge.clean_streak(wave), 0)
+            self.assertIn("ENT-1", tick.report["notices"][0])
+            self.assertFalse((wave / "autonomy" / "closeout-pending.json").exists())
+
+    def test_a_crash_mid_closeout_leaves_the_marker_for_a_retry(self):
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
+            wave = self._merging_tick(td)
+            with self.assertRaises(subprocess.TimeoutExpired):
+                self._closeout(td, raises=subprocess.TimeoutExpired("bash", 3600))
+            self.assertTrue((wave / "autonomy" / "closeout-pending.json").exists())
+            _, ran, _ = self._closeout(td)
+            self.assertEqual(len(ran), 1)
+            self.assertFalse((wave / "autonomy" / "closeout-pending.json").exists())
+
+    def test_nothing_merged_and_no_marker_runs_no_closeout(self):
+        # Negative control: the marker, not every tick, is what triggers closeout.
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
+            self._repo(td)
+            _, ran, _ = self._closeout(td)
+            self.assertEqual(ran, [])
+
+    def test_a_live_worker_defers_closeout_and_keeps_the_marker(self):
+        import autonomy_tick
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
+            wave = self._merging_tick(td)
+            (wave / "runs" / "ent-2").mkdir()
+            (wave / "runs" / "ent-2" / "status.json").write_text(json.dumps({
+                "ticket_id": "ENT-2", "state": "running", "runtime": "direct", "pid": os.getpid()}), encoding="utf-8")
+            _, ran, _ = self._closeout(td)
+            self.assertEqual(ran, [])
+            self.assertTrue((wave / "autonomy" / "closeout-pending.json").exists())
+            (wave / "runs" / "ent-2" / "status.json").write_text(json.dumps({
+                "ticket_id": "ENT-2", "state": "done_held"}), encoding="utf-8")
+            _, ran, _ = self._closeout(td)
+            self.assertEqual(len(ran), 1)
+
+    def _auto_merge_tick(self, td: str, sha: str, sh=None):
+        """The incident path: merge() itself merges a challenged PR (sportify #489)."""
+        import autonomy_tick
+        wave = self._repo(td)
+        (wave / "runs" / "ent-1").mkdir()
+        (wave / "runs" / "ent-1" / "status.json").write_text(json.dumps({
+            "ticket_id": "ENT-1", "state": "challenged", "pr": "u/1", "pr_number": 1}), encoding="utf-8")
+        res = auto_merge.MergeResult(action="merged", decision="auto_merge_low", pr=1, detail={})
+        sh = sh or (lambda args, cwd, **kw: subprocess.CompletedProcess(args, 0, sha, ""))
+        with mock.patch.object(autonomy_tick, "_sh", sh), \
+             mock.patch.object(autonomy_tick, "evaluate_and_maybe_merge", lambda **kw: res):
+            tick = autonomy_tick.Tick(repo=Path(td), execute=True, log=lambda m: None)
+            tick._slug = "o/r"
+            tick.track = lambda *a, **k: None
+            tick.merge()
+        return json.loads((wave / "autonomy" / "closeout-pending.json").read_text(encoding="utf-8"))
+
+    def test_an_auto_merge_writes_the_marker_before_closeout(self):
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
+            pend = self._auto_merge_tick(td, "def2\n")
+            self.assertEqual((pend["tickets"], pend["shas"]), (["ent-1"], ["def2"]))  # merge() names a ticket by its run dir
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
+            pend = self._auto_merge_tick(td, "")  # gh returned no merge sha: still owed a closeout
+            self.assertEqual((pend["tickets"], pend["shas"], pend["unresolved_prs"]), (["ent-1"], [], [1]))
+
+    def test_a_tick_dying_on_the_sha_lookup_still_owes_the_closeout(self):
+        # The PR is merged before `gh pr view` runs; a crash there must not lose the debt.
+        def boom(args, cwd, **kw):
+            raise subprocess.TimeoutExpired(args, 60)
+
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                self._auto_merge_tick(td, "", sh=boom)
+            self.assertEqual(self._pending(td)["unresolved_prs"], [1])
+            st = json.loads((Path(td) / ".claude" / "wave" / "runs" / "ent-1" / "status.json").read_text(encoding="utf-8"))
+            self.assertEqual(st["state"], "done_merged")  # not left "challenged" for a merge retry
+
+    def test_no_closeout_cmd_writes_no_marker(self):
+        # Nothing would ever clear it.
+        import autonomy_tick
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
+            wave = self._repo(td)
+            (wave / "config.env").write_text("WAVE_TRACKER=jira\n", encoding="utf-8")
+            tick = autonomy_tick.Tick(repo=Path(td), execute=True, log=lambda m: None)
+            tick.closeout_pending("ENT-1", "abc1")
+            self.assertFalse((wave / "autonomy" / "closeout-pending.json").exists())
+
+    def test_a_base_not_ready_keeps_the_marker_and_notices_once(self):
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
+            wave = self._merging_tick(td)
+            why = "closeout needs main checked out; it has feature"
+            t1, ran1, _ = self._closeout(td, not_ready=why)
+            t2, ran2, _ = self._closeout(td, not_ready=why)
+            self.assertEqual((ran1, ran2), ([], []))
+            self.assertFalse(t2.closeout_ok)  # sweep stays held while the merged base is unverified
+            self.assertEqual(len(t1.report["notices"]), 1)
+            self.assertEqual(t2.report["notices"], [])
+            self.assertTrue((wave / "autonomy" / "closeout-pending.json").exists())
+            t3, ran3, _ = self._closeout(td)
+            self.assertEqual(len(ran3), 1)
+            self.assertEqual(t3.report["notices"], [])  # a skip is not a killed attempt
+            self.assertFalse((wave / "autonomy" / "closeout-pending.json").exists())
+
+    def test_a_retry_after_a_killed_closeout_is_noticed(self):
+        # A closeout that always outlives the harness must not loop silently.
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
+            self._merging_tick(td)
+            with self.assertRaises(subprocess.TimeoutExpired):
+                self._closeout(td, raises=subprocess.TimeoutExpired("bash", 3600))
+            tick, _, _ = self._closeout(td)
+            self.assertIn("1 earlier attempt(s) never finished", tick.report["notices"][0])
+
+    def test_a_dry_run_tick_writes_no_marker(self):
+        import autonomy_tick
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
+            wave = self._repo(td)
+            tick = autonomy_tick.Tick(repo=Path(td), execute=False, log=lambda m: None)
+            tick.closeout_pending("ENT-1", "abc1")
+            self.assertFalse((wave / "autonomy" / "closeout-pending.json").exists())
+
+
 class Config(unittest.TestCase):
     def test_state_names_come_from_config_env(self):
         # The tick runs from a scheduler: an env-only read left every tracker

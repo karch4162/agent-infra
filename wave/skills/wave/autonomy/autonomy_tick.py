@@ -54,6 +54,21 @@ from worker_runtime import DirectWorkerRuntime, OrcaWorkerRuntime, WorkerError, 
 
 LIVE = {"running", "starting"}
 IDLE_NOTICE_S = 20 * 60  # an Orca worker silent this long may be waiting at a prompt
+PENDING_NAME = "closeout-pending.json"  # merges whose closeout has not finished (INNOV-447)
+CLOSEOUT_TIMEOUT_S = 3600
+
+
+def _kill_tree(p: subprocess.Popen) -> None:
+    """`bash -lc` forks the closeout's real commands; killing only the wrapper orphans them."""
+    if not p.pid:
+        return
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(p.pid), "/T", "/F"], capture_output=True, timeout=60)
+    else:
+        try:
+            os.killpg(p.pid, 9)
+        except OSError:
+            p.kill()
 
 
 def _now() -> str:
@@ -190,6 +205,34 @@ class Tick:
             with (self.auto / file).open("a", encoding="utf-8") as f:
                 f.write(f"- {_now()} {text}\n")
 
+    def closeout_pending(self, ticket: str, sha: str, pr: int | None = None) -> None:
+        """Record a merge as owed a closeout, at merge time. The merging tick can die before
+        closeout runs (or defer it to live workers); a later tick that merged nothing still
+        finds the marker and runs it. Only a finished closeout command clears it (INNOV-447)."""
+        if ticket not in self.merged_this_tick:
+            self.merged_this_tick.append(ticket)
+        if sha and sha not in self.merged_shas:
+            self.merged_shas.append(sha)
+        if not self.execute or not self.cfg.closeout_cmd:  # no closeout configured: nothing would clear it
+            return
+        pend = _read(self.auto / PENDING_NAME)
+        tickets, shas = list(pend.get("tickets") or []), list(pend.get("shas") or [])
+        unresolved = [n for n in (pend.get("unresolved_prs") or []) if n != pr]
+        if ticket not in tickets:
+            tickets.append(ticket)
+        if sha and sha not in shas:
+            shas.append(sha)
+        if not sha and pr:  # closeout looks the sha up again: it must not run unverified
+            unresolved.append(pr)
+        pend.update(tickets=tickets, shas=shas, unresolved_prs=unresolved, since=pend.get("since") or _now())
+        self._write_pending(pend)
+
+    def _write_pending(self, pend: dict[str, Any]) -> None:
+        path = self.auto / PENDING_NAME
+        tmp = path.with_suffix(".tmp")  # a tick killed mid-write must not leave a truncated marker
+        tmp.write_text(json.dumps(pend, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
+
     def repo_slug(self) -> str:
         if self._slug is None:
             p = _sh(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], self.repo)
@@ -313,9 +356,7 @@ class Tick:
         if pr.get("state") == "MERGED":
             sha = (pr.get("mergeCommit") or {}).get("oid") or ""
             st.update(state="done_merged", note="merged by a human after the hold", merge_sha=sha)
-            self.merged_this_tick.append(ticket)
-            if sha:
-                self.merged_shas.append(sha)
+            self.closeout_pending(ticket, sha, int(st["pr_number"]))
             self.ev(ticket, "merged_by_human", pr=st["pr_number"])
             self.track(ticket, comment=f"wave: {st.get('pr')} merged; closeout and sweep follow")
         elif pr.get("state") == "CLOSED":
@@ -377,12 +418,14 @@ class Tick:
             self.ev(ticket, "merge", action=res.action, decision=res.decision)
             if res.action == "merged":
                 st.update(state="done_merged", note=res.decision)
-                self.merged_this_tick.append(ticket)
+                self.closeout_pending(ticket, "", int(st["pr_number"]))  # owed before anything else can fail
+                if self.execute:  # and merged on disk, or a crash below leaves a merged PR "challenged"
+                    _write(path, st)
                 p = _sh(["gh", "pr", "view", str(st["pr_number"]), "--repo", self.repo_slug(),
                          "--json", "mergeCommit", "-q", ".mergeCommit.oid"], self.repo)
                 if p.stdout.strip():
                     st["merge_sha"] = p.stdout.strip()
-                    self.merged_shas.append(st["merge_sha"])
+                    self.closeout_pending(ticket, st["merge_sha"], int(st["pr_number"]))
                 self.track(ticket, status=self.cfg.state_done or None,
                            comment=f"wave: merged {st['pr']} ({res.decision})")
             elif res.action in {"held", "conflict_held"}:
@@ -488,7 +531,12 @@ class Tick:
 
     # ---- 6. closeout -----------------------------------------------------------------
     def closeout(self) -> None:
-        if not self.merged_this_tick or not self.cfg.closeout_cmd:
+        """Runs for every merge still in the pending marker, not only this tick's: the tick
+        that merged may have died or deferred (INNOV-447)."""
+        pend = _read(self.auto / PENDING_NAME)
+        tickets = list(dict.fromkeys([*(pend.get("tickets") or []), *self.merged_this_tick]))
+        shas = list(dict.fromkeys([*(pend.get("shas") or []), *self.merged_shas]))
+        if not tickets or not self.cfg.closeout_cmd:
             return
         if any(st.get("state") in LIVE and self.alive(p, st) for p, st in self.statuses()):
             self.log("closeout deferred: workers still live")
@@ -496,20 +544,67 @@ class Tick:
         if not self.execute:
             self.ev("-", "would_closeout", cmd=self.cfg.closeout_cmd)
             return
-        why = sync_base(self.repo, self.cfg.wave_base, self.merged_shas)
-        if why:
-            self.ev("-", "closeout_skipped", reason=why)
-            self.notice(f"closeout not run after merging {self.merged_this_tick}: {why}")
+        # A killed tick does not kill the closeout it started: never run a second one beside it.
+        # Two closeouts on one checkout is worse than a stall, so a live pid always holds; past the
+        # timeout the human is told once, since it may be a stuck closeout or a recycled pid.
+        pid = int(pend.get("pid") or 0)
+        age = time.time() - float(pend.get("started_at") or 0)
+        alive = bool(pid) and pid_alive(pid)
+        if alive or (not pid and age < CLOSEOUT_TIMEOUT_S):  # no pid yet: killed between launch and write
+            self.ev("-", "closeout_deferred", reason=f"earlier closeout (pid {pid or '?'}) still running")
+            if alive and age >= CLOSEOUT_TIMEOUT_S and not pend.get("stuck_noticed"):
+                self.notice(f"closeout for {tickets}: earlier closeout pid {pid} still alive past "
+                            f"{CLOSEOUT_TIMEOUT_S // 60} min; kill it (or remove \"pid\" from "
+                            f"autonomy/{PENDING_NAME} if that pid is not a closeout) to let closeout retry")
+                self._write_pending({**pend, "stuck_noticed": _now()})
             self.closeout_ok = False
             return
-        p = subprocess.run([_bash(), "-lc", self.cfg.closeout_cmd], cwd=str(self.repo), capture_output=True,
-                           text=True, encoding="utf-8", errors="replace", timeout=3600)
-        (self.auto / "closeout-last.log").write_text((p.stdout or "") + (p.stderr or ""), encoding="utf-8")
+        unresolved = []
+        for n in pend.get("unresolved_prs") or []:  # a merge sha gh did not report at merge time
+            p = _sh(["gh", "pr", "view", str(n), "--repo", self.repo_slug(),
+                     "--json", "mergeCommit", "-q", ".mergeCommit.oid"], self.repo)
+            sha = (p.stdout or "").strip()
+            if sha:
+                shas = list(dict.fromkeys([*shas, sha]))
+            else:
+                unresolved.append(n)
+        pend.update(tickets=tickets, shas=shas, unresolved_prs=unresolved, since=pend.get("since") or _now())
+        why = (f"merge commit of PR(s) {unresolved} unknown; the base cannot be checked for it" if unresolved
+               else sync_base(self.repo, self.cfg.wave_base, shas))
+        if why:  # the command never ran: the marker stays, so the next tick tries again
+            self.ev("-", "closeout_skipped", reason=why)
+            if pend.get("skip_reason") != why:  # once per reason, not once per tick
+                self.notice(f"closeout not run after merging {tickets}: {why}")
+            self._write_pending({**pend, "skip_reason": why})
+            self.closeout_ok = False
+            return
+        attempts = int(pend.get("attempts") or 0)
+        if attempts:
+            self.notice(f"closeout for {tickets}: {attempts} earlier attempt(s) never finished "
+                        "(tick killed or timed out mid-closeout); retrying")
+        pend.pop("skip_reason", None)
+        pend.pop("pid", None)
+        pend.pop("stuck_noticed", None)
+        pend.update(attempts=attempts + 1, started_at=time.time())  # before the launch: no unguarded window
+        self._write_pending(pend)
+        p = subprocess.Popen([_bash(), "-lc", self.cfg.closeout_cmd], cwd=str(self.repo), stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+                             start_new_session=os.name != "nt")
+        self._write_pending({**pend, "pid": p.pid})
+        try:
+            out, err = p.communicate(timeout=CLOSEOUT_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            _kill_tree(p)  # the marker stays: the next tick retries, and notices the earlier attempt
+            pend.pop("started_at", None)  # killed here; the pid stays, so a kill that failed still holds
+            self._write_pending({**pend, "pid": p.pid})
+            raise
+        (self.auto / "closeout-last.log").write_text((out or "") + (err or ""), encoding="utf-8")
         self.closeout_ok = p.returncode == 0
         streak = record_closeout(self.wave_dir, self.closeout_ok)
+        (self.auto / PENDING_NAME).unlink(missing_ok=True)  # finished, pass or fail: owed no longer
         self.ev("-", "closeout", rc=p.returncode, clean_streak=streak)
         if p.returncode != 0:
-            self.notice(f"closeout failed (rc={p.returncode}) after merging {self.merged_this_tick}; see autonomy/closeout-last.log. "
+            self.notice(f"closeout failed (rc={p.returncode}) after merging {tickets}; see autonomy/closeout-last.log. "
                         "Clean-wave streak reset to 0: medium auto-merge is suspended until it is rebuilt.")
         elif streak == self.cfg.clean_waves_for_medium and not self.cfg.auto_merge_medium:
             self.notice(f"{streak} clean waves in a row: medium auto-merge may be turned on (WAVE_AUTO_MERGE_MEDIUM=1). Owner's call.")
