@@ -30,12 +30,7 @@ WF="$REPO_ROOT/brain/templates/github/workflows/brain-mirrors.yml"
 PASSED=0
 FAILED=0
 TMPROOT="$(mktemp -d)"
-# Bounded: on the Windows runner this suite once never exited after its last line,
-# with the temp tree's removal as the only step left.
-cleanup() {
-  if command -v timeout >/dev/null 2>&1; then timeout 60 rm -rf "$TMPROOT" 2>/dev/null || true
-  else rm -rf "$TMPROOT" 2>/dev/null || true; fi
-}
+cleanup() { rm -rf "$TMPROOT" 2>/dev/null || true; }
 trap cleanup EXIT
 
 pass() { PASSED=$((PASSED + 1)); echo "PASS $1"; }
@@ -158,12 +153,6 @@ cat > "$GIT_CONFIG_GLOBAL" <<EOF
 	defaultBranch = main
 [core]
 	autocrlf = false
-[gc]
-	auto = 0
-[maintenance]
-	auto = false
-[fetch]
-	writeCommitGraph = false
 [url "file:///${NATIVE#/}/remotes/"]
 	insteadOf = https://
 EOF
@@ -329,7 +318,11 @@ assert_contains "off-branch mirror: rebuilt from the branch" "$out" "CI-MIRRORS:
 git -C "$V" checkout -q -- . && git -C "$V" clean -fdq -e repos.local.json
 
 # --- 6. a subPath that is a committed symlink out of the clone is refused ----------
-if ln -s ../.. "$T/src/mono/apps/link" 2>/dev/null && [[ -L "$T/src/mono/apps/link" ]]; then
+# Never attempt it under MSYS/Cygwin: there `ln -s` falls back to a deep COPY of the
+# target, and ../.. contains the link itself, so the copy never ends (it hung the
+# Windows CI shard twice). POSIX filesystems make a real link.
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) can_link=0 ;; *) can_link=1 ;; esac
+if [[ $can_link -eq 1 ]] && ln -s ../.. "$T/src/mono/apps/link" 2>/dev/null && [[ -L "$T/src/mono/apps/link" ]]; then
   push mono "symlink"
   node -e 'const f=process.argv[1],j=JSON.parse(require("fs").readFileSync(f,"utf8"));j.repos.web.subPath="apps/link";require("fs").writeFileSync(f,JSON.stringify(j))' "$V/repos.json"
   out=$(ci --only web --force)
