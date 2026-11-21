@@ -27,7 +27,7 @@ export WAVE_REPO
 WAVE_REPO="$(cygpath -m "$BOX" 2>/dev/null || echo "$BOX")"
 
 status=0
-for suite in test_wave_autonomy.py test_wave_infra_blockers.py; do
+for suite in test_wave_autonomy.py test_wave_infra_blockers.py test_coordinator_loop.py; do
   echo "--- $suite ---"
   if (cd "$AUTONOMY" && "$PY" "$suite" 2>&1 | tail -n 4); then
     :
