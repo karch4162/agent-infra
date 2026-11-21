@@ -713,16 +713,30 @@ class CloseoutSurvivesTickDeath(unittest.TestCase):
                 if not runs:
                     self.assertFalse(t.closeout_ok)
 
-    def test_the_overlap_hold_expires_so_a_recycled_pid_cannot_wedge_closeout(self):
+    def test_a_closeout_alive_past_its_timeout_still_holds_and_is_noticed_once(self):
+        # Never two closeouts on one checkout; a stuck (or recycled) pid goes to the human instead.
         import autonomy_tick
         with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
             self._merging_tick(td)
             tick = autonomy_tick.Tick(repo=Path(td), execute=True, log=lambda m: None)
             tick._write_pending({**self._pending(td), "pid": os.getpid(),
                                  "started_at": time.time() - autonomy_tick.CLOSEOUT_TIMEOUT_S - 1})
-            t, ran, _ = self._closeout(td)
-            self.assertEqual(len(ran), 1)
-            self.assertTrue(any("still alive" in n for n in t.report["notices"]))
+            t1, ran1, _ = self._closeout(td)
+            t2, ran2, _ = self._closeout(td)
+            self.assertEqual((ran1, ran2), ([], []))
+            self.assertTrue(any("still alive past" in n for n in t1.report["notices"]))
+            self.assertEqual(t2.report["notices"], [])
+
+    def test_a_timed_out_closeout_keeps_its_pid_so_a_failed_kill_still_holds(self):
+        import autonomy_tick
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
+            self._merging_tick(td)
+            with mock.patch.object(autonomy_tick, "_kill_tree", lambda p: None), \
+                 self.assertRaises(subprocess.TimeoutExpired):
+                self._closeout(td, raises=subprocess.TimeoutExpired("bash", 3600))
+            pend = self._pending(td)
+            self.assertIn("pid", pend)
+            self.assertNotIn("started_at", pend)
 
     def test_an_unknown_merge_sha_is_looked_up_again_before_closeout(self):
         with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {}):
@@ -823,6 +837,8 @@ class CloseoutSurvivesTickDeath(unittest.TestCase):
             with self.assertRaises(subprocess.TimeoutExpired):
                 self._auto_merge_tick(td, "", sh=boom)
             self.assertEqual(self._pending(td)["unresolved_prs"], [1])
+            st = json.loads((Path(td) / ".claude" / "wave" / "runs" / "ent-1" / "status.json").read_text(encoding="utf-8"))
+            self.assertEqual(st["state"], "done_merged")  # not left "challenged" for a merge retry
 
     def test_no_closeout_cmd_writes_no_marker(self):
         # Nothing would ever clear it.

@@ -419,6 +419,8 @@ class Tick:
             if res.action == "merged":
                 st.update(state="done_merged", note=res.decision)
                 self.closeout_pending(ticket, "", int(st["pr_number"]))  # owed before anything else can fail
+                if self.execute:  # and merged on disk, or a crash below leaves a merged PR "challenged"
+                    _write(path, st)
                 p = _sh(["gh", "pr", "view", str(st["pr_number"]), "--repo", self.repo_slug(),
                          "--json", "mergeCommit", "-q", ".mergeCommit.oid"], self.repo)
                 if p.stdout.strip():
@@ -543,15 +545,20 @@ class Tick:
             self.ev("-", "would_closeout", cmd=self.cfg.closeout_cmd)
             return
         # A killed tick does not kill the closeout it started: never run a second one beside it.
-        # The hold is bounded by the closeout timeout, so a recycled pid cannot wedge it for good.
+        # Two closeouts on one checkout is worse than a stall, so a live pid always holds; past the
+        # timeout the human is told once, since it may be a stuck closeout or a recycled pid.
         pid = int(pend.get("pid") or 0)
         age = time.time() - float(pend.get("started_at") or 0)
-        if age < CLOSEOUT_TIMEOUT_S and (not pid or pid_alive(pid)):
-            self.ev("-", "closeout_deferred", reason=f"earlier closeout (pid {pid or '?'}) started {int(age)}s ago")
+        alive = bool(pid) and pid_alive(pid)
+        if alive or (not pid and age < CLOSEOUT_TIMEOUT_S):  # no pid yet: killed between launch and write
+            self.ev("-", "closeout_deferred", reason=f"earlier closeout (pid {pid or '?'}) still running")
+            if alive and age >= CLOSEOUT_TIMEOUT_S and not pend.get("stuck_noticed"):
+                self.notice(f"closeout for {tickets}: earlier closeout pid {pid} still alive past "
+                            f"{CLOSEOUT_TIMEOUT_S // 60} min; kill it (or remove \"pid\" from "
+                            f"autonomy/{PENDING_NAME} if that pid is not a closeout) to let closeout retry")
+                self._write_pending({**pend, "stuck_noticed": _now()})
             self.closeout_ok = False
             return
-        if pid and pid_alive(pid):
-            self.notice(f"earlier closeout pid {pid} still alive after {int(age // 60)} min; starting a new one anyway")
         unresolved = []
         for n in pend.get("unresolved_prs") or []:  # a merge sha gh did not report at merge time
             p = _sh(["gh", "pr", "view", str(n), "--repo", self.repo_slug(),
@@ -577,6 +584,7 @@ class Tick:
                         "(tick killed or timed out mid-closeout); retrying")
         pend.pop("skip_reason", None)
         pend.pop("pid", None)
+        pend.pop("stuck_noticed", None)
         pend.update(attempts=attempts + 1, started_at=time.time())  # before the launch: no unguarded window
         self._write_pending(pend)
         p = subprocess.Popen([_bash(), "-lc", self.cfg.closeout_cmd], cwd=str(self.repo), stdout=subprocess.PIPE,
@@ -587,8 +595,8 @@ class Tick:
             out, err = p.communicate(timeout=CLOSEOUT_TIMEOUT_S)
         except subprocess.TimeoutExpired:
             _kill_tree(p)  # the marker stays: the next tick retries, and notices the earlier attempt
-            pend.pop("started_at", None)  # killed here, so nothing is left running to hold for
-            self._write_pending(pend)
+            pend.pop("started_at", None)  # killed here; the pid stays, so a kill that failed still holds
+            self._write_pending({**pend, "pid": p.pid})
             raise
         (self.auto / "closeout-last.log").write_text((out or "") + (err or ""), encoding="utf-8")
         self.closeout_ok = p.returncode == 0
