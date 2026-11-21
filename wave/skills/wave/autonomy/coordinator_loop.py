@@ -8,6 +8,8 @@ the env is read here, the loop runs in main().
 import json, os, re, subprocess, sys, time
 RUN, STATE, WAVE, MAIN = (os.environ.get(k, '') for k in ('RUN','STATE','WAVE_HOME','MAIN_CHECKOUT'))
 BASE = os.environ.get('BASE_BRANCH', '')
+CONFIG = os.environ.get('WAVE_CONFIG', '')   # the repo's config.env, as lib.sh resolved it
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 def sh(*args, check=False, cwd=None):
     r = subprocess.run(args, capture_output=True, text=True, cwd=cwd)
@@ -56,6 +58,42 @@ def pr_number(v):
     for w in oj('worktree', 'list').get('worktrees', []):
         if w.get('displayName') == v['slug'] and (w.get('linkedPR') or {}).get('number'):
             return w['linkedPR']['number']
+_TRACKER = []   # memo: [adapter or None]
+def tracker():
+    # The tick's adapter (jira_tracker.tracker_for), picked by WAVE_TRACKER: Jira via acli,
+    # ClickUp via REST, None for linear or unset. Never raises: a crash here leaves every
+    # worker unsupervised, and the ticket is a courtesy copy of state that lives on GitHub.
+    if not _TRACKER:
+        t = None
+        try:
+            from pathlib import Path
+            from autonomy_config import load_autonomy_config
+            from jira_tracker import tracker_for
+            cfg = load_autonomy_config(Path(CONFIG) if CONFIG else None)
+            t = tracker_for(cfg)
+            if t is None:
+                log(f"tracker: no adapter for WAVE_TRACKER={cfg.tracker or '(unset)'}; tickets are not updated")
+        except Exception as e:  # noqa: BLE001
+            log('tracker: unavailable, tickets are not updated:', str(e)[:200])
+        _TRACKER.append(t)
+    return _TRACKER[0]
+def track(k, status=None, comment=None):
+    t = tracker()
+    if t is None: return
+    # separately: a refused transition must not swallow the comment that says why
+    for what, arg in (('set_status', status), ('comment', comment)):
+        if not arg: continue
+        try: getattr(t, what)(k, arg)
+        except Exception as e: log(k, f'tracker {what} failed:', str(e)[:200])  # noqa: BLE001
+def track_hold(k, v):
+    # the worker already set the done state (step 5); a held PR is not done
+    pr = f" (PR #{v['pr']})" if v.get('pr') else ''
+    track(k, status=os.environ.get('WAVE_STATE_HELD') or os.environ.get('WAVE_STATE_START'),
+          comment=f"wave: held{pr} - {v['reason']}")
+def merge_sha(pr):
+    try: return (json.loads(gh('pr', 'view', str(pr), '--json', 'mergeCommit') or '{}').get('mergeCommit') or {}).get('oid') or ''
+    except ValueError: return ''
+
 def gate(pr):
     view = json.loads(gh('pr', 'view', str(pr), '--json', 'body,mergeable'))
     # not --required: repos without required checks (sports-management) get a text
@@ -86,6 +124,7 @@ def consume(d):
         else:  # question or escalation: the coordinator never guesses for a worker
             v['status'] = 'held'; v['reason'] = f"{m['type']} needs human: " + (m.get('body') or '')[:160]
         log(k, '->', v['status'], v['reason'])
+        if v['status'] == 'held': track_hold(k, v)
     if r.get('deliveryId'):
         oj('orchestration', 'check', '--run', RUN, '--ack', r['deliveryId'], '--timeout-ms', '1')
 
@@ -94,13 +133,15 @@ def settle(d):
         if v['status'] != 'done': continue
         pr = pr_number(v)
         if not pr:
-            v['status'], v['reason'] = 'held', 'worker_done without a PR number'; continue
+            v['status'], v['reason'] = 'held', 'worker_done without a PR number'; track_hold(k, v); continue
         v['pr'] = pr
         verdict = gate(pr)
         log(k, f'PR #{pr}', verdict)
         if verdict == 'MERGE':
             if subprocess.run(['gh', 'pr', 'merge', str(pr), '--merge'], cwd=MAIN, capture_output=True).returncode == 0:
                 v['status'] = 'merged'; oj('orchestration', 'worker-release', '--dispatch', v['dispatch'])
+                sha = merge_sha(pr)
+                track(k, comment=f"wave: PR #{pr} merged" + (f" as {sha}" if sha else ''))
             else:
                 v['status'], v['reason'] = 'held', 'gh pr merge failed'
         elif verdict == 'CONFLICT' and not v['rebased']:
@@ -108,7 +149,7 @@ def settle(d):
             handle = oj('orchestration', 'worker-show', '--dispatch', v['dispatch']).get('terminal', {}).get('handle') \
                 or oj('orchestration', 'worker-show', '--dispatch', v['dispatch']).get('agentTerminalHandle')
             if not handle:
-                v['status'], v['reason'] = 'held', 'CONFLICT and no terminal handle to redispatch'; continue
+                v['status'], v['reason'] = 'held', 'CONFLICT and no terminal handle to redispatch'; track_hold(k, v); continue
             spec = (f"PR #{pr} conflicts with {BASE} after a sibling merged. Rebase this worktree on origin/{BASE}, "
                     "resolve conflicts, rerun /preflight, push with --force-with-lease, then send worker_done "
                     f"--outcome succeeded with PR #{pr} in the summary. Change nothing else.")
@@ -125,8 +166,7 @@ def settle(d):
         if v['status'] == 'held':
             gh('pr', 'edit', str(pr), '--add-label', 'wave-held')
             oj('orchestration', 'worker-retain', '--dispatch', v['dispatch'])
-            if os.environ.get('WAVE_TRACKER') == 'linear':   # the worker already set it Done (step 5); a held PR is not done
-                sh('orca', 'linear', 'status', 'set', k, '--to', os.environ['WAVE_STATE_HELD'], '--json')
+            track_hold(k, v)
 
 def main():
     take_lock()

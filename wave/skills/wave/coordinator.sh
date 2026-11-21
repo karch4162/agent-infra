@@ -5,11 +5,13 @@
 #   bash "$WAVE/coordinator.sh" SPO-640 quick:SPO-641 risk:SPO-642   # tier:ISSUE, default normal
 #   bash "$WAVE/coordinator.sh" --resume run_5de25620f335            # continue after a crash
 #
-# Runs for the whole wave (hours): start it from its own terminal. State lives in
+# Runs for the whole wave (hours). `/wave <issues>` starts it as a background job of
+# the session (INNOV-463); from a terminal, give it its own. State lives in
 # <main checkout>/.wave-run.<run>.json (git-excluded) plus the Orca Run, PR labels and
 # worktrees, so --resume re-reads those and never re-spawns an issue that has a
 # worktree (spawn.sh's claim guard). The merge decision is gate.py, pure and tested;
-# this file only moves data between orca, gh and the state file.
+# the loop itself is autonomy/coordinator_loop.py. Ticket status and comments go
+# through the tick's tracker adapter (jira_tracker.tracker_for, by WAVE_TRACKER).
 #
 # Human-gated by rule, never merged here: TIER risk, MIGRATION: yes, a fallback
 # reviewer, a tie-break, a worker question. Those PRs get the wave-held label.
@@ -21,6 +23,7 @@
 # Bash 3.2-safe: every map lives in the state JSON, handled by python.
 set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+[ "$WAVE_RUNTIME" = orca ] || { echo "wave: coordinator.sh needs WAVE_RUNTIME=orca; the direct runtime is supervised by autonomy/autonomy_tick.py" >&2; exit 1; }
 REPO_ID="$(orca_repo_id)"
 [ -n "$REPO_ID" ] || { echo "$MAIN_CHECKOUT is not registered with Orca" >&2; exit 1; }
 wave_exclude '.wave-run.*'
@@ -57,8 +60,12 @@ PY
 done
 
 # --- wait / gate / merge loop -----------------------------------------------
-export RUN STATE WAVE_HOME MAIN_CHECKOUT BASE_BRANCH WAVE_BASE WAVE_TRACKER
-export WAVE_STATE_HELD="${WAVE_STATE_HELD:-In Review}"
+export RUN STATE WAVE_HOME MAIN_CHECKOUT BASE_BRANCH WAVE_BASE WAVE_TRACKER WAVE_STATE_START
+# The tracker adapter (jira_tracker.tracker_for, same as the tick) reads the queue, site
+# and ClickUp list from the file; python on Windows needs the native path.
+WAVE_CONFIG="$(cygpath -m "$WAVE_CONFIG" 2>/dev/null || echo "$WAVE_CONFIG")"; export WAVE_CONFIG
+# A held ticket goes back here; the start state unless config.env names one.
+export WAVE_STATE_HELD="${WAVE_STATE_HELD:-$WAVE_STATE_START}"
 # A crashed loop must not fall through to the report: that printed "merged 0; held 0"
 # as if the wave had settled, while every worker was still running unsupervised.
 python "$WAVE_HOME_NATIVE/autonomy/coordinator_loop.py" || { echo "wave: coordinator loop crashed (traceback above); workers are unsupervised. Fix, then: bash \"\$WAVE/coordinator.sh\" --resume $RUN" >&2; exit 1; }
