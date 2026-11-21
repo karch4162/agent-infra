@@ -60,7 +60,7 @@ PY
 done
 
 # --- wait / gate / merge loop -----------------------------------------------
-export RUN STATE WAVE_HOME MAIN_CHECKOUT BASE_BRANCH WAVE_BASE WAVE_TRACKER WAVE_STATE_START
+export RUN STATE WAVE_HOME MAIN_CHECKOUT BASE_BRANCH WAVE_BASE WAVE_TRACKER WAVE_STATE_START WAVE_STATE_DONE
 # The tracker adapter (jira_tracker.tracker_for, same as the tick) reads the queue, site
 # and ClickUp list from the file; python on Windows needs the native path.
 WAVE_CONFIG="$(cygpath -m "$WAVE_CONFIG" 2>/dev/null || echo "$WAVE_CONFIG")"; export WAVE_CONFIG

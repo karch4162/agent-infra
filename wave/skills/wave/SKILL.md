@@ -265,8 +265,10 @@ The ticket follows the PR through the tick's tracker adapter (`jira_tracker.trac
 by `WAVE_TRACKER`; INNOV-463): a held PR moves its ticket back to `WAVE_STATE_HELD` (default
 `WAVE_STATE_START`) with a comment giving the reason and PR, and a merge comments the PR
 number and merge sha. Jira goes through `acli`, ClickUp through REST, Linear through
-`orca linear` (`autonomy/linear_tracker.py`, write-only, coordinator-only). A PR found
-already merged is recorded as merged, never held. A tracker error is logged, never fatal. What is left for you: the held PRs, the
+`orca linear` (`autonomy/linear_tracker.py`, write-only, coordinator-only). A PR the
+coordinator finds already merged before its gate passed (a self-merge) is held, with
+its ticket left as the worker set it; on `--resume`, a held PR you merged by hand has
+its ticket set back to `WAVE_STATE_DONE` and stays listed as held. A tracker error is logged, never fatal. What is left for you: the held PRs, the
 walker's tickets, and one `/brain:save`.
 
 ## What makes an issue `agent-ready`

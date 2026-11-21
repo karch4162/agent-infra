@@ -30,7 +30,7 @@ CONFIGS = {
 }
 # env beats the file in load_autonomy_config; a developer's shell must not pick the tracker
 CLEAR = ("WAVE_TRACKER", "WAVE_QUEUE", "WAVE_JIRA_SITE", "WAVE_CLICKUP_LIST", "WAVE_CLICKUP_SPACE",
-         "WAVE_CLICKUP_TEAM", "WAVE_STATE_HELD", "WAVE_STATE_START")
+         "WAVE_CLICKUP_TEAM", "WAVE_STATE_HELD", "WAVE_STATE_START", "WAVE_STATE_DONE")
 
 
 class Stub:
@@ -127,14 +127,36 @@ class CoordinatorTracker(unittest.TestCase):
                 self.assertIn("#12", calls[0][2])
                 self.assertIn("abc123def456", calls[0][2])
 
-    def test_pr_merged_outside_the_loop_is_merged_not_held(self):
+    def test_pr_merged_outside_the_loop_is_held_without_rewinding_the_ticket(self):
+        # a self-merged PR never passed gate.py: it must not count as a clean merge
+        # (walked, swept), and its ticket keeps the worker's done state
         self.use("jira")
         self.merged = True
-        for verdict in ("HOLD: TIER risk", "PENDING: mergeable UNKNOWN"):
+        for verdict in ("MERGE", "HOLD: TIER risk", "PENDING: mergeable UNKNOWN"):
             with self.subTest(verdict=verdict):
                 v = self.settle(verdict, issue())
-                self.assertEqual(v["status"], "merged")
-        self.assertNotIn("status", [c[0] for c in self.calls()])
+                self.assertEqual(v["status"], "held")
+                self.assertIn("never gated", v["reason"])
+        calls = self.calls()
+        self.assertNotIn("status", [c[0] for c in calls])
+        self.assertEqual(len(calls), 3)
+
+    def test_resume_puts_a_hand_merged_held_ticket_back_to_done_once(self):
+        os.environ["WAVE_STATE_DONE"] = "Validate"
+        self.use("jira")
+        self.merged = True
+        d = {"issues": {"ABC-7": issue(status="held")}}
+        cl.reconcile(d); cl.reconcile(d)   # a second --resume must not repeat it
+        self.assertEqual(d["issues"]["ABC-7"]["status"], "held")
+        calls = self.calls()
+        self.assertEqual([c[0] for c in calls], ["status", "comment"])
+        self.assertEqual(calls[0], ("status", "ABC-7", "Validate"))
+
+    def test_resume_leaves_an_open_held_pr_alone(self):
+        self.use("jira")
+        d = {"issues": {"ABC-7": issue(status="held")}}
+        cl.reconcile(d)
+        self.assertEqual(self.calls(), [])
 
     def test_failed_merge_call_on_a_landed_merge_is_merged(self):
         self.use("jira")

@@ -47,6 +47,11 @@ def reconcile(d):
             pr = pr_number(v)
             if pr and json.loads(gh('pr', 'view', str(pr), '--json', 'state')).get('state') == 'MERGED':
                 v.update(status='merged', pr=pr); log(k, f'PR #{pr} already merged; reconciled')
+        elif v['status'] == 'held' and v.get('pr') and pr_merged(v['pr']) and not v.get('mergedByHand'):
+            # a human merged a held PR: undo the hold's ticket rewind, but it stays held here
+            # (never walked or swept as a clean wave merge; the gate never passed it)
+            v['mergedByHand'] = True; log(k, f"held PR #{v['pr']} merged by hand; ticket back to done")
+            track(k, status=os.environ.get('WAVE_STATE_DONE'), comment=f"wave: held PR #{v['pr']} merged by hand")
 def save(d): json.dump(d, open(STATE, 'w'), indent=1)
 def log(*a): print(time.strftime('%H:%M:%S'), *a, flush=True)
 
@@ -146,8 +151,12 @@ def settle(d):
             v['status'], v['reason'] = 'held', 'worker_done without a PR number'; track_hold(k, v); continue
         v['pr'] = pr
         if pr_merged(pr):
-            v['status'] = 'merged'; log(k, f'PR #{pr} merged outside the loop; not gating')
-            oj('orchestration', 'worker-release', '--dispatch', v['dispatch']); continue
+            # merged before the gate passed it (a self-merge, or a human): hold for a person,
+            # never walk or sweep it as a clean merge; the ticket keeps the worker's done state
+            v['status'], v['reason'] = 'held', 'PR merged outside the coordinator; never gated'
+            gh('pr', 'edit', str(pr), '--add-label', 'wave-held')
+            oj('orchestration', 'worker-retain', '--dispatch', v['dispatch'])
+            track(k, comment=f"wave: held (PR #{pr}) - {v['reason']}"); continue
         verdict = gate(pr)
         log(k, f'PR #{pr}', verdict)
         if verdict == 'MERGE':
