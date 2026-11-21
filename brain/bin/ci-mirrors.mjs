@@ -22,9 +22,10 @@
 // reverted too, except the sync's own wiki/log.md line, which is always dropped. One row failing never stops the others; the exit status reports it.
 //
 // The recorded scope is machine-readable or the row fails: `scopes` on the repos.json
-// entry (e.g. ["lib"], or ["."] for the build directory minus the carve-out), else the
-// `scopes` the mirror's brain-inputs.json recorded. The prose scope column in the vault
-// CLAUDE.md is not parsed, and the driver never guesses a scope.
+// entry (["."] for the build directory minus the carve-out, or e.g. ["lib"]). The prose
+// scope column in the vault CLAUDE.md is not parsed, and the driver never guesses. The
+// scope audit reads only the vault-side carve-out, so a narrowed scope whose siblings
+// hold source must also be carved out there, or the audit refuses it (MISSING-ROOTS).
 //
 // Usage:
 //   node ci-mirrors.mjs --vault <vault> --work <dir> [--force] [--only a,b]
@@ -49,8 +50,10 @@ import { bashBin, pluginRoot } from '../core/runtime.mjs';
 // graphify, never sync-graph.sh, never a git call against the vault.
 const sourceAuth = process.env.BRAIN_SOURCE_AUTH || '';
 delete process.env.BRAIN_SOURCE_AUTH;
-const authEnv = (remote) => (sourceAuth
-  ? { env: { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `http.https://${remote.split('/')[0]}/.extraheader`, GIT_CONFIG_VALUE_0: sourceAuth } }
+// github.com only: the remote is repos.json data, and a row naming another host must
+// not receive the token.
+const authEnv = (remote) => (sourceAuth && remote.split('/')[0] === 'github.com'
+  ?{ env: { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `http.https://${remote.split('/')[0]}/.extraheader`, GIT_CONFIG_VALUE_0: sourceAuth } }
   : {});
 
 const argv = process.argv.slice(2);
@@ -104,6 +107,8 @@ const report = (state, name, detail) => { results.push({ state, name }); console
 // Every path git reports as changed in the vault, so each row's delta can be checked.
 function dirty() {
   const s = git(vault, 'status', '--porcelain', '--untracked-files=all', '--no-renames');
+  // An unreadable vault is not a clean one: a broken status must stop the row.
+  if (s.status !== 0) throw new Error('git status failed in the vault; refusing to judge this row');
   return new Set(s.raw.split('\n').filter(Boolean).map((l) => l.slice(3).replace(/^"|"$/g, '')));
 }
 function restore(name, extra = []) {
@@ -131,7 +136,9 @@ function buildRow(name, spec) {
   const mirror = join(vault, 'graphify', name);
   const remote = normalizeRemote(spec?.remote);
   if (!remote) throw new Error('repos.json entry has no remote');
-  const scopes = Array.isArray(spec?.scopes) ? spec.scopes : readJson(join(mirror, 'brain-inputs.json'))?.scopes;
+  // repos.json only: a mirror's brain-inputs.json is deleted by the sync when the
+  // build does not write one, so a scope read from it would last a single run.
+  const scopes = spec?.scopes;
   if (!Array.isArray(scopes) || !scopes.length || scopes.some((s) => typeof s !== 'string')) {
     throw new Error(`no machine-readable scope: add "scopes" to its repos.json entry (["."] builds the whole ${spec?.subPath ? 'subPath' : 'checkout'} minus the carve-out)`);
   }
@@ -157,6 +164,9 @@ function buildRow(name, spec) {
     const built = readJson(join(mirror, 'graph.json'))?.built_at_commit;
     if (typeof built === 'string' && /^[0-9a-f]{7,40}$/i.test(built) &&
         git(root, 'cat-file', '-e', `${built}^{commit}`).status === 0 &&
+        // Only a mirror built ON the branch may be left alone; one built off it gets
+        // rebuilt, so the provenance gate is never skipped by the fast path.
+        git(root, 'merge-base', '--is-ancestor', built, head.stdout).status === 0 &&
         git(root, 'diff', '--quiet', built, head.stdout, '--', sub || '.').status === 0) {
       return { state: 'UNCHANGED', detail: `nothing under ${sub || '.'} changed on origin/${branch} since ${built.slice(0, 12)}` };
     }
@@ -170,7 +180,10 @@ function buildRow(name, spec) {
   // deletes and writes in this directory, so confine it by its real path.
   const inside = relative(realpathSync(root), realpathSync(dir));
   if (inside.startsWith('..') || isAbsolute(inside)) throw new Error(`subPath ${sub} resolves outside the repository (symlink?)`);
+  // Both are build outputs; unlinking first means a committed symlink at either name
+  // is removed, never written through.
   rmSync(join(dir, 'graphify-out'), { recursive: true, force: true });
+  rmSync(join(dir, '.graphifyignore'), { force: true });
   writeScopedIgnore(dir, carveOut, scopes);
   const b = graphifyRunner(dir)(['update', '.']);
   if (b.status !== 0) throw new Error(`graphify update failed: ${`${b.stdout || ''}${b.stderr || ''}`.trim().split('\n').slice(-3).join(' | ')}`);

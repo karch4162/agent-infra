@@ -97,6 +97,11 @@ fi
 if printf '%s\n' "$wf" | grep -q 'ci-mirrors.mjs" --gate HEAD~1 HEAD' &&
    printf '%s\n' "$wf" | grep -q 'if \[ "$gate" -eq 0 \]; then'; then
   pass "template: auto-merge is behind the --gate verdict"
+  if printf '%s\n' "$wf" | grep -q -- '--match-head-commit "$(git rev-parse HEAD)"'; then
+    pass "template: the merge is bound to the gated commit"
+  else
+    fail "template: gh pr merge must pass --match-head-commit for the gated commit"
+  fi
 else
   fail "template: gh pr merge must be guarded by the --gate verdict"
 fi
@@ -295,6 +300,19 @@ else
   fail "escaping subPath: wrote outside the clone"
 fi
 
+# --- 5b. a mirror built OFF the branch is rebuilt, even with no diff under its path --
+node -e 'const f=process.argv[1],j=JSON.parse(require("fs").readFileSync(f,"utf8"));j.repos.web.subPath="apps/web";require("fs").writeFileSync(f,JSON.stringify(j))' "$V/repos.json"
+git -C "$T/src/mono" switch -q -c side
+echo 'export const s = 1;' > "$T/src/mono/other/side.js"
+git -C "$T/src/mono" add -A && git -C "$T/src/mono" commit -qm side && git -C "$T/src/mono" push -q origin side
+SIDE=$(git -C "$T/src/mono" rev-parse HEAD)
+git -C "$T/src/mono" switch -q main
+printf '{"nodes":[],"links":[],"built_at_commit":"%s"}' "$SIDE" > "$V/graphify/web/graph.json"
+out=$(ci --only web)
+assert_not_contains "off-branch mirror: never left UNCHANGED" "$out" "CI-MIRRORS: UNCHANGED web"
+assert_contains "off-branch mirror: rebuilt from the branch" "$out" "CI-MIRRORS: BUILT web"
+git -C "$V" checkout -q -- . && git -C "$V" clean -fdq -e repos.local.json
+
 # --- 6. a subPath that is a committed symlink out of the clone is refused ----------
 if ln -s ../.. "$T/src/mono/apps/link" 2>/dev/null && [[ -L "$T/src/mono/apps/link" ]]; then
   push mono "symlink"
@@ -302,6 +320,13 @@ if ln -s ../.. "$T/src/mono/apps/link" 2>/dev/null && [[ -L "$T/src/mono/apps/li
   out=$(ci --only web --force)
   assert_contains "symlinked subPath: row FAILED" "$out" "CI-MIRRORS: FAILED web - subPath apps/link resolves outside the repository"
   if [[ ! -e "$W/.graphifyignore" ]]; then pass "symlinked subPath: nothing written at the link target"; else fail "symlinked subPath: wrote at the link target"; fi
+  # A committed .graphifyignore symlink is unlinked, never written through.
+  echo keep > "$T/target"
+  ln -s "$T/target" "$T/src/mono/apps/web/.graphifyignore"
+  push mono "ignore symlink"
+  node -e 'const f=process.argv[1],j=JSON.parse(require("fs").readFileSync(f,"utf8"));j.repos.web.subPath="apps/web";require("fs").writeFileSync(f,JSON.stringify(j))' "$V/repos.json"
+  out=$(ci --only web --force)
+  assert_eq "symlinked .graphifyignore: its target is untouched" "keep" "$(cat "$T/target")"
 else
   echo "SKIP symlinked subPath: this filesystem cannot create symlinks"
 fi

@@ -28,7 +28,9 @@
 #        "web": { "remote": "github.com/acme/mono", "subPath": "apps/web",
 #                 "branch": "main", "scopes": ["src"] }
 #      plus graphify/web/.graphifyignore. ["."] builds the whole checkout (or
-#      subPath) minus the carve-out.
+#      subPath) minus the carve-out. The scope audit reads only that vault-side
+#      carve-out, so any sibling directory holding source that a narrowed scope
+#      leaves out must be listed there too, or the row is refused.
 #   6. Copy templates/github/dependabot.yml to <vault>/.github/dependabot.yml so
 #      the action SHA pins below stay current.
 #
@@ -194,7 +196,8 @@ jobs:
             --title "chore(brain): rebuild graph mirrors" --body-file "$RUNNER_TEMP/pr-body.md")
           echo "PR: $url" | tee -a "$GITHUB_STEP_SUMMARY"
           if [ "$gate" -eq 0 ]; then
-            gh pr merge "$url" --squash --delete-branch ||
+            # Merge exactly the commit the gate judged, not whatever the branch holds now.
+            gh pr merge "$url" --squash --delete-branch --match-head-commit "$(git rev-parse HEAD)" ||
               echo "Merge refused (branch protection?); the PR stays open for a human." | tee -a "$GITHUB_STEP_SUMMARY"
           else
             echo "Not auto-merged: $verdict" | tee -a "$GITHUB_STEP_SUMMARY"
