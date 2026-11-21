@@ -88,7 +88,11 @@ jobs:
             exit 1
           fi
 
+      # No credential left in .git/config while graphify and its dependencies run;
+      # the publish step authenticates its one push itself.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Check out the brain plugin
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -115,6 +119,9 @@ jobs:
           app-id: ${{ vars.BRAIN_SOURCE_APP_ID }}
           private-key: ${{ secrets.BRAIN_SOURCE_APP_KEY }}
           owner: ${{ vars.BRAIN_SOURCE_OWNER }}
+          # Read-only, whatever the installation grants. Narrow further with a
+          # `repositories:` list of the source repos if the app sees more than those.
+          permission-contents: read
 
       - name: Build and sync
         id: build
@@ -125,11 +132,12 @@ jobs:
           ONLY: ${{ inputs.only }}
         run: |
           graphify --version
-          # The credential reaches git through this step's environment only: never a
-          # clone URL, never the global config, never the vault checkout's own config.
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$SOURCE_TOKEN" | base64 -w0)"
+          # The credential goes to the driver as a header value, never a clone URL or any
+          # git config file. The driver hands it to clone/fetch/checkout only and removes
+          # it from its environment, so graphify and sync-graph.sh never see it.
+          BRAIN_SOURCE_AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$SOURCE_TOKEN" | base64 -w0)"
+          export BRAIN_SOURCE_AUTH
+          unset SOURCE_TOKEN
           args=(--vault "$GITHUB_WORKSPACE" --work "$RUNNER_TEMP/brain-src")
           [ -n "$FORCE" ] && args+=("$FORCE")
           [ -n "$ONLY" ] && args+=(--only "$ONLY")
@@ -170,7 +178,10 @@ jobs:
             echo "Dry run: would push $branch and open a PR ($verdict)." | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          git push -q origin "$branch"
+          # The vault checkout kept no credential; authenticate this one push only.
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.$GITHUB_SERVER_URL/.extraheader" \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
+            git push -q origin "$branch"
           {
             echo "Scheduled mirror rebuild, run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID."
             echo

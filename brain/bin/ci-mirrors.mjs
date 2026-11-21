@@ -19,7 +19,7 @@
 // A row publishes only when both gates said OK. SKIPPED is "could not check", and the
 // workflow auto-merges on the strength of those checks, so an unchecked row is reverted
 // and reported as failed. A row that changes anything outside graphify/<name>/ is
-// reverted too. One row failing never stops the others; the exit status reports it.
+// reverted too, except the sync's own wiki/log.md line, which is always dropped. One row failing never stops the others; the exit status reports it.
 //
 // The recorded scope is machine-readable or the row fails: `scopes` on the repos.json
 // entry (e.g. ["lib"], or ["."] for the build directory minus the carve-out), else the
@@ -36,12 +36,22 @@
 // base..head changes at least one path and every changed path is under graphify/;
 // otherwise `AUTO-MERGE: NO - <reason>` (exit 1).
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { normalizeRemote, branchOf } from './resolve-repos.mjs';
 import { writeScopedIgnore, graphifyRunner } from '../core/graph-inputs.mjs';
 import { bashBin, pluginRoot } from '../core/runtime.mjs';
+
+// The source-repo credential, as an http.extraHeader value. It is read once and removed
+// from this process's environment, so only clone, fetch and checkout see it: never
+// graphify, never sync-graph.sh, never a git call against the vault.
+const sourceAuth = process.env.BRAIN_SOURCE_AUTH || '';
+delete process.env.BRAIN_SOURCE_AUTH;
+const authEnv = (remote) => (sourceAuth
+  ? { env: { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `http.https://${remote.split('/')[0]}/.extraheader`, GIT_CONFIG_VALUE_0: sourceAuth } }
+  : {});
 
 const argv = process.argv.slice(2);
 const val = (f) => (argv.includes(f) ? argv[argv.indexOf(f) + 1] : undefined);
@@ -91,9 +101,9 @@ const local = readJson(join(vault, 'repos.local.json')) || {};
 const results = [];
 const report = (state, name, detail) => { results.push({ state, name }); console.log(`CI-MIRRORS: ${state} ${name} - ${detail}`); };
 
-// Paths git reports as changed under graphify/, so each row's delta can be checked.
+// Every path git reports as changed in the vault, so each row's delta can be checked.
 function dirty() {
-  const s = git(vault, 'status', '--porcelain', '--untracked-files=all', '--no-renames', '--', 'graphify/');
+  const s = git(vault, 'status', '--porcelain', '--untracked-files=all', '--no-renames');
   return new Set(s.raw.split('\n').filter(Boolean).map((l) => l.slice(3).replace(/^"|"$/g, '')));
 }
 function restore(name, extra = []) {
@@ -104,11 +114,12 @@ function restore(name, extra = []) {
 
 function checkout(remote) {
   if (clones.has(remote)) return clones.get(remote);
-  const dir = join(work, remote.replace(/[^A-Za-z0-9._-]+/g, '_'));
+  // The hash keeps remotes that sanitize alike (group/sub_proj, group/sub/proj) apart.
+  const dir = join(work, `${remote.replace(/[^A-Za-z0-9._-]+/g, '_')}-${createHash('sha256').update(remote).digest('hex').slice(0, 10)}`);
   if (!existsSync(join(dir, '.git'))) {
-    const c = run('git', ['clone', '--quiet', '--no-checkout', '--filter=blob:none', `https://${remote}.git`, dir]);
+    const c = run('git', ['clone', '--quiet', '--no-checkout', '--filter=blob:none', `https://${remote}.git`, dir], authEnv(remote));
     if (c.status !== 0) throw new Error(`clone of ${remote} failed (check the source-repo credential)`);
-  } else if (git(dir, 'fetch', '--quiet', '--prune', 'origin').status !== 0) {
+  } else if (run('git', ['-C', dir, 'fetch', '--quiet', '--prune', 'origin'], authEnv(remote)).status !== 0) {
     // A reused work dir must see today's branch tips, or every row reads UNCHANGED.
     throw new Error(`fetch of ${remote} failed (check the source-repo credential)`);
   }
@@ -151,10 +162,14 @@ function buildRow(name, spec) {
     }
   }
 
-  const co = git(root, 'checkout', '--quiet', '--force', '--detach', head.stdout);
+  const co = run('git', ['-C', root, 'checkout', '--quiet', '--force', '--detach', head.stdout], authEnv(remote));
   if (co.status !== 0) throw new Error(`checkout of origin/${branch} failed`);
   const dir = sub ? join(root, sub) : root;
   if (!existsSync(dir)) throw new Error(`subPath ${sub} does not exist on origin/${branch}`);
+  // A committed symlink passes the string check above and leads anywhere; the build
+  // deletes and writes in this directory, so confine it by its real path.
+  const inside = relative(realpathSync(root), realpathSync(dir));
+  if (inside.startsWith('..') || isAbsolute(inside)) throw new Error(`subPath ${sub} resolves outside the repository (symlink?)`);
   rmSync(join(dir, 'graphify-out'), { recursive: true, force: true });
   writeScopedIgnore(dir, carveOut, scopes);
   const b = graphifyRunner(dir)(['update', '.']);
@@ -170,7 +185,12 @@ function buildRow(name, spec) {
   const s = run(bashBin(), [fwd(join(pluginRoot, 'bin', 'sync-graph.sh')), '--no-commit', name],
     { cwd: vault, env: { BRAIN_ROOT: fwd(vault), CLAUDE_PROJECT_DIR: fwd(vault), REPOS_DIR: fwd(work) } });
   process.stdout.write(s.out.split('\n').map((l) => (l ? `  | ${l}` : l)).join('\n'));
-  const stray = [...dirty()].filter((p) => !before.has(p) && !p.startsWith(`graphify/${name}/`));
+  const changed = [...dirty()].filter((p) => !before.has(p) && !p.startsWith(`graphify/${name}/`));
+  // sync-graph.sh appends a wiki/log.md line (the PR is graphify/ only, so it is dropped
+  // here); repos.local.json is ours and .brain/ is machine-local state. Anything else is
+  // a write this row must not make.
+  if (changed.includes('wiki/log.md')) git(vault, 'checkout', '--quiet', 'HEAD', '--', 'wiki/log.md');
+  const stray = changed.filter((p) => p !== 'wiki/log.md' && p !== 'repos.local.json' && !p.startsWith('.brain/'));
   if (stray.length) { restore(name, stray); throw new Error(`the sync changed ${stray.length} path(s) outside graphify/${name}/, e.g. ${stray[0]}; reverted`); }
   if (s.status !== 0) { restore(name); throw new Error(`sync-graph.sh refused it (exit ${s.status}); see its output above`); }
   if (new RegExp(`^up-to-date: ${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm').test(s.out)) {
@@ -189,6 +209,7 @@ for (const name of names) {
     const r = buildRow(name, repos[name]);
     report(r.state, name, r.detail);
   } catch (e) {
+    restore(name); // whatever step threw, a failed row leaves its mirror as it was
     report('FAILED', name, e.message);
   }
 }

@@ -100,6 +100,16 @@ if printf '%s\n' "$wf" | grep -q 'ci-mirrors.mjs" --gate HEAD~1 HEAD' &&
 else
   fail "template: gh pr merge must be guarded by the --gate verdict"
 fi
+if [[ "$(printf '%s\n' "$wf" | grep -c 'persist-credentials: false')" == 2 ]]; then
+  pass "template: neither checkout leaves a credential in .git/config"
+else
+  fail "template: both checkouts must set persist-credentials: false"
+fi
+if printf '%s\n' "$wf" | grep -q 'permission-contents: read' && ! printf '%s\n' "$wf" | grep -qE 'permission-contents: write'; then
+  pass "template: the source token is minted read-only"
+else
+  fail "template: create-github-app-token must request permission-contents: read"
+fi
 if [[ -f "$REPO_ROOT/brain/templates/github/dependabot.yml" ]] &&
    grep -q 'package-ecosystem: github-actions' "$REPO_ROOT/brain/templates/github/dependabot.yml"; then
   pass "template: dependabot github-actions config ships alongside"
@@ -145,6 +155,7 @@ import { mkdirSync, writeFileSync, readFileSync, readdirSync, statSync } from 'n
 import { execFileSync } from 'node:child_process';
 if (process.argv[2] === '--version') { console.log('graphify 0.0.0-fake'); process.exit(0); }
 if (process.argv[2] !== 'update' || process.argv[3] !== '.') process.exit(2);
+if (process.env.BRAIN_SOURCE_AUTH || process.env.GIT_CONFIG_COUNT) { console.error('fake graphify: source credential leaked into the build'); process.exit(3); }
 const ignored = new Set(readFileSync('.graphifyignore', 'utf8').split(/\r?\n/).filter(l => /^\/[^/]+\/$/.test(l)).map(l => l.slice(1, -1)));
 const files = [];
 const walk = d => { for (const e of readdirSync(d)) { const p = d + '/' + e; statSync(p).isDirectory() ? walk(p) : files.push(p); } };
@@ -199,8 +210,9 @@ assert_eq "no --vault: exits 2 even with BRAIN_ROOT set" "2" "$rc"
 assert_eq "no --vault: wrote nothing" "" "$(changed)"
 
 # --- 1. first run: whole repo + subPath build, both gates OK ---------------------
-out=$(ci); rc=$?
+out=$(BRAIN_SOURCE_AUTH='AUTHORIZATION: basic ZHVtbXk=' ci); rc=$?
 assert_eq "run 1: exit 1 (noscope and nocarve fail)" "1" "$rc"
+assert_not_contains "run 1: the source credential never reaches graphify" "$out" "credential leaked"
 assert_contains "run 1: app BUILT" "$out" "CI-MIRRORS: BUILT app - origin/main"
 assert_contains "run 1: web (subPath) BUILT" "$out" "CI-MIRRORS: BUILT web - origin/main"
 assert_contains "run 1: provenance OK for web" "$out" "PROVENANCE: OK web"
@@ -218,8 +230,9 @@ assert_contains "run 1: app mirror has the new file" "$app" '"source_file": "src
 assert_not_contains "run 1: app scope ['src'] carved tests/ out" "$app" "tests/"
 ch=$(changed)
 assert_not_contains "run 1: subPath never published under its basename" "$ch" "graphify/apps/"
-outside=$(printf '%s\n' $ch | grep -vE '^(graphify/(app|web)/|wiki/log\.md$|repos\.local\.json$|\.brain/)' || true)
-assert_eq "run 1: changes only under graphify/app, graphify/web (+ log, local state)" "" "$outside"
+outside=$(printf '%s\n' $ch | grep -vE '^(graphify/(app|web)/|repos\.local\.json$|\.brain/)' || true)
+assert_eq "run 1: changes only under graphify/app, graphify/web (+ local state)" "" "$outside"
+assert_not_contains "run 1: the sync's wiki/log.md line is dropped" "$ch" "wiki/log.md"
 
 # --- 2. the auto-merge gate -------------------------------------------------------
 git -C "$V" switch -q -c ci
@@ -228,6 +241,7 @@ git -C "$V" commit -qm mirrors
 out=$(node "$CI" --gate HEAD~1 HEAD --vault "$V" 2>&1); rc=$?
 assert_eq "gate: graphify/-only commit exits 0" "0" "$rc"
 assert_contains "gate: says YES" "$out" "AUTO-MERGE: YES"
+echo '- extra' >> "$V/wiki/log.md"
 git -C "$V" add -- wiki/log.md
 git -C "$V" commit -qm log
 out=$(node "$CI" --gate HEAD~2 HEAD --vault "$V" 2>&1); rc=$?
@@ -279,6 +293,17 @@ if [[ -f "$W/outside/sentinel" && ! -e "$W/outside/.graphifyignore" ]]; then
   pass "escaping subPath: nothing written outside the clone"
 else
   fail "escaping subPath: wrote outside the clone"
+fi
+
+# --- 6. a subPath that is a committed symlink out of the clone is refused ----------
+if ln -s ../.. "$T/src/mono/apps/link" 2>/dev/null && [[ -L "$T/src/mono/apps/link" ]]; then
+  push mono "symlink"
+  node -e 'const f=process.argv[1],j=JSON.parse(require("fs").readFileSync(f,"utf8"));j.repos.web.subPath="apps/link";require("fs").writeFileSync(f,JSON.stringify(j))' "$V/repos.json"
+  out=$(ci --only web --force)
+  assert_contains "symlinked subPath: row FAILED" "$out" "CI-MIRRORS: FAILED web - subPath apps/link resolves outside the repository"
+  if [[ ! -e "$W/.graphifyignore" ]]; then pass "symlinked subPath: nothing written at the link target"; else fail "symlinked subPath: wrote at the link target"; fi
+else
+  echo "SKIP symlinked subPath: this filesystem cannot create symlinks"
 fi
 
 echo
