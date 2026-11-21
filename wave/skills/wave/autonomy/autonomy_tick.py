@@ -191,7 +191,7 @@ class Tick:
             with (self.auto / file).open("a", encoding="utf-8") as f:
                 f.write(f"- {_now()} {text}\n")
 
-    def closeout_pending(self, ticket: str, sha: str) -> None:
+    def closeout_pending(self, ticket: str, sha: str, pr: int | None = None) -> None:
         """Record a merge as owed a closeout, at merge time. The merging tick can die before
         closeout runs (or defer it to live workers); a later tick that merged nothing still
         finds the marker and runs it. Only a finished closeout command clears it (INNOV-447)."""
@@ -203,11 +203,14 @@ class Tick:
             return
         pend = _read(self.auto / PENDING_NAME)
         tickets, shas = list(pend.get("tickets") or []), list(pend.get("shas") or [])
+        unresolved = [n for n in (pend.get("unresolved_prs") or []) if n != pr]
         if ticket not in tickets:
             tickets.append(ticket)
         if sha and sha not in shas:
             shas.append(sha)
-        pend.update(tickets=tickets, shas=shas, since=pend.get("since") or _now())
+        if not sha and pr:  # closeout looks the sha up again: it must not run unverified
+            unresolved.append(pr)
+        pend.update(tickets=tickets, shas=shas, unresolved_prs=unresolved, since=pend.get("since") or _now())
         self._write_pending(pend)
 
     def _write_pending(self, pend: dict[str, Any]) -> None:
@@ -339,7 +342,7 @@ class Tick:
         if pr.get("state") == "MERGED":
             sha = (pr.get("mergeCommit") or {}).get("oid") or ""
             st.update(state="done_merged", note="merged by a human after the hold", merge_sha=sha)
-            self.closeout_pending(ticket, sha)
+            self.closeout_pending(ticket, sha, int(st["pr_number"]))
             self.ev(ticket, "merged_by_human", pr=st["pr_number"])
             self.track(ticket, comment=f"wave: {st.get('pr')} merged; closeout and sweep follow")
         elif pr.get("state") == "CLOSED":
@@ -401,11 +404,12 @@ class Tick:
             self.ev(ticket, "merge", action=res.action, decision=res.decision)
             if res.action == "merged":
                 st.update(state="done_merged", note=res.decision)
+                self.closeout_pending(ticket, "", int(st["pr_number"]))  # owed before anything else can fail
                 p = _sh(["gh", "pr", "view", str(st["pr_number"]), "--repo", self.repo_slug(),
                          "--json", "mergeCommit", "-q", ".mergeCommit.oid"], self.repo)
                 if p.stdout.strip():
                     st["merge_sha"] = p.stdout.strip()
-                self.closeout_pending(ticket, st.get("merge_sha") or "")
+                    self.closeout_pending(ticket, st["merge_sha"], int(st["pr_number"]))
                 self.track(ticket, status=self.cfg.state_done or None,
                            comment=f"wave: merged {st['pr']} ({res.decision})")
             elif res.action in {"held", "conflict_held"}:
@@ -524,8 +528,23 @@ class Tick:
         if not self.execute:
             self.ev("-", "would_closeout", cmd=self.cfg.closeout_cmd)
             return
-        why = sync_base(self.repo, self.cfg.wave_base, shas)
-        pend.update(tickets=tickets, shas=shas, since=pend.get("since") or _now())
+        if pid_alive(int(pend.get("pid") or 0)):
+            # A killed tick does not kill its closeout's process; never run a second one beside it.
+            self.ev("-", "closeout_deferred", reason=f"earlier closeout pid {pend['pid']} still running")
+            self.closeout_ok = False
+            return
+        unresolved = []
+        for n in pend.get("unresolved_prs") or []:  # a merge sha gh did not report at merge time
+            p = _sh(["gh", "pr", "view", str(n), "--repo", self.repo_slug(),
+                     "--json", "mergeCommit", "-q", ".mergeCommit.oid"], self.repo)
+            sha = (p.stdout or "").strip()
+            if sha:
+                shas = list(dict.fromkeys([*shas, sha]))
+            else:
+                unresolved.append(n)
+        pend.update(tickets=tickets, shas=shas, unresolved_prs=unresolved, since=pend.get("since") or _now())
+        why = (f"merge commit of PR(s) {unresolved} unknown; the base cannot be checked for it" if unresolved
+               else sync_base(self.repo, self.cfg.wave_base, shas))
         if why:  # the command never ran: the marker stays, so the next tick tries again
             self.ev("-", "closeout_skipped", reason=why)
             if pend.get("skip_reason") != why:  # once per reason, not once per tick
@@ -538,10 +557,17 @@ class Tick:
             self.notice(f"closeout for {tickets}: {attempts} earlier attempt(s) never finished "
                         "(tick killed or timed out mid-closeout); retrying")
         pend.pop("skip_reason", None)
-        self._write_pending({**pend, "attempts": attempts + 1})
-        p = subprocess.run([_bash(), "-lc", self.cfg.closeout_cmd], cwd=str(self.repo), capture_output=True,
-                           text=True, encoding="utf-8", errors="replace", timeout=3600)
-        (self.auto / "closeout-last.log").write_text((p.stdout or "") + (p.stderr or ""), encoding="utf-8")
+        pend["attempts"] = attempts + 1
+        self._write_pending(pend)
+        p = subprocess.Popen([_bash(), "-lc", self.cfg.closeout_cmd], cwd=str(self.repo), stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+        self._write_pending({**pend, "pid": p.pid})
+        try:
+            out, err = p.communicate(timeout=3600)
+        except subprocess.TimeoutExpired:
+            p.kill()  # the marker stays: the next tick retries, and notices the earlier attempt
+            raise
+        (self.auto / "closeout-last.log").write_text((out or "") + (err or ""), encoding="utf-8")
         self.closeout_ok = p.returncode == 0
         streak = record_closeout(self.wave_dir, self.closeout_ok)
         (self.auto / PENDING_NAME).unlink(missing_ok=True)  # finished, pass or fail: owed no longer
