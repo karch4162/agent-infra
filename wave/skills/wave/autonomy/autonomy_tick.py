@@ -199,18 +199,21 @@ class Tick:
             self.merged_this_tick.append(ticket)
         if sha and sha not in self.merged_shas:
             self.merged_shas.append(sha)
-        if not self.execute:
+        if not self.execute or not self.cfg.closeout_cmd:  # no closeout configured: nothing would clear it
             return
-        path = self.auto / PENDING_NAME
-        pend = _read(path)
+        pend = _read(self.auto / PENDING_NAME)
         tickets, shas = list(pend.get("tickets") or []), list(pend.get("shas") or [])
         if ticket not in tickets:
             tickets.append(ticket)
         if sha and sha not in shas:
             shas.append(sha)
+        pend.update(tickets=tickets, shas=shas, since=pend.get("since") or _now())
+        self._write_pending(pend)
+
+    def _write_pending(self, pend: dict[str, Any]) -> None:
+        path = self.auto / PENDING_NAME
         tmp = path.with_suffix(".tmp")  # a tick killed mid-write must not leave a truncated marker
-        tmp.write_text(json.dumps({"tickets": tickets, "shas": shas, "since": pend.get("since") or _now()},
-                                  indent=2) + "\n", encoding="utf-8")
+        tmp.write_text(json.dumps(pend, indent=2) + "\n", encoding="utf-8")
         os.replace(tmp, path)
 
     def repo_slug(self) -> str:
@@ -522,11 +525,20 @@ class Tick:
             self.ev("-", "would_closeout", cmd=self.cfg.closeout_cmd)
             return
         why = sync_base(self.repo, self.cfg.wave_base, shas)
+        pend.update(tickets=tickets, shas=shas, since=pend.get("since") or _now())
         if why:  # the command never ran: the marker stays, so the next tick tries again
             self.ev("-", "closeout_skipped", reason=why)
-            self.notice(f"closeout not run after merging {tickets}: {why}")
+            if pend.get("skip_reason") != why:  # once per reason, not once per tick
+                self.notice(f"closeout not run after merging {tickets}: {why}")
+            self._write_pending({**pend, "skip_reason": why})
             self.closeout_ok = False
             return
+        attempts = int(pend.get("attempts") or 0)
+        if attempts:
+            self.notice(f"closeout for {tickets}: {attempts} earlier attempt(s) never finished "
+                        "(tick killed or timed out mid-closeout); retrying")
+        pend.pop("skip_reason", None)
+        self._write_pending({**pend, "attempts": attempts + 1})
         p = subprocess.run([_bash(), "-lc", self.cfg.closeout_cmd], cwd=str(self.repo), capture_output=True,
                            text=True, encoding="utf-8", errors="replace", timeout=3600)
         (self.auto / "closeout-last.log").write_text((p.stdout or "") + (p.stderr or ""), encoding="utf-8")
