@@ -69,11 +69,20 @@ else
 fi
 if printf '%s\n' "$wf" | grep -q "PYTHONHASHSEED: '0'"; then pass "template: PYTHONHASHSEED pinned to 0"; else fail "template: PYTHONHASHSEED must be '0'"; fi
 ref=$(printf '%s\n' "$wf" | sed -n 's/^ *PLUGIN_REF: *\([^ #]*\).*/\1/p')
-if [[ -n "$ref" && "$ref" != main && "$ref" != master && "$ref" != HEAD ]]; then
-  pass "template: plugin checkout is pinned ($ref)"
+# A tag or branch can be moved under a job that holds a token and self-merges. The
+# template ships an unfillable placeholder plus a first step that refuses anything
+# but a 40-hex SHA, so an unadopted copy fails instead of running a movable ref.
+if [[ "$ref" =~ ^[0-9a-f]{40}$ || "$ref" == FILL-IN-brain-release-commit-sha ]] &&
+   printf '%s\n' "$wf" | grep -qF 'if ! [[ "$PLUGIN_REF" =~ ^[0-9a-f]{40}$ ]]; then'; then
+  pass "template: plugin checkout requires a commit SHA ($ref)"
 else
-  fail "template: PLUGIN_REF must pin a release, not a branch" "[$ref]"
+  fail "template: PLUGIN_REF must be a 40-hex SHA (or the FILL-IN placeholder) behind a SHA guard step" "[$ref]"
 fi
+guard=$(printf '%s\n' "$wf" | awk '/name: Require an immutable plugin pin/{f=1} f&&/if ! \[\[/{print; exit}' | sed 's/^ *//')
+for probe in brain--v0.23.0 main 3d3c42e5; do
+  PLUGIN_REF="$probe" bash -c "${guard} exit 1; fi; exit 0" >/dev/null 2>&1 && fail "template: pin guard accepts movable ref $probe" || pass "template: pin guard refuses $probe"
+done
+PLUGIN_REF=3d3c42e5aac5ba805825da76410c181273ba90b1 bash -c "${guard} exit 1; fi; exit 0" >/dev/null 2>&1 && pass "template: pin guard accepts a 40-hex SHA" || fail "template: pin guard refuses a 40-hex SHA"
 if printf '%s\n' "$wf" | grep -qE 'https://[^ ]*(TOKEN|token)[^ ]*@' ||
    printf '%s\n' "$wf" | grep -qE 'git config --global'; then
   fail "template: the source token must never sit in a clone URL or the global git config"
@@ -259,6 +268,18 @@ assert_contains "scope refusal: app FAILED" "$out" "CI-MIRRORS: FAILED app - syn
 assert_eq "scope refusal: app mirror left as it was" "$before" "$(cat "$V/graphify/app/graph.json")"
 assert_contains "scope refusal: web still BUILT" "$out" "CI-MIRRORS: BUILT web"
 assert_contains "scope refusal: web mirror has the new file" "$(tr -d '\r' < "$V/graphify/web/graph.json")" '"source_file": "src/y.js"'
+
+# --- 5. a subPath that escapes the clone is refused before anything is written ----
+mkdir -p "$W/outside" && echo keep > "$W/outside/sentinel"
+node -e 'const f=process.argv[1],j=JSON.parse(require("fs").readFileSync(f,"utf8"));j.repos.web.subPath="../outside";require("fs").writeFileSync(f,JSON.stringify(j))' "$V/repos.json"
+out=$(ci --only web --force); rc=$?
+assert_eq "escaping subPath: exit 1" "1" "$rc"
+assert_contains "escaping subPath: row FAILED" "$out" 'CI-MIRRORS: FAILED web - subPath "../outside" must be a relative path inside the repository'
+if [[ -f "$W/outside/sentinel" && ! -e "$W/outside/.graphifyignore" ]]; then
+  pass "escaping subPath: nothing written outside the clone"
+else
+  fail "escaping subPath: wrote outside the clone"
+fi
 
 echo
 echo "Passed: $PASSED  Failed: $FAILED"

@@ -37,7 +37,7 @@
 // otherwise `AUTO-MERGE: NO - <reason>` (exit 1).
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { normalizeRemote, branchOf } from './resolve-repos.mjs';
 import { writeScopedIgnore, graphifyRunner } from '../core/graph-inputs.mjs';
@@ -136,7 +136,11 @@ function buildRow(name, spec) {
   }
   const head = git(root, 'rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}^{commit}`);
   if (head.status !== 0) throw new Error(`origin/${branch} does not exist`);
-  const sub = fwd(spec?.subPath || '').replace(/^\/+|\/+$/g, '');
+  const sub = fwd(spec?.subPath || '').replace(/\/+$/g, '');
+  // subPath names a directory inside the clone; the build deletes and writes there.
+  if (isAbsolute(sub) || /^[A-Za-z]:/.test(sub) || sub.split('/').includes('..') || relative(root, join(root, sub)).startsWith('..')) {
+    throw new Error(`subPath ${JSON.stringify(spec.subPath)} must be a relative path inside the repository`);
+  }
 
   if (!force) {
     const built = readJson(join(mirror, 'graph.json'))?.built_at_commit;
