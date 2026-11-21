@@ -61,7 +61,7 @@ Each tick, idempotent, resumable from the status files:
 | challenge | Grok in the surviving worktree, read-only, diff written for it | `challenged` + verdict |
 | merge | `merge_policy.decide` over the PR body's `## Wave` block + checks + challenge | `done_merged` or `done_held`; tracker status + comment |
 | spawn | `backlog_watch` (cap, slots, rating, sufficiency), plan loop when thin | a worker; daily cap counted only after the spawn succeeded |
-| closeout | `WAVE_CLOSEOUT_CMD` when something merged and nothing is live | `autonomy/closeout-last.log` |
+| closeout | `WAVE_CLOSEOUT_CMD` when `autonomy/closeout-pending.json` lists a merge and nothing is live; a merge writes the marker at once, so a later tick runs the closeout a killed or deferred tick owed. The marker records the closeout's pid: while it is alive no second closeout starts (one notice past the 60-min timeout), and a merge sha gh did not report is looked up again before closeout runs | `autonomy/closeout-last.log`; the marker is cleared once the command finishes, pass or fail |
 
 ## Watching workers in Orca
 
