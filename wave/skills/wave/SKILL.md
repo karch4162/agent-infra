@@ -1,6 +1,6 @@
 ---
 name: wave
-description: Start a wave of unsupervised workers on agent-ready tracker issues (Linear, Jira or ClickUp, configured per repo) on the Orca runtime or the direct git-worktree runtime, run the fresh-session checklist around it (leftovers, brain save, worktree sweep, queue check), or run the autonomy tick that drives spawn, CI, challenge and merge without a session in the loop. Use when the user says "/wave", "spin up N workers", "start a wave", "run the loop", "wave status", "autonomy tick", or opens a session wanting agents working the backlog.
+description: Start a supervised wave on agent-ready tracker issues (Linear, Jira or ClickUp, configured per repo) - `/wave <issues>` runs coordinator.sh, which spawns the workers, gates and merges or holds their PRs, updates the tickets, walks and sweeps; `/wave spawn <issue>` is the explicit unsupervised launch - run the fresh-session checklist around it (leftovers, brain save, worktree sweep, queue check), or run the autonomy tick that drives spawn, CI, challenge and merge without a session in the loop. Use when the user says "/wave", "spin up N workers", "start a wave", "run the loop", "wave status", "autonomy tick", or opens a session wanting agents working the backlog.
 ---
 
 # /wave — run a wave of workers
@@ -9,6 +9,20 @@ Each worker takes one issue in its own worktree, ships a PR, and writes a summar
 (an Orca worktree comment on the `orca` runtime; `runs/<ticket>/summary.md` on the
 `direct` runtime; see "Runtime" below). A successor wave is opt-in (`AUTO_SUCCESSOR=1`), not
 automatic; the human reviews between ordinary waves.
+
+## Invocation
+
+| You type | What runs |
+|---|---|
+| `/wave [tier:]ISSUE...` (e.g. `/wave INNOV-447 quick:INNOV-355`) | **Supervised** (the default): `coordinator.sh` with those args, as a background job of this session. See "Supervised wave" below. |
+| `/wave resume run_<id>` | `coordinator.sh --resume run_<id>`, also in the background |
+| `/wave spawn [tier:]ISSUE...` | **Unsupervised**: `spawn.sh` per issue (`TIER=<tier>`). Nothing gates, merges, updates the ticket, walks or sweeps these; you do, with the checklist below. |
+| `/wave` alone, `/wave status` | the fresh-session checklist |
+
+A manual wave means supervised. Fall back to `spawn` only when asked for it by name, or
+when the repo runs `WAVE_RUNTIME=direct`: `coordinator.sh` needs Orca and refuses there
+(the direct runtime's supervisor is `autonomy/autonomy_tick.py`), so say that and ask
+before spawning unsupervised workers.
 
 The scripts live next to this file. Every command below uses
 ```bash
@@ -194,7 +208,14 @@ hands the ticket plus live excerpts to a cheap headless model (`TRIAGER=grok` de
 verdict is a hint; the label is still yours. An issue citing no `file:line` is listed
 but not judged, because that trait is what predicts a safe unsupervised run.
 
-**5. Spawn the wave**, one issue per worker, each with its tier (see "Pick the tier"):
+**5. Start the wave, supervised**, one issue per worker, each with its tier (see "Pick
+the tier"): `/wave quick:INNOV-309 INNOV-301 risk:INNOV-305` runs
+```bash
+bash "$WAVE/coordinator.sh" quick:INNOV-309 INNOV-301 risk:INNOV-305
+```
+as a background job (see "Supervised wave"), which also does steps 1–3.5 for these
+issues when they settle. Only on `/wave spawn` (or the direct runtime, after asking)
+launch them unsupervised instead:
 ```bash
 TIER=quick bash "$WAVE/spawn.sh" INNOV-309
 bash "$WAVE/spawn.sh" INNOV-301              # normal
@@ -206,9 +227,9 @@ concurrent builds, not agents.
 
 ## Supervised wave (`coordinator.sh`, SPO-640)
 
-**Attended only.** Run it in a session you are watching. Never schedule it: unattended
-and scheduled waves use `autonomy/autonomy_tick.py` (INNOV-444), which survives a
-crash or a missed firing; this loop does not.
+**Attended only.** Run it from a session someone is watching. Never schedule it:
+unattended and scheduled waves use `autonomy/autonomy_tick.py` (INNOV-444), which
+survives a crash or a missed firing; this loop does not.
 
 Human PR review on quick/normal tiers caught nothing across the last waves, so the
 coordinator takes the human out of that merge path. One command replaces steps 5, 1,
@@ -217,7 +238,13 @@ coordinator takes the human out of that merge path. One command replaces steps 5
 bash "$WAVE/coordinator.sh" SPO-640 quick:SPO-641 risk:SPO-642   # tier:ISSUE, default normal
 bash "$WAVE/coordinator.sh" --resume run_<id>                     # after a crash
 ```
-It runs for the whole wave, so give it its own terminal. Each worker is spawned with
+It runs for the whole wave (hours). `/wave` starts it with the Bash tool's
+`run_in_background` and the longest timeout (7200000 ms), so the session stays free.
+Read the `RUN run_<id>` line from its output first and tell the user. If the job ends
+before the wave does (the timeout, a crash, `exit 2` when something is still live), run
+`/wave resume run_<id>`. When resume refuses because another loop on that Run is alive,
+supervision is still going (the orphaned loop keeps gating); resume again once it
+exits, so the walk, sweep and report run. From a plain terminal, give it its own. Each worker is spawned with
 `WAVE_RUN` set, which makes `spawn.sh` launch it as a Dispatch in one Orca Run and tell
 it to send `worker_done`. The coordinator blocks on those, and on each one runs
 `gate.py` over the PR body's `## Wave` block (SPO-639) plus `gh pr checks`:
@@ -232,7 +259,16 @@ comments each merged PR with its `cost.sh` split, builds the walk checklist from
 merged bodies' `NOT VERIFIED IN BROWSER` and `MIGRATION: yes` lines, runs the repo's
 `.claude/wave/walk.sh` as a supervised worker (skipped when the file or the lines are
 absent), sweeps merged worktrees, and prints one `WAVE ... merged N; held M; walk: ...`
-line. Held PRs are not walked this wave. What is left for you: the held PRs, the
+line. Held PRs are not walked this wave.
+
+The ticket follows the PR through the tick's tracker adapter (`jira_tracker.tracker_for`,
+by `WAVE_TRACKER`; INNOV-463): a held PR moves its ticket back to `WAVE_STATE_HELD` (default
+`WAVE_STATE_START`) with a comment giving the reason and PR, and a merge comments the PR
+number and merge sha. Jira goes through `acli`, ClickUp through REST, Linear through
+`orca linear` (`autonomy/linear_tracker.py`, write-only, coordinator-only). A PR the
+coordinator finds already merged before its gate passed (a self-merge) is held, with
+its ticket left as the worker set it; on `--resume`, a held PR you merged by hand has
+its ticket set back to `WAVE_STATE_DONE` and stays listed as held. A tracker error is logged, never fatal. What is left for you: the held PRs, the
 walker's tickets, and one `/brain:save`.
 
 ## What makes an issue `agent-ready`
