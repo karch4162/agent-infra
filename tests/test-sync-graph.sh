@@ -1465,6 +1465,149 @@ else
   pass "innov346/copied-report-retires-sidecar"
 fi
 
+# ===================================================== INNOV-427: LAYOUTS ==
+# The Android layout pass runs inside the sync, on the repo-side graph, before
+# the copy. Its own suite (test-android-layouts.sh) owns what it extracts; these
+# cases own the wiring: it runs when there are layouts, the result is what gets
+# published, an unchanged rebuild stays up-to-date, a broken pass warns and still
+# publishes, and a non-Android repo never calls it.
+STUBS_427="$TMPROOT/stubs-427"
+mkdir -p "$STUBS_427"
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'for a in "$@"; do\n'
+  printf '  case "$a" in\n'
+  printf '    *label-guard.mjs|*android-layouts.mjs) exec %q "$@" ;;\n' "$REAL_NODE"
+  printf '  esac\n'
+  printf 'done\n'
+  printf 'exit 0\n'
+} >"$STUBS_427/node"
+chmod +x "$STUBS_427/node"
+for prog in python python3; do cp "$STUBS/$prog" "$STUBS_427/$prog"; done
+BROKEN_427="$TMPROOT/stubs-427-broken"
+mkdir -p "$BROKEN_427"
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'for a in "$@"; do\n'
+  printf '  case "$a" in\n'
+  printf '    *label-guard.mjs) exec %q "$@" ;;\n' "$REAL_NODE"
+  printf '    *android-layouts.mjs) echo "SyntaxError: nope"; exit 1 ;;\n'
+  printf '  esac\n'
+  printf 'done\n'
+  printf 'exit 0\n'
+} >"$BROKEN_427/node"
+chmod +x "$BROKEN_427/node"
+for prog in python python3; do cp "$STUBS/$prog" "$BROKEN_427/$prog"; done
+
+layout_box() { # -> box with one Android module carrying a layout
+  local box r
+  box="$(new_sandbox)"
+  r="$box/repos/demorepo"
+  mkdir -p "$r/app/src/main/res/layout" "$r/app/src/main/java/com/x"
+  printf '<LinearLayout />\n' >"$r/app/src/main/res/layout/activity_main.xml"
+  printf 'class Main {\n  fun f() { setContentView(R.layout.activity_main) }\n}\n' >"$r/app/src/main/java/com/x/Main.kt"
+  printf '{\n  "nodes": [\n    {\n      "id": "main",\n      "label": "Main",\n      "_callable": true,\n      "_callable_class": true,\n      "source_file": "app/src/main/java/com/x/Main.kt",\n      "source_location": "L1"\n    }\n  ],\n  "links": []\n}\n' \
+    >"$r/graphify-out/graph.json"
+  cp "$r/graphify-out/graph.json" "$box/graph.unaugmented"
+  echo "$box"
+}
+MIRROR_427="vault/graphify/demorepo/graph.json"
+
+box="$(layout_box)"
+run_sync "$box" "$STUBS_427:$PATH" >/dev/null
+if grep -q '^ANDROID-LAYOUTS: OK - 1 layout(s), 0 variant(s), 1 code->layout' "$box/err.txt" \
+  && grep -q '"_origin": "android-layouts"' "$box/$MIRROR_427" \
+  && grep -q '"relation": "uses_layout"' "$box/$MIRROR_427"; then
+  pass "innov427/layouts-published-in-the-mirror"
+else
+  fail "innov427/layouts-published-in-the-mirror" "stderr: [$(cat "$box/err.txt")]" \
+    "mirror: [$(cat "$box/$MIRROR_427" 2>/dev/null)]"
+fi
+assert_files_identical "innov427/repo-side-graph-carries-the-layouts-too" \
+  "$box/repos/demorepo/graphify-out/graph.json" "$box/$MIRROR_427"
+
+# A rebuild that changed nothing but dropped the layout nodes is up-to-date
+# once the pass has run, not a republish.
+cp "$box/graph.unaugmented" "$box/repos/demorepo/graphify-out/graph.json"
+run_sync "$box" "$STUBS_427:$PATH" >/dev/null
+if grep -q '^up-to-date: demorepo' "$box/out.txt"; then
+  pass "innov427/unchanged-rebuild-reads-up-to-date"
+else
+  fail "innov427/unchanged-rebuild-reads-up-to-date" "stdout: [$(cat "$box/out.txt")]" "stderr: [$(cat "$box/err.txt")]"
+fi
+
+# UPGRADE PATH: a mirror published before the pass existed is byte-identical to
+# its repo-side graph. An explicit sync must still give it layouts, not read
+# up-to-date and skip it forever.
+box="$(layout_box)"
+mkdir -p "$box/vault/graphify/demorepo"
+cp "$box/graph.unaugmented" "$box/$MIRROR_427"
+run_sync "$box" "$STUBS_427:$PATH" >/dev/null
+if grep -q '"_origin": "android-layouts"' "$box/$MIRROR_427" && ! grep -q '^up-to-date: demorepo' "$box/out.txt"; then
+  pass "innov427/pre-existing-identical-mirror-gets-layouts"
+else
+  fail "innov427/pre-existing-identical-mirror-gets-layouts" "stdout: [$(cat "$box/out.txt")]" "stderr: [$(cat "$box/err.txt")]"
+fi
+
+# The layouts are read from the working tree, so a checkout that moved off the
+# graph's built_at_commit is not re-read (negative control: same box, HEAD matches).
+box="$(layout_box)"
+r="$box/repos/demorepo"
+git_init_commit "$r" "init" >/dev/null 2>&1
+other="0123456789abcdef0123456789abcdef01234567"
+printf '{\n  "nodes": [],\n  "links": [],\n  "built_at_commit": "%s"\n}\n' "$other" >"$r/graphify-out/graph.json"
+cp "$r/graphify-out/graph.json" "$box/graph.stamped"
+run_sync "$box" "$STUBS_427:$PATH" >/dev/null
+if grep -q '^ANDROID-LAYOUTS: SKIPPED demorepo - checkout is at' "$box/err.txt" \
+  && ! grep -q '"_origin": "android-layouts"' "$box/$MIRROR_427"; then
+  pass "innov427/moved-checkout-is-not-re-read"
+else
+  fail "innov427/moved-checkout-is-not-re-read" "stderr: [$(cat "$box/err.txt")]"
+fi
+head_sha="$(git -C "$r" rev-parse HEAD)"
+printf '{\n  "nodes": [],\n  "links": [],\n  "built_at_commit": "%s"\n}\n' "$head_sha" >"$r/graphify-out/graph.json"
+rm -f "$box/$MIRROR_427"
+run_sync "$box" "$STUBS_427:$PATH" >/dev/null
+if grep -q '^ANDROID-LAYOUTS: OK' "$box/err.txt" && grep -q '"_origin": "android-layouts"' "$box/$MIRROR_427"; then
+  pass "innov427/checkout-at-built-commit-is-read"
+else
+  fail "innov427/checkout-at-built-commit-is-read" "stderr: [$(cat "$box/err.txt")]"
+fi
+
+# A pass that fails is a loud warning, never an OK, and the graph still publishes.
+box="$(layout_box)"
+run_sync "$box" "$BROKEN_427:$PATH" >/dev/null
+if grep -q 'warn: the Android layout pass did not complete for demorepo' "$box/err.txt" \
+  && ! grep -q 'ANDROID-LAYOUTS: OK' "$box/err.txt"; then
+  pass "innov427/broken-pass-warns"
+else
+  fail "innov427/broken-pass-warns" "stderr: [$(cat "$box/err.txt")]"
+fi
+assert_files_identical "innov427/broken-pass-still-publishes-the-graph-unchanged" \
+  "$box/graph.unaugmented" "$box/$MIRROR_427"
+
+# The gate finds a module at any depth, as the pass walks (here three levels down).
+box="$(layout_box)"
+r="$box/repos/demorepo"
+mkdir -p "$r/features/pay/ui"
+mv "$r/app" "$r/features/pay/ui/"
+sed 's#app/src/main#features/pay/ui/app/src/main#' "$box/graph.unaugmented" >"$r/graphify-out/graph.json"
+run_sync "$box" "$STUBS_427:$PATH" >/dev/null
+if grep -q '^ANDROID-LAYOUTS: OK - 1 layout(s)' "$box/err.txt" && grep -q '"_origin": "android-layouts"' "$box/$MIRROR_427"; then
+  pass "innov427/deep-module-is-found"
+else
+  fail "innov427/deep-module-is-found" "stderr: [$(cat "$box/err.txt")]"
+fi
+
+# No res/layout directory: the pass is never called (negative control for the gate).
+box="$(new_sandbox)"
+run_sync "$box" "$STUBS_427:$PATH" >/dev/null
+if grep -q 'ANDROID-LAYOUTS\|Android layout pass' "$box/err.txt"; then
+  fail "innov427/non-android-repo-skips-the-pass" "stderr: [$(cat "$box/err.txt")]"
+else
+  pass "innov427/non-android-repo-skips-the-pass"
+fi
+
 # ================================================================= SUMMARY ==
 echo
 echo "$PASSED passed, $FAILED failed"

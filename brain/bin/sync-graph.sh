@@ -399,6 +399,60 @@ scope_audit() { # graph_path repo_root name
   return 0
 }
 
+# --- THE ANDROID LAYOUT PASS (INNOV-427) ------------------------------------
+# graphify does not read .xml, so an Android build's res/layout files never reach
+# its graph. android-layouts.mjs adds them deterministically (no LLM, so the CI
+# rebuild reproduces it). It runs HERE because this is the one place both publish
+# paths meet: /brain:save step 5 and ci-mirrors.mjs both publish through this
+# script. It edits the repo-side graph in place (atomically, and only when the
+# bytes change), so the local hook sees the layouts too.
+#
+# Gated on a cheap glob — a src/main/res/layout* directory at the build root or one
+# or two module levels down — so a non-Android mirror never pays for a walk.
+#
+# Same polarity as the scope gate's SKIPPED: a pass that fails or does not answer
+# is a LOUD warning and the publish proceeds without layouts. A missing layout
+# index is recoverable on the next sync; nothing here can corrupt the graph,
+# because the pass writes through a temp file and a rename.
+ANDROID_LAYOUTS="$SCRIPT_DIR/android-layouts.mjs"
+
+has_android_layouts() { # repo_root
+  # Any module depth, as the pass walks; pruned like the pass, and stops at the
+  # first hit, so a non-Android repo costs one walk that skips its deps/build output.
+  [[ -n "$(find "$1" \( -name node_modules -o -name build -o -name generated -o -name graphify-out -o -name '.*' ! -name . \) -prune \
+    -o -type d -name 'layout*' -path '*/src/main/res/layout*' -print 2>/dev/null | head -n 1)" ]]
+}
+
+android_layouts() { # repo_root graph_path name
+  local out="" rc=0 first="" built="" head=""
+  has_android_layouts "$1" || return 0
+  # The layouts are read from the working tree, so the tree must be the one the
+  # graph was built from. built_at_commit is the root's LAST key in graphify's
+  # output, so the file's tail holds it and no node attribute can be mistaken
+  # for it. Unknown on either side (no stamp, not a git checkout) runs the pass:
+  # that is the same unverifiable case the provenance gate SKIPs, not a mismatch.
+  built="$(tail -c 400 "$2" 2>/dev/null | tr -d '\r' | sed -n 's/^  "built_at_commit": "\([0-9a-fA-F]\{7,40\}\)"$/\1/p')"
+  head="$(git -C "$1" rev-parse HEAD 2>/dev/null || true)"
+  if [[ -n "$built" && -n "$head" && "$head" != "$built"* ]]; then
+    echo "ANDROID-LAYOUTS: SKIPPED $3 - checkout is at ${head:0:12}, the graph was built at ${built:0:12}; layouts not re-read. Rebuild the graph at HEAD to refresh them." >&2
+    return 0
+  fi
+  out="$(node "$ANDROID_LAYOUTS" "$1" --graph "$2" 2>&1)" || rc=$?
+  first="${out%%$'\n'*}"
+  case "$first:$rc" in
+    "ANDROID-LAYOUTS: OK"*:0 | "ANDROID-LAYOUTS: SKIPPED"*:0)
+      printf '%s\n' "$first" >&2 ;;
+    *)
+      {
+        echo "warn: the Android layout pass did not complete for $3 — publishing its graph WITHOUT layouts."
+        [[ -n "$out" ]] && printf '  %s\n' "$first"
+        echo "  This is NOT an OK: res/layout files are missing from this mirror until the pass runs."
+        echo "  Fix $ANDROID_LAYOUTS (or node), then re-run this sync."
+      } >&2 ;;
+  esac
+  return 0
+}
+
 # --- THE PROVENANCE GATE (INNOV-353) ----------------------------------------
 # provenance_check and the reference-branch map live in lib/provenance.sh (the
 # rationale is there too), shared with doctor's check-mirror-source.sh --behind.
@@ -466,6 +520,12 @@ for repo in "${repos[@]}"; do
     echo "skip $name: no graph at $src/graph.json" >&2
     continue
   fi
+  # THE ANDROID LAYOUT PASS. Before the up-to-date check, so a mirror published
+  # before this pass existed still gets its layouts on an explicit or --all sync,
+  # and a graphify rebuild that only dropped the layout nodes reads up-to-date.
+  # android_layouts itself refuses to run when the checkout is not at the graph's
+  # built_at_commit, so a graph is never augmented from a tree it was not built from.
+  android_layouts "$repo" "$src/graph.json" "$name"
   if [[ -f "$dst/graph.json" ]] && cmp -s "$src/graph.json" "$dst/graph.json"; then
     echo "up-to-date: $name"
     continue
