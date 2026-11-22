@@ -404,6 +404,29 @@ class DenySelfHeal(unittest.TestCase):
         self.assertFalse(self.check(out).ok)
         self.assertEqual(self.heals(), [])
 
+    def test_other_rights_or_flags_are_not_healed(self):
+        # Codex review: only the exact stamped shape heals, not any raw-SID DENY.
+        for ace in (f"{SID}:(OI)(CI)(DENY)(W,D,Rc,RD,DC)", f"{SID}:(DENY)(W,D,Rc,DC)",
+                    f"{SID}:(OI)(CI)(IO)(DENY)(W,D,Rc,DC)"):
+            self.calls = []
+            out = self.dirty(git_aces=(ace, SANDBOX))
+            self.assertFalse(self.check(out).ok, ace)
+            self.assertEqual(self.heals(), [], ace)
+
+    def test_non_account_raw_sid_is_not_healed(self):
+        cap = "S-1-15-3-1024-1-2-3"
+        out = self.dirty(git_aces=(f"{cap}:(OI)(CI)(DENY)(W,D,Rc,DC)", SANDBOX), child_ace=f"{cap}:(I)(DENY)(W,D,Rc,DC)")
+        self.assertFalse(self.check(out).ok)
+        self.assertEqual(self.heals(), [])
+
+    def test_heal_script_matches_the_exact_rights_and_inheritance(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.check(self.dirty())
+        script = base64.b64decode(self.heals()[0][4]).decode("utf-16-le")
+        self.assertIn("[int]$_.FileSystemRights -eq 1245526", script)  # measured: icacls W,D,Rc,DC
+        self.assertIn("$_.InheritanceFlags -eq 'ContainerInherit, ObjectInherit'", script)
+        self.assertIn("$_.PropagationFlags -eq 'None'", script)
+
     def test_scan_failure_with_deny_is_not_healed(self):
         out = self.dirty()
         out[self.slug] = out[self.slug].replace("Failed processing 0", "Failed processing 1")

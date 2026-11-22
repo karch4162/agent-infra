@@ -102,7 +102,11 @@ def _icacls_failure(target: Path, code: int, text: str) -> str | None:
     return f"icacls {target} exit={code}: {text.strip()[-300:]}"
 
 
-_RAW_SID_DENY = re.compile(r"(S-1-\d+(?:-\d+)+):((?:\([^)]*\))+)\s*$")
+# The one ACE shape the elevated Codex sandbox stamps (seen 2026-11-18): a raw (unresolvable)
+# machine/domain SID, (OI)(CI) DENY of W,D,Rc,DC. Children carry it with (I).
+_CODEX_DENY = re.compile(r"(S-1-5-21(?:-\d+)+):(\(I\))?((?:\(OI\)\(CI\))?)\(DENY\)\(W,D,Rc,DC\)\s*$")
+# W,D,Rc,DC as FileSystemRights (Write|Delete|ReadPermissions|DeleteSubdirectoriesAndFiles|Synchronize).
+_CODEX_DENY_RIGHTS = 0x130156
 
 
 def _scan_deny(targets: list[Path], run: Callable[..., tuple[int, str, str]]) -> tuple[list[str], dict[Path, str], set[str]]:
@@ -144,23 +148,25 @@ def _own_acl_block(git_dir: Path, text: str) -> list[str]:
 def codex_sandbox_deny_sids(git_dir: Path, text: str, deny_hits: set[str]) -> list[str]:
     """SIDs to heal when the DENY ACEs are the known Codex-sandbox case, else [].
 
-    The case (INNOV-458): an elevated Codex sandbox stamped an explicit DENY on .git
-    for its own SID, which no longer resolves, so icacls prints it raw; children only
-    inherit it; and .git carries a CodexSandboxUsers ACE. Anything else is not ours.
+    The case (INNOV-458): an elevated Codex sandbox stamped an explicit
+    (OI)(CI)(DENY)(W,D,Rc,DC) on .git for its own SID, which no longer resolves, so
+    icacls prints it raw; children only inherit it; and .git carries a
+    CodexSandboxUsers ACE. Any other DENY anywhere (a named principal, other rights or
+    flags) means a rule this heal did not see stamped, so nothing is healed.
     """
     sids: set[str] = set()
     for hit in deny_hits:
-        m = _RAW_SID_DENY.search(hit)
+        m = _CODEX_DENY.search(hit)
         if not m:
-            return []  # a named principal's DENY: a deliberate rule, leave it
+            return []
         sids.add(m[1])
     block = _own_acl_block(git_dir, text)
     if not any(ace.split(":", 1)[0].endswith("\\CodexSandboxUsers") for ace in block):
         return []
     explicit = set()
     for ace in block:
-        m = _RAW_SID_DENY.search(ace)
-        if m and "(DENY)" in m[2].upper() and "(I)" not in m[2].upper():
+        m = _CODEX_DENY.search(ace)
+        if m and not m[2] and m[3]:
             explicit.add(m[1])
     return sorted(sids) if sids and sids <= explicit else []
 
@@ -176,7 +182,9 @@ def _heal_script(git_dir: Path, sids: list[str]) -> str:
         "$acl = Get-Acl -LiteralPath $p",
         "if (-not ($acl.Access | Where-Object { $_.IdentityReference.Value -like '*\\CodexSandboxUsers' })) { exit 3 }",
         "$rules = @($acl.Access | Where-Object { $_.AccessControlType -eq 'Deny' -and -not $_.IsInherited -and"
-        " $_.IdentityReference -is [System.Security.Principal.SecurityIdentifier] -and $sids -contains $_.IdentityReference.Value })",
+        " $_.IdentityReference -is [System.Security.Principal.SecurityIdentifier] -and $sids -contains $_.IdentityReference.Value -and"
+        f" [int]$_.FileSystemRights -eq {_CODEX_DENY_RIGHTS} -and $_.InheritanceFlags -eq 'ContainerInherit, ObjectInherit' -and"
+        " $_.PropagationFlags -eq 'None' })",
         "if ($rules.Count -eq 0) { exit 4 }",
         "foreach ($r in $rules) { $acl.RemoveAccessRuleSpecific($r) }",
         "Set-Acl -LiteralPath $p -AclObject $acl",

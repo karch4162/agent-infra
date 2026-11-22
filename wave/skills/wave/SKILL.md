@@ -115,8 +115,8 @@ every run with the live PID, last step, last tool call and cost (`--sweep` print
 an explicit DENY for its own SID on `.git`, and every later spawn fails the preflight.
 Launch Codex there with `--dangerously-bypass-approvals-and-sandbox` (Orca's agent
 picker applies it from the Codex default Arguments). The preflight self-heals exactly
-that case (explicit DENY on `.git` for an unresolvable SID, next to a
-`CodexSandboxUsers` ACE): it removes those rules, rescans, and passes with a
+that case (an explicit `(OI)(CI)(DENY)(W,D,Rc,DC)` on `.git` for an unresolvable
+`S-1-5-21-` SID, inherited by everything under it, next to a `CodexSandboxUsers` ACE): it removes those rules, rescans, and passes with a
 `NOTICE: git_deny_aces self-healed` line. Any other DENY ACE still fails the spawn.
 
 On top of the direct runtime, **`autonomy/autonomy_tick.py`** is the loop that removes
