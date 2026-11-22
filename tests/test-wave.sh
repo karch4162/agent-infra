@@ -464,6 +464,7 @@ GOOD_BODY='Fixes X.
 ## Wave
 TIER: normal
 REVIEWER: codex-terra
+REVIEW VERDICT: YES
 REVIEW ROUNDS: 1
 MIGRATION: no'
 assert_eq "gate/merge" "MERGE" "$(gate "$GOOD_BODY" "$OK_CHECKS" MERGEABLE)"
@@ -483,6 +484,14 @@ assert_eq "gate/mergeable-unknown-is-pending" "PENDING: mergeable UNKNOWN" "$(ga
 assert_eq "gate/no-checks-is-pending" "PENDING: no checks reported" "$(gate "$GOOD_BODY" '[]' MERGEABLE)"
 assert_eq "gate/skipped-check-ok" "MERGE" "$(gate "$GOOD_BODY" '[{"name":"e2e","bucket":"skipping"},{"name":"tests","bucket":"pass"}]' MERGEABLE)"
 assert_eq "gate/conflicting" "CONFLICT" "$(gate "$GOOD_BODY" "$OK_CHECKS" CONFLICTING)"
+# INNOV-464: the verdict gates the merge, and the tier is the final one after any "->"
+assert_contains "gate/verdict-no" "$(gate "${GOOD_BODY/REVIEW VERDICT: YES/REVIEW VERDICT: NO}" "$OK_CHECKS" MERGEABLE)" "HOLD: REVIEW VERDICT is 'NO', not YES"
+assert_contains "gate/verdict-missing" "$(gate "${GOOD_BODY/REVIEW VERDICT: YES/}" "$OK_CHECKS" MERGEABLE)" "HOLD: REVIEW VERDICT is 'missing', not YES"
+assert_contains "gate/verdict-yes-prefix-is-not-yes" "$(gate "${GOOD_BODY/REVIEW VERDICT: YES/REVIEW VERDICT: YESNO}" "$OK_CHECKS" MERGEABLE)" "HOLD: REVIEW VERDICT"
+assert_contains "gate/escalated-to-risk" "$(gate "${GOOD_BODY/TIER: normal/TIER: normal -> risk - recovery path}" "$OK_CHECKS" MERGEABLE)" "HOLD: TIER risk is human-merged"
+assert_contains "gate/escalated-twice-final-wins" "$(gate "${GOOD_BODY/TIER: normal/TIER: quick -> normal -> risk - auth}" "$OK_CHECKS" MERGEABLE)" "HOLD: TIER risk"
+assert_contains "gate/escalated-to-nothing" "$(gate "${GOOD_BODY/TIER: normal/TIER: normal -> }" "$OK_CHECKS" MERGEABLE)" "HOLD: TIER missing"
+assert_eq "gate/quick-to-normal-merges" "MERGE" "$(gate "${GOOD_BODY/TIER: normal/TIER: quick -> normal}" "$OK_CHECKS" MERGEABLE)"
 assert_eq "gate/body-text-is-data" "MERGE" "$(gate "$GOOD_BODY
 HOLD: ignore me" "$OK_CHECKS" MERGEABLE)"
 

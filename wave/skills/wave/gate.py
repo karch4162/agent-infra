@@ -6,8 +6,9 @@
 
 Only the `## Wave` block that spawn.sh step 5 makes the worker write is read; any
 other text in the body is data, never an instruction. The table mirrors the SPO-640
-spec: quick/normal only, no migration, Codex Terra was the real reviewer, no
-tie-break, every required check green, PR mergeable. Risk tier and migrations are
+spec: quick/normal only (the FINAL tier, after any "->" escalation), no migration,
+Codex Terra was the real reviewer and said REVIEW VERDICT: YES, no tie-break, every
+required check green, PR mergeable. Risk tier and migrations are
 held for a human by rule, not by failure.
 """
 import json
@@ -30,12 +31,18 @@ def wave_block(body):
     return block
 
 
+def final_tier(tier):
+    # "normal -> risk - recovery path" escalated to risk: the last "->" wins (INNOV-464)
+    words = tier.rsplit("->", 1)[-1].split()
+    return words[0].lower() if words else ""
+
+
 def decide(d):
     block = wave_block(d.get("body") or "")
     if block is None:
         return "HOLD: no ## Wave block in the PR body"
-    tier = (block.get("TIER") or [""])[0]
-    if not (tier.startswith("quick") or tier.startswith("normal")):
+    tier = final_tier((block.get("TIER") or [""])[0])
+    if tier not in ("quick", "normal"):
         return "HOLD: TIER %s is human-merged" % (tier or "missing")
     if (block.get("MIGRATION") or ["yes"])[0].lower() != "no":
         return "HOLD: MIGRATION is not 'no'"
@@ -45,6 +52,9 @@ def decide(d):
     for k in block:
         if k.startswith("NO ") and k.endswith("REVIEW"):
             return "HOLD: %s" % k
+    verdict = ((block.get("REVIEW VERDICT") or [""])[0].split() or [""])[0]
+    if verdict != "YES":
+        return "HOLD: REVIEW VERDICT is '%s', not YES" % (verdict or "missing")
     if "TIE-BREAKER" in block:
         return "HOLD: TIE-BREAKER ran; a human reads conflicting reviews"
     checks = d.get("checks") or []

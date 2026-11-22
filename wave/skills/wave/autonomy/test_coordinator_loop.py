@@ -208,6 +208,119 @@ class CoordinatorTracker(unittest.TestCase):
         self.assertTrue(any("which table?" in c[2] for c in calls if c[0] == "comment"), calls)
 
 
+TURN_END = ("Worker structworker_1b4769ae ended its turn without sending worker_done for task "
+            "task_9ba74bc414cb")   # Orca's wording, from run_634d93c19dcc's state file
+
+
+class TurnEndEscalation(unittest.TestCase):
+    """INNOV-464: Orca escalates every time a Claude worker's turn ends (a background review, an
+    advisor call). A live worker is waited on, up to WAVE_TURN_END_GRACE_MIN; a real question or
+    any other escalation still holds."""
+
+    def setUp(self):
+        self.now = 1_000_000.0
+        self.liveness = "live"
+        self.inbox = []        # messages the next consume() receives
+        self.shown = []        # worker-show calls
+        env = {k: v for k, v in os.environ.items() if k not in CLEAR + ("WAVE_TURN_END_GRACE_MIN",)}
+        p = mock.patch.dict(os.environ, env, clear=True)
+        p.start(); self.addCleanup(p.stop)
+        for target in (mock.patch.object(cl, "oj", self.fake_oj),
+                       mock.patch.object(cl, "log", lambda *a: None),
+                       mock.patch.object(cl, "track", lambda *a, **k: None),
+                       mock.patch.object(cl.time, "time", lambda: self.now)):
+            target.start(); self.addCleanup(target.stop)
+        self.d = {"issues": {"ABC-7": issue(status="running", pr=None)}}
+
+    def fake_oj(self, *args):
+        if args[:2] == ("orchestration", "worker-show"):
+            self.shown.append(args)
+            return {"dispatchId": "d1", "state": "running", "liveness": self.liveness}
+        if args[:2] == ("orchestration", "check") and "--wait" in args:
+            msgs, self.inbox = self.inbox, []
+            return {"messages": msgs}
+        return {}
+
+    def send(self, type_, body, **payload):
+        self.inbox.append({"type": type_, "body": body,
+                           "payload": dict({"dispatchId": "d1", "taskId": "t1"}, **payload)})
+        cl.consume(self.d)
+        return self.d["issues"]["ABC-7"]
+
+    def test_live_worker_is_not_held_and_its_pr_is_gated_on_worker_done(self):
+        v = self.send("escalation", TURN_END)
+        self.assertEqual(v["status"], "running")
+        self.assertTrue(self.shown)
+        self.now += 20 * 60
+        v = self.send("worker_done", "DONE - ABC-7 - PR #303", outcome="succeeded")
+        self.assertEqual((v["status"], v["pr"]), ("done", 303))
+        seen = []
+        with mock.patch.object(cl, "gate", lambda pr: seen.append(pr) or "MERGE"), \
+                mock.patch.object(cl, "gh", lambda *a: json.dumps({"state": "OPEN"})), \
+                mock.patch.object(cl.subprocess, "run", lambda *a, **k: types.SimpleNamespace(returncode=0)):
+            cl.settle(self.d)
+        self.assertEqual(seen, [303])
+        self.assertEqual(v["status"], "merged")
+
+    def test_worker_no_longer_live_is_held(self):
+        self.liveness = "exited"
+        v = self.send("escalation", TURN_END)
+        self.assertEqual(v["status"], "held")
+        self.assertIn("not live", v["reason"])
+
+    def test_worker_show_failure_holds(self):
+        # an unreadable worker is not a live one: fail to a hold, never to an unsupervised wait
+        with mock.patch.object(cl, "oj", lambda *a: (_ for _ in ()).throw(ValueError("bad json"))
+                               if a[:2] == ("orchestration", "worker-show") else self.fake_oj(*a)):
+            v = self.send("escalation", TURN_END)
+        self.assertEqual(v["status"], "held")
+
+    def test_live_worker_past_the_grace_cap_is_held_without_another_message(self):
+        self.send("escalation", TURN_END)
+        self.now += 59 * 60
+        cl.consume(self.d)   # no message: the parked worker is re-checked on the poll
+        self.assertEqual(self.d["issues"]["ABC-7"]["status"], "running")
+        self.now += 2 * 60
+        cl.consume(self.d)
+        v = self.d["issues"]["ABC-7"]
+        self.assertEqual(v["status"], "held")
+        self.assertIn("60 min", v["reason"])
+
+    def test_later_turn_ends_do_not_reset_the_clock(self):
+        self.send("escalation", TURN_END)
+        self.now += 40 * 60
+        self.assertEqual(self.send("escalation", TURN_END)["status"], "running")
+        self.now += 21 * 60
+        self.assertEqual(self.send("escalation", TURN_END)["status"], "held")
+
+    def test_parked_worker_that_exits_is_held_on_the_poll(self):
+        self.send("escalation", TURN_END)
+        self.liveness = "exited"
+        cl.consume(self.d)
+        self.assertEqual(self.d["issues"]["ABC-7"]["status"], "held")
+
+    def test_grace_comes_from_the_env_and_a_bad_value_falls_back(self):
+        os.environ["WAVE_TURN_END_GRACE_MIN"] = "5"
+        self.send("escalation", TURN_END)
+        self.now += 6 * 60
+        cl.consume(self.d)
+        self.assertEqual(self.d["issues"]["ABC-7"]["status"], "held")
+        os.environ["WAVE_TURN_END_GRACE_MIN"] = "soon"
+        self.d = {"issues": {"ABC-7": issue(status="running", pr=None)}}
+        self.send("escalation", TURN_END)
+        self.now += 30 * 60
+        cl.consume(self.d)
+        self.assertEqual(self.d["issues"]["ABC-7"]["status"], "running")
+
+    def test_questions_and_other_escalations_still_hold_while_live(self):
+        for type_, body in (("question", "which table?"), ("escalation", "worker reports a blocker")):
+            with self.subTest(type=type_):
+                self.d = {"issues": {"ABC-7": issue(status="running", pr=None)}}
+                v = self.send(type_, body)
+                self.assertEqual(v["status"], "held")
+                self.assertIn("needs human", v["reason"])
+
+
 class LinearAdapterCommands(unittest.TestCase):
     def test_writes_go_through_orca_linear(self):
         seen = []
