@@ -110,6 +110,15 @@ every run with the live PID, last step, last tool call and cost (`--sweep` print
 `git worktree remove` commands), and `autonomy/aggregate_wave_report.py` builds the
 `/brain:save` report from the summaries.
 
+**Do not run a sandboxed Codex session in a wave repo's main checkout** (a plain
+`codex` typed into a terminal, `workspace-write`): on Windows its elevated sandbox stamps
+an explicit DENY for its own SID on `.git`, and every later spawn fails the preflight.
+Launch Codex there with `--dangerously-bypass-approvals-and-sandbox` (Orca's agent
+picker applies it from the Codex default Arguments). The preflight self-heals exactly
+that case (explicit DENY on `.git` for an unresolvable SID, next to a
+`CodexSandboxUsers` ACE): it removes those rules, rescans, and passes with a
+`NOTICE: git_deny_aces self-healed` line. Any other DENY ACE still fails the spawn.
+
 On top of the direct runtime, **`autonomy/autonomy_tick.py`** is the loop that removes
 the session from the merge path: one idempotent tick reconciles workers against their
 PIDs, finds their PRs, polls CI, runs the Grok challenge in the surviving worktree,

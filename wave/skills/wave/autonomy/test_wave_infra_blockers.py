@@ -4,6 +4,7 @@ Run: python .claude/wave/test_wave_infra_blockers.py
 """
 from __future__ import annotations
 
+import base64
 import contextlib
 import io
 import json
@@ -286,6 +287,145 @@ class DenyScan(unittest.TestCase):
             check = preflight.check_git_deny_aces(str(self.repo), run=Runner(5, "", ""))
         self.assertTrue(check.ok)
         self.assertIn("skipped", check.detail)
+
+
+SID = "S-1-5-21-3334757451-3060406414-2442283242-4068458768"
+SANDBOX = "Masons-Razer\\CodexSandboxUsers:(I)(OI)(CI)(M)"
+
+
+class DenySelfHeal(unittest.TestCase):
+    """INNOV-458: the known Codex-sandbox DENY on .git heals; anything else hard-fails."""
+
+    def setUp(self):
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        self.repo = Path(td.name)
+        self.git = self.repo / ".git"
+        self.slug = self.git / "worktrees" / "slug-a"
+        self.slug.mkdir(parents=True)
+        patcher = mock.patch.object(preflight, "os", types.SimpleNamespace(name="nt"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.calls: list[list[str]] = []
+
+    @staticmethod
+    def block(path, *aces, n=1):
+        """Real icacls /T shape: first ACE on the path line, the rest indented."""
+        pad = " " * (len(str(path)) + 1)
+        lines = [f"{path} {aces[0]}"] + [pad + a for a in aces[1:]]
+        return "\n".join(lines) + f"\n\nSuccessfully processed {n} files; Failed processing 0 files\n"
+
+    def dirty(self, git_aces=None, child_ace=f"{SID}:(I)(DENY)(W,D,Rc,DC)", crlf=False):
+        git_aces = git_aces or (f"{SID}:(OI)(CI)(DENY)(W,D,Rc,DC)", SANDBOX, "NT AUTHORITY\\SYSTEM:(I)(OI)(CI)(F)")
+        out = {
+            self.git: self.block(self.git, *git_aces) + self.block(self.git / "HEAD", child_ace, SANDBOX),
+            self.git / "worktrees": self.block(self.git / "worktrees", child_ace, SANDBOX),
+            self.slug: self.block(self.slug, child_ace, SANDBOX),
+        }
+        if crlf:
+            out = {k: v.replace("\n", "\r\n") for k, v in out.items()}
+        return out
+
+    def clean(self):
+        return {t: self.block(t, SANDBOX) for t in (self.git, self.git / "worktrees", self.slug)}
+
+    def check(self, first, *, heal=(0, "REMOVED 1\n", ""), after=None):
+        scans = [first, after if after is not None else self.clean()]
+
+        def run(cmd, *, timeout):
+            self.calls.append(cmd)
+            if cmd[0] == "powershell":
+                if isinstance(heal, Exception):
+                    raise heal
+                return heal
+            target = Path(cmd[1])
+            scan = scans[0] if self.calls.count(cmd) == 1 else scans[1]
+            return 0, scan[target], ""
+
+        return preflight.check_git_deny_aces(str(self.repo), run=run)
+
+    def heals(self):
+        return [c for c in self.calls if c[0] == "powershell"]
+
+    def test_known_case_heals_with_notice_after_clean_rescan(self):
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            check = self.check(self.dirty())
+        self.assertTrue(check.ok, check.detail)
+        self.assertIn("self-healed: removed 1", check.detail)
+        self.assertIn(SID, check.detail)
+        self.assertIn("NOTICE: git_deny_aces", err.getvalue())
+        self.assertEqual(len(self.heals()), 1)
+        self.assertEqual(len([c for c in self.calls if c[0] == "icacls"]), 6)  # scan + rescan
+
+    def test_crlf_output_heals(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertTrue(self.check(self.dirty(crlf=True)).ok)
+
+    def test_heal_script_targets_git_only_and_explicit_sid_rules(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.check(self.dirty())
+        cmd = self.heals()[0]
+        self.assertEqual(cmd[:4], ["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand"])
+        script = base64.b64decode(cmd[4]).decode("utf-16-le")
+        self.assertIn(f"$p = '{self.git}'", script)
+        self.assertIn(f"$sids = @('{SID}')", script)
+        self.assertIn("-not $_.IsInherited", script)
+        self.assertIn("CodexSandboxUsers", script)
+        self.assertNotIn("-Recurse", script)
+
+    def test_named_principal_deny_is_not_healed(self):
+        out = self.dirty()
+        out[self.slug] = self.block(self.slug, "BUILTIN\\Users:(DENY)(W)", SANDBOX)
+        check = self.check(out)
+        self.assertFalse(check.ok)
+        self.assertIn("DENY ACEs present", check.detail)
+        self.assertEqual(self.heals(), [])
+
+    def test_no_codex_sandbox_ace_is_not_healed(self):
+        out = self.dirty(git_aces=(f"{SID}:(OI)(CI)(DENY)(W,D,Rc,DC)", "NT AUTHORITY\\SYSTEM:(I)(OI)(CI)(F)"))
+        self.assertFalse(self.check(out).ok)
+        self.assertEqual(self.heals(), [])
+
+    def test_sandbox_ace_only_on_a_child_is_not_healed(self):
+        out = self.dirty(git_aces=(f"{SID}:(OI)(CI)(DENY)(W,D,Rc,DC)", "NT AUTHORITY\\SYSTEM:(I)(OI)(CI)(F)"))
+        out[self.git] += self.block(self.git / "config", SANDBOX)
+        self.assertFalse(self.check(out).ok)
+        self.assertEqual(self.heals(), [])
+
+    def test_inherited_only_deny_on_git_is_not_healed(self):
+        # The rule comes from above .git: removing nothing on .git could not fix it.
+        out = self.dirty(git_aces=(f"{SID}:(I)(OI)(CI)(DENY)(W,D,Rc,DC)", SANDBOX))
+        self.assertFalse(self.check(out).ok)
+        self.assertEqual(self.heals(), [])
+
+    def test_child_deny_for_another_sid_is_not_healed(self):
+        out = self.dirty()
+        out[self.slug] = self.block(self.slug, "S-1-5-21-9-9-9-9:(DENY)(W)", SANDBOX)
+        self.assertFalse(self.check(out).ok)
+        self.assertEqual(self.heals(), [])
+
+    def test_scan_failure_with_deny_is_not_healed(self):
+        out = self.dirty()
+        out[self.slug] = out[self.slug].replace("Failed processing 0", "Failed processing 1")
+        check = self.check(out)
+        self.assertFalse(check.ok)
+        self.assertIn("scan failed", check.detail)
+        self.assertEqual(self.heals(), [])
+
+    def test_heal_ok_but_rescan_still_dirty_fails(self):
+        check = self.check(self.dirty(), after=self.dirty())
+        self.assertFalse(check.ok)
+        self.assertIn("DENY ACEs present", check.detail)
+        self.assertIn("after self-heal exit=0", check.detail)
+
+    def test_heal_refusal_or_crash_fails(self):
+        for heal in ((3, "", ""), (0, "", ""), (1, "", "Set-Acl: denied"), OSError("no powershell")):
+            self.calls = []
+            check = self.check(self.dirty(), heal=heal)
+            self.assertFalse(check.ok, heal)
+            self.assertIn("DENY ACEs present", check.detail)
+            self.assertIn("self-heal exit=", check.detail)
+            self.assertEqual(len([c for c in self.calls if c[0] == "icacls"]), 3)  # no rescan
 
 
 class BrainSaveConsume(unittest.TestCase):
