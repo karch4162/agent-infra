@@ -7,10 +7,10 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dumpPyJson, parsePyJson } from '../brain/bin/android-layouts.mjs';
+import { dumpPyJson, parsePyJson, pyFloat } from '../brain/bin/android-layouts.mjs';
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', 'brain', 'bin', 'android-layouts.mjs');
-const F = '\u0000android-layouts-float:1.0';
+const F = pyFloat('1.0');
 
 function put(root, rel, text) {
   mkdirSync(dirname(join(root, rel)), { recursive: true });
@@ -302,4 +302,9 @@ test('single-quoted include attributes count; a directory named *.xml is not a l
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('a graph string that looks like the float sentinel stays a string', () => {
+  const text = '{\n  "a": "\\u0000android-layouts-float:1.0",\n  "b": 1.0\n}';
+  assert.equal(dumpPyJson(parsePyJson(text)), text);
 });

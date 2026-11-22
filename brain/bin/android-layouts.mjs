@@ -52,6 +52,7 @@
 //   exit 2  "ANDROID-LAYOUTS: ERROR - <reason>"     nothing written
 import { readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { carveMatcher } from './lib/graphifyignore.mjs';
 
@@ -59,7 +60,9 @@ const ORIGIN = 'android-layouts';
 
 // --- Python-compatible JSON --------------------------------------------------
 // Floats are smuggled through JSON.parse as sentinel strings so `1.0` survives.
-const FLOAT = '\u0000android-layouts-float:';
+// The per-process nonce means no string in an input graph can pose as one.
+const FLOAT = `\u0000android-layouts-float:${randomBytes(16).toString('hex')}:`;
+export const pyFloat = (raw) => FLOAT + raw;
 
 export function parsePyJson(text) {
   const marked = text.replace(
