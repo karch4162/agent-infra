@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dumpPyJson, parsePyJson, pyFloat } from '../brain/bin/android-layouts.mjs';
 
@@ -307,4 +307,23 @@ test('single-quoted include attributes count; a directory named *.xml is not a l
 test('a graph string that looks like the float sentinel stays a string', () => {
   const text = '{\n  "a": "\\u0000android-layouts-float:1.0",\n  "b": 1.0\n}';
   assert.equal(dumpPyJson(parsePyJson(text)), text);
+});
+
+test('a graph source_file outside the checkout is never read', () => {
+  const root = fixture();
+  try {
+    const outside = mkdtempSync(join(tmpdir(), 'android-layouts-outside-'));
+    writeFileSync(join(outside, 'Evil.kt'), 'class Evil { val a = R.layout.toolbar }\n');
+    const rel = `../${basename(outside)}/Evil.kt`;
+    const g = parsePyJson(readFileSync(join(root, 'graphify-out', 'graph.json'), 'utf8'));
+    g.nodes.push(n('evil_cls', 'Evil', rel, 1, cls));
+    g.nodes.push(n('evil_abs', 'Evil', join(outside, 'Evil.kt').split('\\').join('/'), 1, cls));
+    put(root, 'graphify-out/graph.json', dumpPyJson(g) + '\n');
+    assert.equal(run(root).status, 0);
+    const t = tagged(load(root));
+    assert.ok(!t.links.some((e) => e.source === 'evil_cls' || e.source === 'evil_abs'));
+    rmSync(outside, { recursive: true, force: true });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

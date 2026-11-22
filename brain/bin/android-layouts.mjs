@@ -51,7 +51,7 @@
 //   exit 0  "ANDROID-LAYOUTS: SKIPPED - <reason>"   nothing written
 //   exit 2  "ANDROID-LAYOUTS: ERROR - <reason>"     nothing written
 import { readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
-import { basename, join, resolve } from 'node:path';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { carveMatcher } from './lib/graphifyignore.mjs';
@@ -283,6 +283,8 @@ export function augment(graph, buildDir, readText = (p) => readFileSync(p, 'utf8
   for (const n of keptNodes) {
     const sf = n && typeof n.source_file === 'string' ? n.source_file.replace(/\\/g, '/') : '';
     if (!/\.(kt|java)$/i.test(sf)) continue;
+    // Read only inside the checkout: an absolute or `..` path is not a repo file.
+    if (isAbsolute(sf) || /^[A-Za-z]:/.test(sf) || sf.split('/').includes('..')) continue;
     if (!byFile.has(sf)) byFile.set(sf, []);
     byFile.get(sf).push(n);
   }

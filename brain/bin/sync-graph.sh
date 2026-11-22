@@ -417,11 +417,10 @@ scope_audit() { # graph_path repo_root name
 ANDROID_LAYOUTS="$SCRIPT_DIR/android-layouts.mjs"
 
 has_android_layouts() { # repo_root
-  local g
-  for g in "$1"/src/main/res/layout* "$1"/*/src/main/res/layout* "$1"/*/*/src/main/res/layout*; do
-    [[ -d "$g" ]] && return 0
-  done
-  return 1
+  # Any module depth, as the pass walks; pruned like the pass, and stops at the
+  # first hit, so a non-Android repo costs one walk that skips its deps/build output.
+  [[ -n "$(find "$1" \( -name node_modules -o -name build -o -name generated -o -name graphify-out -o -name '.*' ! -name . \) -prune \
+    -o -type d -name 'layout*' -path '*/src/main/res/layout*' -print 2>/dev/null | head -n 1)" ]]
 }
 
 android_layouts() { # repo_root graph_path name

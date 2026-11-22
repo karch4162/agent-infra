@@ -1586,6 +1586,19 @@ fi
 assert_files_identical "innov427/broken-pass-still-publishes-the-graph-unchanged" \
   "$box/graph.unaugmented" "$box/$MIRROR_427"
 
+# The gate finds a module at any depth, as the pass walks (here three levels down).
+box="$(layout_box)"
+r="$box/repos/demorepo"
+mkdir -p "$r/features/pay/ui"
+mv "$r/app" "$r/features/pay/ui/"
+sed 's#app/src/main#features/pay/ui/app/src/main#' "$box/graph.unaugmented" >"$r/graphify-out/graph.json"
+run_sync "$box" "$STUBS_427:$PATH" >/dev/null
+if grep -q '^ANDROID-LAYOUTS: OK - 1 layout(s)' "$box/err.txt" && grep -q '"_origin": "android-layouts"' "$box/$MIRROR_427"; then
+  pass "innov427/deep-module-is-found"
+else
+  fail "innov427/deep-module-is-found" "stderr: [$(cat "$box/err.txt")]"
+fi
+
 # No res/layout directory: the pass is never called (negative control for the gate).
 box="$(new_sandbox)"
 run_sync "$box" "$STUBS_427:$PATH" >/dev/null
