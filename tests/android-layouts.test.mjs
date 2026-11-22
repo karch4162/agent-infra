@@ -327,3 +327,35 @@ test('a graph source_file outside the checkout is never read', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('owner is the class whose body holds the reference; a foreign qualified R is not ours', () => {
+  const root = fixture();
+  try {
+    const sf = `${J}/Outer.kt`;
+    put(root, sf, `package com.example.app
+
+class Outer {
+    class Holder(val b: ToolbarBinding)
+    class Inner {
+        fun f() {}
+    }
+    val a = R.layout.item_row
+    val c = com.vendor.lib.R.layout.only_land
+    val d = com.example.R.layout.simple_list_item_1
+}
+`);
+    const g = parsePyJson(readFileSync(join(root, 'graphify-out', 'graph.json'), 'utf8'));
+    g.nodes.push(n('outer', 'Outer', sf, 3, cls), n('holder', 'Holder', sf, 4, cls), n('inner', 'Inner', sf, 5, cls), n('inner_f', '.f()', sf, 6, fn));
+    g.links.push(edge('inner', 'inner_f', 'method', sf));
+    put(root, 'graphify-out/graph.json', dumpPyJson(g) + '\n');
+    assert.equal(run(root).status, 0);
+    const t = tagged(load(root));
+    const L = (label) => t.nodes.find((x) => x.label === label).id;
+    const from = (src) => t.links.filter((e) => e.source === src && e.relation === 'uses_layout').map((e) => e.target).sort();
+    assert.deepEqual(from('holder'), [L('toolbar')], 'a bodiless nested class owns its header');
+    assert.deepEqual(from('inner'), [], 'a closed nested class owns nothing after it');
+    assert.deepEqual(from('outer'), [L('item_row'), L('simple_list_item_1')].sort());
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

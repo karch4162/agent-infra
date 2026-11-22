@@ -301,41 +301,56 @@ export function augment(graph, buildDir, readText = (p) => readFileSync(p, 'utf8
       let text;
       try { text = blankCommentsAndStrings(readText(join(buildDir, sf))); } catch { continue; }
       const fileNodes = byFile.get(sf);
-      // The reference belongs to the innermost declaration that starts at or
-      // before it: a method resolves to its class (graphify's `method` edge), a
-      // top-level function is its own owner. Class start lines alone would hand
-      // an edge to a nested interface declared above the method that inflates.
       const starts = [0];
       for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) starts.push(i + 1);
       const lineText = (l) => (l >= 1 && l <= starts.length ? text.slice(starts[l - 1], l < starts.length ? starts[l] : text.length) : '');
-      // Without end lines a nested listener interface declared above the field or
-      // method would swallow the reference; an interface body never holds one.
-      const ifaces = new Set(fileNodes.filter((n) => n._callable_class && /\binterface\s/.test(lineText(lineNo(n.source_location)))).map((n) => n.id));
-      const decls = fileNodes
-        .filter((n) => n._callable && !ifaces.has(n.id) && !(methodOwner.has(n.id) && ifaces.has(methodOwner.get(n.id).id)))
-        .map((n) => ({ n, line: lineNo(n.source_location) }))
-        .sort((a, b) => a.line - b.line);
+      // The reference belongs to the innermost CLASS whose body holds it. graphify
+      // gives start lines only, so each class's end is found by brace matching on
+      // the blanked text (comments and strings cannot unbalance it). A class with
+      // no body owns just its header (a ViewHolder's constructor parameters). An
+      // interface body never holds a layout reference, so interfaces are skipped.
+      const declLines = [...new Set(fileNodes.filter((n) => n._callable).map((n) => lineNo(n.source_location)))].sort((a, b) => a - b);
+      const classEnd = (line) => {
+        const next = declLines.find((l) => l > line);
+        const limit = next ? starts[next - 1] : text.length;
+        let depth = 0;
+        for (let i = starts[line - 1] || 0; i < limit; i++) {
+          const c = text[i];
+          if (c === '(') depth++;
+          else if (c === ')') depth--;
+          else if (c === '{' && depth <= 0) {
+            let b = 0;
+            for (let j = i; j < text.length; j++) {
+              if (text[j] === '{') b++;
+              else if (text[j] === '}' && --b === 0) return lineAt(starts, j);
+            }
+            return starts.length;
+          }
+        }
+        return next ? next - 1 : starts.length;
+      };
+      const classes = fileNodes
+        .filter((n) => n._callable_class && !/\binterface\s/.test(lineText(lineNo(n.source_location))))
+        .map((n) => { const s = lineNo(n.source_location); return { n, s, e: classEnd(s) }; });
+      const topFns = fileNodes
+        .filter((n) => n._callable && !n._callable_class && !methodOwner.has(n.id) && !String(n.label).startsWith('.'))
+        .map((n) => ({ n, s: lineNo(n.source_location) }));
       const fileNode = fileNodes.find((n) => n.label === basename(sf)) || null;
       const owner = (line) => {
         let best = null;
-        for (const d of decls) if (d.line <= line) best = d.n;
-        if (!best) best = (decls.find((d) => d.n._callable_class) || {}).n || null;
-        if (best && !best._callable_class) {
-          if (methodOwner.has(best.id)) best = methodOwner.get(best.id);
-          // `.name()` is a member graphify gave no `method` edge (a companion
-          // object's): it still belongs to the class it sits in.
-          else if (String(best.label).startsWith('.')) {
-            let cls = null;
-            for (const d of decls) if (d.n._callable_class && d.line <= line) cls = d.n;
-            if (cls) best = cls;
-          }
-        }
-        return best || fileNode;
+        for (const c of classes) if (c.s <= line && line <= c.e && (!best || c.s >= best.s)) best = c;
+        if (best) return best.n;
+        let fn = null;
+        for (const f of topFns) if (f.s <= line && (!fn || f.s >= fn.s)) fn = f;
+        return fn ? fn.n : fileNode;
       };
+      // A qualified R (`com.vendor.lib.R`) is another package's resources unless
+      // it is this file's own package or a parent of it.
+      const pkg = (/^\s*package\s+([\w.]+)/m.exec(text) || [])[1] || '';
       const module = moduleOf(sf);
       const hits = [];
       for (const m of text.matchAll(RREF)) {
-        if (m[1] === 'android') continue;
+        if (m[1] && !(pkg === m[1] || pkg.startsWith(m[1] + '.'))) continue;
         const before = text.slice(Math.max(0, m.index - 80), m.index);
         const context = /setContentView\s*\(\s*(?:[\w.]+\s*,\s*)?$/.test(before) ? 'setContentView'
           : /inflate\s*\(\s*(?:[\w.]+\s*,\s*)?$/.test(before) ? 'inflate' : 'R.layout';
