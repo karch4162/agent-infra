@@ -169,6 +169,34 @@ function lineAt(starts, idx) {
   return lo + 1;
 }
 
+// Kotlin/Java source with comments and string/char literals blanked to spaces
+// (newlines kept, so offsets and line numbers still line up): commented-out
+// `R.layout.x` is not a use, and a `//` inside a URL string is not a comment.
+export function blankCommentsAndStrings(src) {
+  const out = src.split('');
+  const blank = (from, to) => { for (let k = from; k < to; k++) if (out[k] !== '\n' && out[k] !== '\r') out[k] = ' '; };
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    const c = src[i], d = src[i + 1];
+    if (c === '/' && d === '/') {
+      let j = src.indexOf('\n', i); if (j === -1) j = n;
+      blank(i, j); i = j;
+    } else if (c === '/' && d === '*') {
+      let j = src.indexOf('*/', i + 2); j = j === -1 ? n : j + 2;
+      blank(i, j); i = j;
+    } else if (c === '"' && src.startsWith('"""', i)) {
+      let j = src.indexOf('"""', i + 3); j = j === -1 ? n : j + 3;
+      blank(i + 1, j - 1); i = j;
+    } else if (c === '"' || c === "'") {
+      let j = i + 1;
+      while (j < n && src[j] !== c && src[j] !== '\n') j += src[j] === '\\' ? 2 : 1;
+      blank(i + 1, j); i = j + 1;
+    } else i++;
+  }
+  return out.join('');
+}
+
 const lineNo = (loc) => { const m = /^L(\d+)/.exec(String(loc || '')); return m ? Number(m[1]) : 0; };
 
 // --- main --------------------------------------------------------------------
@@ -266,7 +294,7 @@ export function augment(graph, buildDir, readText = (p) => readFileSync(p, 'utf8
     const BREF = /\b([A-Z][A-Za-z0-9]*Binding)\b/g;
     for (const sf of [...byFile.keys()].sort()) {
       let text;
-      try { text = readText(join(buildDir, sf)); } catch { continue; }
+      try { text = blankCommentsAndStrings(readText(join(buildDir, sf))); } catch { continue; }
       const fileNodes = byFile.get(sf);
       // The reference belongs to the innermost declaration that starts at or
       // before it: a method resolves to its class (graphify's `method` edge), a

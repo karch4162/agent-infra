@@ -1536,6 +1536,44 @@ else
   fail "innov427/unchanged-rebuild-reads-up-to-date" "stdout: [$(cat "$box/out.txt")]" "stderr: [$(cat "$box/err.txt")]"
 fi
 
+# UPGRADE PATH: a mirror published before the pass existed is byte-identical to
+# its repo-side graph. An explicit sync must still give it layouts, not read
+# up-to-date and skip it forever.
+box="$(layout_box)"
+mkdir -p "$box/vault/graphify/demorepo"
+cp "$box/graph.unaugmented" "$box/$MIRROR_427"
+run_sync "$box" "$STUBS_427:$PATH" >/dev/null
+if grep -q '"_origin": "android-layouts"' "$box/$MIRROR_427" && ! grep -q '^up-to-date: demorepo' "$box/out.txt"; then
+  pass "innov427/pre-existing-identical-mirror-gets-layouts"
+else
+  fail "innov427/pre-existing-identical-mirror-gets-layouts" "stdout: [$(cat "$box/out.txt")]" "stderr: [$(cat "$box/err.txt")]"
+fi
+
+# The layouts are read from the working tree, so a checkout that moved off the
+# graph's built_at_commit is not re-read (negative control: same box, HEAD matches).
+box="$(layout_box)"
+r="$box/repos/demorepo"
+git_init_commit "$r" "init" >/dev/null 2>&1
+other="0123456789abcdef0123456789abcdef01234567"
+printf '{\n  "nodes": [],\n  "links": [],\n  "built_at_commit": "%s"\n}\n' "$other" >"$r/graphify-out/graph.json"
+cp "$r/graphify-out/graph.json" "$box/graph.stamped"
+run_sync "$box" "$STUBS_427:$PATH" >/dev/null
+if grep -q '^ANDROID-LAYOUTS: SKIPPED demorepo - checkout is at' "$box/err.txt" \
+  && ! grep -q '"_origin": "android-layouts"' "$box/$MIRROR_427"; then
+  pass "innov427/moved-checkout-is-not-re-read"
+else
+  fail "innov427/moved-checkout-is-not-re-read" "stderr: [$(cat "$box/err.txt")]"
+fi
+head_sha="$(git -C "$r" rev-parse HEAD)"
+printf '{\n  "nodes": [],\n  "links": [],\n  "built_at_commit": "%s"\n}\n' "$head_sha" >"$r/graphify-out/graph.json"
+rm -f "$box/$MIRROR_427"
+run_sync "$box" "$STUBS_427:$PATH" >/dev/null
+if grep -q '^ANDROID-LAYOUTS: OK' "$box/err.txt" && grep -q '"_origin": "android-layouts"' "$box/$MIRROR_427"; then
+  pass "innov427/checkout-at-built-commit-is-read"
+else
+  fail "innov427/checkout-at-built-commit-is-read" "stderr: [$(cat "$box/err.txt")]"
+fi
+
 # A pass that fails is a loud warning, never an OK, and the graph still publishes.
 box="$(layout_box)"
 run_sync "$box" "$BROKEN_427:$PATH" >/dev/null

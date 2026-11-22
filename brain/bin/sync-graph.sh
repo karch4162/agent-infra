@@ -425,8 +425,19 @@ has_android_layouts() { # repo_root
 }
 
 android_layouts() { # repo_root graph_path name
-  local out="" rc=0 first=""
+  local out="" rc=0 first="" built="" head=""
   has_android_layouts "$1" || return 0
+  # The layouts are read from the working tree, so the tree must be the one the
+  # graph was built from. built_at_commit is the root's LAST key in graphify's
+  # output, so the file's tail holds it and no node attribute can be mistaken
+  # for it. Unknown on either side (no stamp, not a git checkout) runs the pass:
+  # that is the same unverifiable case the provenance gate SKIPs, not a mismatch.
+  built="$(tail -c 400 "$2" 2>/dev/null | tr -d '\r' | sed -n 's/^  "built_at_commit": "\([0-9a-fA-F]\{7,40\}\)"$/\1/p')"
+  head="$(git -C "$1" rev-parse HEAD 2>/dev/null || true)"
+  if [[ -n "$built" && -n "$head" && "$head" != "$built"* ]]; then
+    echo "ANDROID-LAYOUTS: SKIPPED $3 - checkout is at ${head:0:12}, the graph was built at ${built:0:12}; layouts not re-read. Rebuild the graph at HEAD to refresh them." >&2
+    return 0
+  fi
   out="$(node "$ANDROID_LAYOUTS" "$1" --graph "$2" 2>&1)" || rc=$?
   first="${out%%$'\n'*}"
   case "$first:$rc" in
@@ -510,15 +521,11 @@ for repo in "${repos[@]}"; do
     echo "skip $name: no graph at $src/graph.json" >&2
     continue
   fi
-  if [[ -f "$dst/graph.json" ]] && cmp -s "$src/graph.json" "$dst/graph.json"; then
-    echo "up-to-date: $name"
-    continue
-  fi
-
-  # THE ANDROID LAYOUT PASS. After the up-to-date check, not before it: an
-  # unchanged mirror must not be re-augmented from whatever is checked out now and
-  # republished under its old built_at_commit. Checked again afterwards, so a
-  # graphify rebuild that only dropped the layout nodes reads up-to-date.
+  # THE ANDROID LAYOUT PASS. Before the up-to-date check, so a mirror published
+  # before this pass existed still gets its layouts on an explicit or --all sync,
+  # and a graphify rebuild that only dropped the layout nodes reads up-to-date.
+  # android_layouts itself refuses to run when the checkout is not at the graph's
+  # built_at_commit, so a graph is never augmented from a tree it was not built from.
   android_layouts "$repo" "$src/graph.json" "$name"
   if [[ -f "$dst/graph.json" ]] && cmp -s "$src/graph.json" "$dst/graph.json"; then
     echo "up-to-date: $name"

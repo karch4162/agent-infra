@@ -263,3 +263,28 @@ test('a same-module layout wins over a same-named one in another module', () => 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('references in code comments and string literals are not uses', () => {
+  const root = fixture();
+  try {
+    put(root, `${J}/MainActivity.kt`, `package com.example.app
+
+class MainActivity : AppCompatActivity() {
+    override fun onCreate(b: Bundle?) {
+        val url = "https://x.test/a" // R.layout.toolbar
+        /* setContentView(R.layout.item_row)
+           ToolbarBinding.inflate(i) */
+        val s = "R.layout.only_land"
+        setContentView(R.layout.activity_main)
+    }
+}
+`);
+    assert.equal(run(root).status, 0);
+    const t = tagged(load(root));
+    const from = t.links.filter((e) => e.source === 'main_cls').map((e) => t.nodes.find((x) => x.id === e.target).label);
+    assert.deepEqual(from, ['activity_main']);
+    assert.equal(t.links.find((e) => e.source === 'main_cls').source_location, 'L9', 'line numbers survive the blanking');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
