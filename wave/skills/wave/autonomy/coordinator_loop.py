@@ -153,9 +153,14 @@ def recheck_parked(d):
 
 def consume(d):
     r = oj('orchestration', 'check', '--run', RUN, '--wait', '--types', 'worker_done,escalation,question', '--timeout-ms', '120000')
-    for m in r.get('messages', []):
+    def payload(m):
         p = m.get('payload') or {}
-        p = json.loads(p) if isinstance(p, str) else p   # older Orca builds sent a JSON string
+        return json.loads(p) if isinstance(p, str) else p   # older Orca builds sent a JSON string
+    # a worker that yielded, then finished and exited, has its turn-end ahead of its worker_done
+    # in one batch: the worker_done settles it, the turn-end must not hold it first
+    finished = {payload(m).get('dispatchId') for m in r.get('messages', []) if m.get('type') == 'worker_done'}
+    for m in r.get('messages', []):
+        p = payload(m)
         if m.get('type') not in ('worker_done', 'question', 'escalation'):
             continue   # heartbeats ride in the same FIFO batch (--types is only the wake condition)
         k = by_dispatch(d, p.get('dispatchId'), p.get('taskId'))
@@ -170,6 +175,8 @@ def consume(d):
             v['doneAt'] = time.time()
             if v['status'] == 'held': v['reason'] = 'worker failed: ' + (m.get('body') or '')[:160]
         elif m['type'] == 'escalation' and TURN_END.match((m.get('body') or '').lstrip()):
+            if p.get('dispatchId') in finished:
+                log(k, 'turn ended, worker_done follows in this batch'); continue
             why = parked_why_not(v)
             if not why:
                 log(k, 'turn ended, worker still live; waiting for worker_done'); continue
@@ -235,7 +242,8 @@ def main():
     take_lock()
     d = load(); reconcile(d); save(d)
     while any(v['status'] in ('running', 'done') for v in d['issues'].values()):
-        if any(v['status'] == 'running' for v in d['issues'].values()): consume(d)
+        if any(v['status'] == 'running' for v in d['issues'].values()):
+            consume(d); save(d)   # the acked turn-end clock must survive a crash in settle
         settle(d); save(d)
         if all(v['status'] == 'done' for v in d['issues'].values() if v['status'] in ('running','done')): time.sleep(60)  # CI pending
     save(d)

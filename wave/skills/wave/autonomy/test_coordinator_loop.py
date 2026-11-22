@@ -328,6 +328,15 @@ class TurnEndEscalation(unittest.TestCase):
                 cl.consume(self.d)
                 self.assertEqual(self.d["issues"]["ABC-7"]["status"], "held")
 
+    def test_worker_done_in_the_same_batch_wins_over_its_turn_end(self):
+        # the worker yielded, then finished and exited before the coordinator read the queue:
+        # the turn-end must not hold it and swallow the worker_done that follows it
+        self.liveness = "exited"
+        self.inbox.append({"type": "escalation", "body": TURN_END,
+                           "payload": {"dispatchId": "d1", "taskId": "t1"}})
+        v = self.send("worker_done", "DONE - ABC-7 - PR #303", outcome="succeeded")
+        self.assertEqual((v["status"], v["pr"]), ("done", 303))
+
     def test_unverifiable_with_a_detail_still_waits(self):
         # concise worker-show renders "unverifiable (<detail>)" when the projection has one
         self.liveness = "unverifiable (stale_status)"

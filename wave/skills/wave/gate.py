@@ -32,23 +32,33 @@ def wave_block(body):
     return block
 
 
-def final_tier(tier):
-    # "normal -> risk - recovery path" escalated to risk: the end of the leading
-    # "<tier> -> <tier> ..." chain wins (INNOV-464). An arrow in the reason is not a tier;
-    # a dangling "->" is no tier at all.
-    m = re.match(r"\s*([A-Za-z]+)(?:\s*->\s*([A-Za-z]+))*", tier)
+def tier_chain(tier):
+    # The leading "<tier> -> <tier> ..." chain of a TIER line (INNOV-464): "normal -> risk -
+    # recovery path" is [normal, risk]. An arrow in the reason is not a tier; a dangling "->"
+    # gives [] (no tier at all).
+    m = re.match(r"\s*[A-Za-z]+(?:\s*->\s*[A-Za-z]+)*", tier)
     if not m or tier[m.end():].lstrip().startswith("->"):
-        return ""
-    return (m.group(2) or m.group(1)).lower()
+        return []
+    return [t.strip().lower() for t in m.group(0).split("->")]
+
+
+def tier_hold(tiers):
+    # Every tier on every TIER line must be quick or normal: escalated to risk, or
+    # de-escalated from it ("risk -> normal"), is still human-merged.
+    chains = [tier_chain(t) for t in tiers or [""]]
+    if not all(chains):
+        return "missing"
+    bad = [t for c in chains for t in c if t not in ("quick", "normal")]
+    return bad[0] if bad else ""
 
 
 def decide(d):
     block = wave_block(d.get("body") or "")
     if block is None:
         return "HOLD: no ## Wave block in the PR body"
-    tier = final_tier((block.get("TIER") or [""])[0])
-    if tier not in ("quick", "normal"):
-        return "HOLD: TIER %s is human-merged" % (tier or "missing")
+    tier = tier_hold(block.get("TIER"))
+    if tier:
+        return "HOLD: TIER %s is human-merged" % tier
     if (block.get("MIGRATION") or ["yes"])[0].lower() != "no":
         return "HOLD: MIGRATION is not 'no'"
     reviewer = (block.get("REVIEWER") or [""])[0]

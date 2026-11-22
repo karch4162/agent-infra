@@ -261,7 +261,7 @@ it to send `worker_done`. The coordinator blocks on those, and on each one runs
 
 | Merged by the coordinator | Held for you (`wave-held` label, worktree kept) |
 |---|---|
-| Final `TIER` `quick` or `normal` (the end of the leading `a -> b` chain, so `quick -> normal` merges), `MIGRATION: no`, `REVIEWER: codex-terra`, `REVIEW VERDICT: YES` (every such line, exactly), no `TIE-BREAKER`, every required check green, mergeable | Final `TIER` `risk` or missing (incl. `normal -> risk`), `MIGRATION: yes`, a fallback reviewer, `REVIEW VERDICT` `NO` or missing, any `NO ... REVIEW`, a tie-break, a failed check, a worker question, an escalation other than a live worker's turn ending, a second conflict |
+| Every tier on every `TIER` line `quick` or `normal` (the leading `a -> b` chain, so `quick -> normal` merges), `MIGRATION: no`, `REVIEWER: codex-terra`, `REVIEW VERDICT: YES` (every such line, exactly), no `TIE-BREAKER`, every required check green, mergeable | `risk` anywhere in a `TIER` chain (`normal -> risk`, `risk -> normal`) or no tier, `MIGRATION: yes`, a fallback reviewer, `REVIEW VERDICT` `NO` or missing, any `NO ... REVIEW`, a tie-break, a failed check, a worker question, an escalation other than a live worker's turn ending, a second conflict |
 
 Orca escalates every time a worker's turn ends without `worker_done`, which includes a
 Claude worker waiting on a background review or an advisor call. The coordinator checks
