@@ -307,6 +307,9 @@ class DenySelfHeal(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.calls: list[list[str]] = []
+        ledger = mock.patch.object(preflight, "codex_cap_sids", return_value={SID, "S-1-15-3-1024-1-2-3"})
+        self.ledger = ledger.start()
+        self.addCleanup(ledger.stop)
 
     @staticmethod
     def block(path, *aces, n=1):
@@ -427,6 +430,14 @@ class DenySelfHeal(unittest.TestCase):
         self.assertIn("$_.InheritanceFlags -eq 'ContainerInherit, ObjectInherit'", script)
         self.assertIn("$_.PropagationFlags -eq 'None'", script)
 
+    def test_sid_missing_from_codex_ledger_is_not_healed(self):
+        # Codex review round 2: the shape alone could be a deleted domain account's DENY.
+        self.ledger.return_value = {"S-1-5-21-1-2-3-4"}
+        check = self.check(self.dirty())
+        self.assertFalse(check.ok)
+        self.assertIn("not in the Codex cap_sid ledger", check.detail)
+        self.assertEqual(self.heals(), [])
+
     def test_scan_failure_with_deny_is_not_healed(self):
         out = self.dirty()
         out[self.slug] = out[self.slug].replace("Failed processing 0", "Failed processing 1")
@@ -449,6 +460,27 @@ class DenySelfHeal(unittest.TestCase):
             self.assertIn("DENY ACEs present", check.detail)
             self.assertIn("self-heal exit=", check.detail)
             self.assertEqual(len([c for c in self.calls if c[0] == "icacls"]), 3)  # no rescan
+
+
+class CodexCapSidLedger(unittest.TestCase):
+    def setUp(self):
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        self.home = Path(td.name)
+        env = mock.patch.dict(preflight.os.environ, {"CODEX_HOME": str(self.home)})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def test_reads_every_sid_in_the_ledger(self):
+        (self.home / "cap_sid").write_text(json.dumps({
+            "workspace": "S-1-5-21-1-1-1-1", "readonly": "S-1-5-21-2-2-2-2",
+            "workspace_by_cwd": {"c:/x": SID}, "note": "not a sid"}), encoding="utf-8")
+        self.assertEqual(preflight.codex_cap_sids(), {"S-1-5-21-1-1-1-1", "S-1-5-21-2-2-2-2", SID})
+
+    def test_missing_or_garbled_ledger_is_empty(self):
+        self.assertEqual(preflight.codex_cap_sids(), set())
+        (self.home / "cap_sid").write_text("{not json", encoding="utf-8")
+        self.assertEqual(preflight.codex_cap_sids(), set())
 
 
 class BrainSaveConsume(unittest.TestCase):

@@ -171,6 +171,27 @@ def codex_sandbox_deny_sids(git_dir: Path, text: str, deny_hits: set[str]) -> li
     return sorted(sids) if sids and sids <= explicit else []
 
 
+def codex_cap_sids() -> set[str]:
+    """Every sandbox SID Codex has minted, from its ledger (CODEX_HOME/cap_sid, a JSON map
+    of workspace/readonly/workspace_by_cwd -> SID). Empty when unreadable."""
+    home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+    try:
+        data = json.loads((home / "cap_sid").read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ValueError):
+        return set()
+    found: set[str] = set()
+    stack: list[Any] = [data]
+    while stack:
+        v = stack.pop()
+        if isinstance(v, dict):
+            stack.extend(v.values())
+        elif isinstance(v, list):
+            stack.extend(v)
+        elif isinstance(v, str) and v.startswith("S-1-"):
+            found.add(v)
+    return found
+
+
 def _heal_script(git_dir: Path, sids: list[str]) -> str:
     def q(v: str) -> str:
         return "'" + v.replace("'", "''") + "'"
@@ -226,8 +247,15 @@ def check_git_deny_aces(repo: str, run: Callable[..., tuple[int, str, str]] = _r
     sids = [] if failures else codex_sandbox_deny_sids(git_dir, outputs.get(git_dir, ""), deny_hits)
     if not sids:
         return Check("git_deny_aces", False, True, _deny_detail(failures, deny_hits))
+    # The shape alone could be a deleted domain account's deliberate DENY: only heal
+    # SIDs Codex itself recorded minting.
+    unknown = sorted(set(sids) - codex_cap_sids())
+    if unknown:
+        return Check("git_deny_aces", False, True, _deny_detail(failures, deny_hits)
+                     + f" | not healed: {', '.join(unknown)} not in the Codex cap_sid ledger")
     try:
-        code, out, err = run(heal_cmd(git_dir, sids), timeout=120)
+        # Set-Acl re-propagates inheritance to every child, as slow as the /T scan.
+        code, out, err = run(heal_cmd(git_dir, sids), timeout=300)
     except (OSError, subprocess.SubprocessError) as e:
         code, out, err = -1, "", f"did not run: {e}"
     m = re.search(r"REMOVED (\d+)", out)
