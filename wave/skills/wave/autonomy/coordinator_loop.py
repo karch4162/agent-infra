@@ -5,7 +5,7 @@ driven by a test. coordinator.sh owns spawn, walk, sweep and the report; this fi
 moves data between orca, gh and the state file. Importing it has no side effects:
 the env is read here, the loop runs in main().
 """
-import json, os, re, subprocess, sys, time
+import json, math, os, re, subprocess, sys, time
 RUN, STATE, WAVE, MAIN = (os.environ.get(k, '') for k in ('RUN','STATE','WAVE_HOME','MAIN_CHECKOUT'))
 BASE = os.environ.get('BASE_BRANCH', '')
 CONFIG = os.environ.get('WAVE_CONFIG', '')   # the repo's config.env, as lib.sh resolved it
@@ -123,17 +123,21 @@ def gate(pr):
 # run_634d93c19dcc were held this way while still live, then sent worker_done to nobody).
 TURN_END = 'ended its turn without sending worker_done'
 def turn_end_grace_s():
-    try: return float(os.environ.get('WAVE_TURN_END_GRACE_MIN') or 60) * 60
-    except ValueError: return 60 * 60
+    try: m = float(os.environ.get('WAVE_TURN_END_GRACE_MIN') or 60)
+    except ValueError: m = 60
+    return m * 60 if math.isfinite(m) and m > 0 else 60 * 60   # nan/inf/0 would never (or always) hold
 def parked_why_not(v):
     """'' while a turn-ended worker may keep running; otherwise why it is held. The clock starts
-    at the first turn-end and later ones never reset it, or a looping worker never hits the cap."""
+    at the first turn-end and later ones never reset it, or a looping worker never hits the cap.
+    Only a definite non-live state holds at once: 'unverifiable' (no status heartbeat for a while,
+    e.g. a long review.sh) or an unreadable worker-show is waited on, bounded by the same cap."""
     v.setdefault('turnEndAt', time.time())
-    try: live = oj('orchestration', 'worker-show', '--dispatch', v['dispatch']).get('liveness') == 'live'
-    except Exception: live = False   # noqa: BLE001 - unreadable is not live: fail to a hold, never to an unsupervised wait
-    if not live: return 'worker not live'
+    try: liveness = oj('orchestration', 'worker-show', '--dispatch', v['dispatch']).get('liveness')
+    except Exception: liveness = None   # noqa: BLE001 - unknown, not dead; the cap still bounds the wait
+    if liveness and liveness not in ('live', 'unverifiable'): return f'worker not live ({liveness})'
     cap = turn_end_grace_s()
-    if time.time() - v['turnEndAt'] > cap: return f'live {cap / 60:g} min after its turn ended, no worker_done'
+    if time.time() - v['turnEndAt'] > cap:
+        return f"{liveness or 'unreadable'} {cap / 60:g} min after its turn ended, no worker_done"
     return ''
 def recheck_parked(d):
     # escalations are events: a parked worker that goes quiet is only caught by this poll

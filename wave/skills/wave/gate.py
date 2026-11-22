@@ -12,6 +12,7 @@ required check green, PR mergeable. Risk tier and migrations are
 held for a human by rule, not by failure.
 """
 import json
+import re
 import sys
 
 
@@ -32,9 +33,13 @@ def wave_block(body):
 
 
 def final_tier(tier):
-    # "normal -> risk - recovery path" escalated to risk: the last "->" wins (INNOV-464)
-    words = tier.rsplit("->", 1)[-1].split()
-    return words[0].lower() if words else ""
+    # "normal -> risk - recovery path" escalated to risk: the end of the leading
+    # "<tier> -> <tier> ..." chain wins (INNOV-464). An arrow in the reason is not a tier;
+    # a dangling "->" is no tier at all.
+    m = re.match(r"\s*([A-Za-z]+)(?:\s*->\s*([A-Za-z]+))*", tier)
+    if not m or tier[m.end():].lstrip().startswith("->"):
+        return ""
+    return (m.group(2) or m.group(1)).lower()
 
 
 def decide(d):
@@ -52,9 +57,10 @@ def decide(d):
     for k in block:
         if k.startswith("NO ") and k.endswith("REVIEW"):
             return "HOLD: %s" % k
-    verdict = ((block.get("REVIEW VERDICT") or [""])[0].split() or [""])[0]
-    if verdict != "YES":
-        return "HOLD: REVIEW VERDICT is '%s', not YES" % (verdict or "missing")
+    # every REVIEW VERDICT line must be exactly YES: a later NO, or "YES but ...", is not a YES
+    for verdict in block.get("REVIEW VERDICT") or [""]:
+        if verdict != "YES":
+            return "HOLD: REVIEW VERDICT is '%s', not YES" % (verdict or "missing")
     if "TIE-BREAKER" in block:
         return "HOLD: TIE-BREAKER ran; a human reads conflicting reviews"
     checks = d.get("checks") or []

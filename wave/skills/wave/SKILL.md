@@ -124,7 +124,7 @@ On top of the direct runtime, **`autonomy/autonomy_tick.py`** is the loop that r
 the session from the merge path: one idempotent tick reconciles workers against their
 PIDs, finds their PRs, polls CI, runs the Grok challenge in the surviving worktree,
 merges through `merge_policy` (rating low, or medium once the owner sets
-`WAVE_AUTO_MERGE_MEDIUM=1` and the clean-wave streak holds; CI green, `REVIEW VERDICT: YES`, no
+`WAVE_AUTO_MERGE_MEDIUM=1` and the clean-wave streak holds; CI green, `REVIEW VERDICT: YES` (every such line, exactly), no
 challenge blocker, no fallback reviewer or tie-break, `MIGRATION: no`), picks the next
 agent-ready `rating:low` tickets (never unrated, never assigned) under the daily and concurrency caps, plans the thin ones first, and
 spawns. It is a dry run unless `--execute`, and it will not pick tickets until the
@@ -261,13 +261,14 @@ it to send `worker_done`. The coordinator blocks on those, and on each one runs
 
 | Merged by the coordinator | Held for you (`wave-held` label, worktree kept) |
 |---|---|
-| Final `TIER` `quick` or `normal` (the word after the last `->`, so `quick -> normal` merges), `MIGRATION: no`, `REVIEWER: codex-terra`, `REVIEW VERDICT: YES`, no `TIE-BREAKER`, every required check green, mergeable | Final `TIER` `risk` or missing (incl. `normal -> risk`), `MIGRATION: yes`, a fallback reviewer, `REVIEW VERDICT` `NO` or missing, any `NO ... REVIEW`, a tie-break, a failed check, a worker question, an escalation other than a live worker's turn ending, a second conflict |
+| Final `TIER` `quick` or `normal` (the end of the leading `a -> b` chain, so `quick -> normal` merges), `MIGRATION: no`, `REVIEWER: codex-terra`, `REVIEW VERDICT: YES` (every such line, exactly), no `TIE-BREAKER`, every required check green, mergeable | Final `TIER` `risk` or missing (incl. `normal -> risk`), `MIGRATION: yes`, a fallback reviewer, `REVIEW VERDICT` `NO` or missing, any `NO ... REVIEW`, a tie-break, a failed check, a worker question, an escalation other than a live worker's turn ending, a second conflict |
 
 Orca escalates every time a worker's turn ends without `worker_done`, which includes a
 Claude worker waiting on a background review or an advisor call. The coordinator checks
-`orchestration worker-show`: while `liveness` is `live` it keeps waiting, and it holds
-when the worker is no longer live or has stayed live past `WAVE_TURN_END_GRACE_MIN`
-(default 60) minutes from its first turn-end without sending `worker_done` (INNOV-464).
+`orchestration worker-show`: while `liveness` is `live` (or `unverifiable`, or the call
+fails) it keeps waiting. It holds at once on any other liveness (`exited`), and holds any
+waiting worker that has not sent `worker_done` within `WAVE_TURN_END_GRACE_MIN` (default 60)
+minutes of its first turn-end; parked workers are re-checked on every poll (INNOV-464).
 
 A first conflict after a sibling merge gets one rebase on the same terminal. When
 `worker-list` shows nothing live, the coordinator fast-forwards the main checkout,

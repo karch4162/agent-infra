@@ -268,12 +268,22 @@ class TurnEndEscalation(unittest.TestCase):
         self.assertEqual(v["status"], "held")
         self.assertIn("not live", v["reason"])
 
-    def test_worker_show_failure_holds(self):
-        # an unreadable worker is not a live one: fail to a hold, never to an unsupervised wait
-        with mock.patch.object(cl, "oj", lambda *a: (_ for _ in ()).throw(ValueError("bad json"))
-                               if a[:2] == ("orchestration", "worker-show") else self.fake_oj(*a)):
-            v = self.send("escalation", TURN_END)
-        self.assertEqual(v["status"], "held")
+    def test_unverifiable_or_unreadable_worker_waits_but_only_up_to_the_cap(self):
+        # 'unverifiable' is Orca's "no status heartbeat lately" (a long review.sh), not dead; an
+        # unreadable worker-show is unknown. Neither holds at once, and neither waits past the cap.
+        boom = lambda *a: (_ for _ in ()).throw(ValueError("bad json")) \
+            if a[:2] == ("orchestration", "worker-show") else self.fake_oj(*a)  # noqa: E731
+        for case in ("unverifiable", "raises", "empty"):
+            with self.subTest(case=case):
+                self.d = {"issues": {"ABC-7": issue(status="running", pr=None)}}
+                self.liveness = None if case == "empty" else case
+                with mock.patch.object(cl, "oj", boom if case == "raises" else self.fake_oj):
+                    self.assertEqual(self.send("escalation", TURN_END)["status"], "running")
+                    self.now += 61 * 60
+                    cl.consume(self.d)
+                v = self.d["issues"]["ABC-7"]
+                self.assertEqual(v["status"], "held")
+                self.assertIn("60 min", v["reason"])
 
     def test_live_worker_past_the_grace_cap_is_held_without_another_message(self):
         self.send("escalation", TURN_END)
@@ -305,12 +315,18 @@ class TurnEndEscalation(unittest.TestCase):
         self.now += 6 * 60
         cl.consume(self.d)
         self.assertEqual(self.d["issues"]["ABC-7"]["status"], "held")
-        os.environ["WAVE_TURN_END_GRACE_MIN"] = "soon"
-        self.d = {"issues": {"ABC-7": issue(status="running", pr=None)}}
-        self.send("escalation", TURN_END)
-        self.now += 30 * 60
-        cl.consume(self.d)
-        self.assertEqual(self.d["issues"]["ABC-7"]["status"], "running")
+        for bad in ("soon", "nan", "inf", "0", "-5"):
+            with self.subTest(bad=bad):
+                # falls back to 60: still waiting at 30 min, held past 60 (nan/inf never would be)
+                os.environ["WAVE_TURN_END_GRACE_MIN"] = bad
+                self.d = {"issues": {"ABC-7": issue(status="running", pr=None)}}
+                self.send("escalation", TURN_END)
+                self.now += 30 * 60
+                cl.consume(self.d)
+                self.assertEqual(self.d["issues"]["ABC-7"]["status"], "running")
+                self.now += 31 * 60
+                cl.consume(self.d)
+                self.assertEqual(self.d["issues"]["ABC-7"]["status"], "held")
 
     def test_questions_and_other_escalations_still_hold_while_live(self):
         for type_, body in (("question", "which table?"), ("escalation", "worker reports a blocker")):

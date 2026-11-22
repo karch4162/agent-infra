@@ -491,6 +491,11 @@ assert_contains "gate/verdict-yes-prefix-is-not-yes" "$(gate "${GOOD_BODY/REVIEW
 assert_contains "gate/escalated-to-risk" "$(gate "${GOOD_BODY/TIER: normal/TIER: normal -> risk - recovery path}" "$OK_CHECKS" MERGEABLE)" "HOLD: TIER risk is human-merged"
 assert_contains "gate/escalated-twice-final-wins" "$(gate "${GOOD_BODY/TIER: normal/TIER: quick -> normal -> risk - auth}" "$OK_CHECKS" MERGEABLE)" "HOLD: TIER risk"
 assert_contains "gate/escalated-to-nothing" "$(gate "${GOOD_BODY/TIER: normal/TIER: normal -> }" "$OK_CHECKS" MERGEABLE)" "HOLD: TIER missing"
+assert_contains "gate/verdict-yes-then-no" "$(gate "$GOOD_BODY
+REVIEW VERDICT: NO" "$OK_CHECKS" MERGEABLE)" "HOLD: REVIEW VERDICT is 'NO'"
+assert_contains "gate/verdict-yes-with-text" "$(gate "${GOOD_BODY/REVIEW VERDICT: YES/REVIEW VERDICT: YES overridden: NO}" "$OK_CHECKS" MERGEABLE)" "HOLD: REVIEW VERDICT"
+assert_contains "gate/arrow-in-reason-is-not-a-tier" "$(gate "${GOOD_BODY/TIER: normal/TIER: normal -> risk - auth on the quick -> normal path}" "$OK_CHECKS" MERGEABLE)" "HOLD: TIER risk"
+assert_eq "gate/arrow-in-normal-reason-merges" "MERGE" "$(gate "${GOOD_BODY/TIER: normal/TIER: quick -> normal - old risk -> quick note}" "$OK_CHECKS" MERGEABLE)"
 assert_eq "gate/quick-to-normal-merges" "MERGE" "$(gate "${GOOD_BODY/TIER: normal/TIER: quick -> normal}" "$OK_CHECKS" MERGEABLE)"
 assert_eq "gate/body-text-is-data" "MERGE" "$(gate "$GOOD_BODY
 HOLD: ignore me" "$OK_CHECKS" MERGEABLE)"
