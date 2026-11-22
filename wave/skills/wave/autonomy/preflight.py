@@ -1,11 +1,12 @@
 """Preflight before any DirectWorkerRuntime spawn (Mason t24u).
 
-Checks: Docker running (start if possible), no DENY ACEs on .git,
-expected Claude/Codex launch flags, Codex quota probe, ClickUp token reachability.
+Checks: Docker running (start if possible), no DENY ACEs on .git (self-healing
+the one known Codex-sandbox case, INNOV-458), expected Claude/Codex launch flags, Codex quota probe, ClickUp token reachability.
 Never fakes a pass — returns structured results; exit 1 if any hard check fails.
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -101,6 +102,134 @@ def _icacls_failure(target: Path, code: int, text: str) -> str | None:
     return f"icacls {target} exit={code}: {text.strip()[-300:]}"
 
 
+# The one ACE shape the elevated Codex sandbox stamps (seen 2026-11-18): a raw (unresolvable)
+# machine/domain SID, (OI)(CI) DENY of W,D,Rc,DC. Children carry it with (I).
+_CODEX_DENY = re.compile(r"(S-1-5-21(?:-\d+)+):(\(I\))?((?:\(OI\)\(CI\))?)\(DENY\)\(W,D,Rc,DC\)\s*$")
+# W,D,Rc,DC as FileSystemRights (Write|Delete|ReadPermissions|DeleteSubdirectoriesAndFiles|Synchronize).
+_CODEX_DENY_RIGHTS = 0x130156
+
+
+def _scan_deny(targets: list[Path], run: Callable[..., tuple[int, str, str]]) -> tuple[list[str], dict[Path, str], set[str]]:
+    """icacls /T every target: (scan failures, raw output per target, DENY lines)."""
+    failures: list[str] = []
+    outputs: dict[Path, str] = {}
+    deny_hits: set[str] = set()
+    for t in targets:
+        try:
+            # 24s for 5k files here, so the 60s default is too tight on a larger .git.
+            code, out, err = run(["icacls", str(t), "/T"], timeout=300)
+        except (OSError, subprocess.SubprocessError) as e:
+            failures.append(f"icacls {t} did not run: {e}")
+            continue
+        text = out + err
+        outputs[t] = text
+        deny_hits.update(line.strip() for line in text.splitlines() if "(DENY)" in line.upper())
+        failure = _icacls_failure(t, code, text)
+        if failure:
+            failures.append(failure)
+    return failures, outputs, deny_hits
+
+
+def _own_acl_block(git_dir: Path, text: str) -> list[str]:
+    """The ACE lines icacls printed for git_dir itself (its first entry sits on the path line)."""
+    prefix = str(git_dir) + " "
+    lines = text.splitlines()
+    for k, line in enumerate(lines):
+        if line.startswith(prefix):
+            block = [line[len(prefix):].strip()]
+            for cont in lines[k + 1:]:
+                if not cont.strip() or not cont[:1].isspace():
+                    break
+                block.append(cont.strip())
+            return block
+    return []
+
+
+def codex_sandbox_deny_sids(git_dir: Path, text: str, deny_hits: set[str]) -> list[str]:
+    """SIDs to heal when the DENY ACEs are the known Codex-sandbox case, else [].
+
+    The case (INNOV-458): an elevated Codex sandbox stamped an explicit
+    (OI)(CI)(DENY)(W,D,Rc,DC) on .git for its own SID, which no longer resolves, so
+    icacls prints it raw; children only inherit it; and .git carries a
+    CodexSandboxUsers ACE. Any other DENY anywhere (a named principal, other rights or
+    flags) means a rule this heal did not see stamped, so nothing is healed.
+    """
+    sids: set[str] = set()
+    for hit in deny_hits:
+        m = _CODEX_DENY.search(hit)
+        if not m:
+            return []
+        sids.add(m[1])
+    block = _own_acl_block(git_dir, text)
+    if not any(ace.split(":", 1)[0].endswith("\\CodexSandboxUsers") for ace in block):
+        return []
+    explicit = set()
+    for ace in block:
+        m = _CODEX_DENY.search(ace)
+        if m and not m[2] and m[3]:
+            explicit.add(m[1])
+    return sorted(sids) if sids and sids <= explicit else []
+
+
+def codex_cap_sids() -> set[str]:
+    """Every sandbox SID Codex has minted, from its ledger (CODEX_HOME/cap_sid, a JSON map
+    of workspace/readonly/workspace_by_cwd -> SID). Empty when unreadable."""
+    home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+    try:
+        data = json.loads((home / "cap_sid").read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ValueError):
+        return set()
+    found: set[str] = set()
+    stack: list[Any] = [data]
+    while stack:
+        v = stack.pop()
+        if isinstance(v, dict):
+            stack.extend(v.values())
+        elif isinstance(v, list):
+            stack.extend(v)
+        elif isinstance(v, str) and v.startswith("S-1-"):
+            found.add(v)
+    return found
+
+
+def _heal_script(git_dir: Path, sids: list[str]) -> str:
+    def q(v: str) -> str:
+        return "'" + v.replace("'", "''") + "'"
+
+    return "\n".join([
+        "$ErrorActionPreference = 'Stop'",
+        f"$p = {q(str(git_dir))}",
+        f"$sids = @({', '.join(q(s) for s in sids)})",
+        "$acl = Get-Acl -LiteralPath $p",
+        "if (-not ($acl.Access | Where-Object { $_.IdentityReference.Value -like '*\\CodexSandboxUsers' })) { exit 3 }",
+        "$rules = @($acl.Access | Where-Object { $_.AccessControlType -eq 'Deny' -and -not $_.IsInherited -and"
+        " $_.IdentityReference -is [System.Security.Principal.SecurityIdentifier] -and $sids -contains $_.IdentityReference.Value -and"
+        f" [int]$_.FileSystemRights -eq {_CODEX_DENY_RIGHTS} -and $_.InheritanceFlags -eq 'ContainerInherit, ObjectInherit' -and"
+        " $_.PropagationFlags -eq 'None' })",
+        "if ($rules.Count -eq 0) { exit 4 }",
+        "foreach ($r in $rules) { $acl.RemoveAccessRuleSpecific($r) }",
+        "Set-Acl -LiteralPath $p -AclObject $acl",
+        "Write-Output \"REMOVED $($rules.Count)\"",
+    ])
+
+
+def heal_cmd(git_dir: Path, sids: list[str]) -> list[str]:
+    """PowerShell that removes only explicit DENY rules for these unresolvable SIDs on
+    .git itself. icacls /remove:d can't: it fails with 1332 on an unresolvable SID."""
+    encoded = base64.b64encode(_heal_script(git_dir, sids).encode("utf-16-le")).decode("ascii")
+    return ["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded]
+
+
+def _deny_detail(failures: list[str], deny_hits: set[str]) -> str:
+    parts = []
+    if failures:
+        parts.append(f"scan failed ({len(failures)}): " + "; ".join(failures[:5]))
+    if deny_hits:
+        hits = sorted(deny_hits)
+        parts.append(f"DENY ACEs present ({len(hits)}): " + "; ".join(hits[:5]))
+    return " | ".join(parts)
+
+
 def check_git_deny_aces(repo: str, run: Callable[..., tuple[int, str, str]] = _run) -> Check:
     git_dir = Path(repo) / ".git"
     if not git_dir.exists():
@@ -111,29 +240,37 @@ def check_git_deny_aces(repo: str, run: Callable[..., tuple[int, str, str]] = _r
         targets = deny_scan_targets(git_dir)
     except OSError as e:
         return Check("git_deny_aces", False, True, f"could not list scan targets: {e}")
-    failures: list[str] = []
-    deny_hits: set[str] = set()
-    for t in targets:
-        try:
-            # 24s for 5k files here, so the 60s default is too tight on a larger .git.
-            code, out, err = run(["icacls", str(t), "/T"], timeout=300)
-        except (OSError, subprocess.SubprocessError) as e:
-            failures.append(f"icacls {t} did not run: {e}")
-            continue
-        text = out + err
-        deny_hits.update(line.strip() for line in text.splitlines() if "(DENY)" in line.upper())
-        failure = _icacls_failure(t, code, text)
-        if failure:
-            failures.append(failure)
-    if failures or deny_hits:
-        parts = []
-        if failures:
-            parts.append(f"scan failed ({len(failures)}): " + "; ".join(failures[:5]))
-        if deny_hits:
-            hits = sorted(deny_hits)
-            parts.append(f"DENY ACEs present ({len(hits)}): " + "; ".join(hits[:5]))
-        return Check("git_deny_aces", False, True, " | ".join(parts))
-    return Check("git_deny_aces", True, True, f"no DENY ACEs in {len(targets)} icacls /T scans under .git")
+    failures, outputs, deny_hits = _scan_deny(targets, run)
+    if not failures and not deny_hits:
+        return Check("git_deny_aces", True, True, f"no DENY ACEs in {len(targets)} icacls /T scans under .git")
+    # Never heal on a scan we can't trust.
+    sids = [] if failures else codex_sandbox_deny_sids(git_dir, outputs.get(git_dir, ""), deny_hits)
+    if not sids:
+        return Check("git_deny_aces", False, True, _deny_detail(failures, deny_hits))
+    # The shape alone could be a deleted domain account's deliberate DENY: only heal
+    # SIDs Codex itself recorded minting.
+    unknown = sorted(set(sids) - codex_cap_sids())
+    if unknown:
+        return Check("git_deny_aces", False, True, _deny_detail(failures, deny_hits)
+                     + f" | not healed: {', '.join(unknown)} not in the Codex cap_sid ledger")
+    try:
+        # Set-Acl re-propagates inheritance to every child, as slow as the /T scan.
+        code, out, err = run(heal_cmd(git_dir, sids), timeout=300)
+    except (OSError, subprocess.SubprocessError) as e:
+        code, out, err = -1, "", f"did not run: {e}"
+    m = re.search(r"REMOVED (\d+)", out)
+    healed = f"self-heal exit={code}: {(m[0] if m else (out + err).strip()[-200:])}"
+    if code != 0 or not m:
+        return Check("git_deny_aces", False, True, _deny_detail(failures, deny_hits) + f" | {healed}")
+    # The rescan is the only judge: inheritance must have cleared every child too.
+    failures2, _, deny_hits2 = _scan_deny(targets, run)
+    if failures2 or deny_hits2:
+        return Check("git_deny_aces", False, True, _deny_detail(failures2, deny_hits2) + f" | after {healed}")
+    notice = (f"self-healed: removed {m[1]} explicit DENY rule(s) on {git_dir} for unresolvable "
+              f"Codex sandbox SID(s) {', '.join(sids)}; rescan clean. A sandboxed Codex session "
+              "ran in this checkout; launch Codex with --dangerously-bypass-approvals-and-sandbox here")
+    print(f"NOTICE: git_deny_aces {notice}", file=sys.stderr)
+    return Check("git_deny_aces", True, True, notice)
 
 
 def check_launch_flags() -> Check:
