@@ -455,8 +455,9 @@ function main(argv) {
   if (out !== text) {
     if (dryRun) state = 'dry run';
     else {
-      const tmp = `${graphPath}.android-layouts.tmp`;
-      writeFileSync(tmp, out);
+      // Unguessable name, created exclusively: never writes through a planted file or symlink.
+      const tmp = `${graphPath}.${randomBytes(8).toString('hex')}.tmp`;
+      writeFileSync(tmp, out, { flag: 'wx' });
       renameSync(tmp, graphPath);
       state = 'written';
     }
