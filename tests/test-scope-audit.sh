@@ -609,6 +609,39 @@ status="$(run_audit --graph "$(to_native "$TMPROOT/a-clean.json")" \
   --repo-root "$(to_native "$REPO_A")" --name demo --prefixes)"
 assert_contains "args/prefixes-lists-path-prefixes" "path prefixes in this graph" "$(audit_all)"
 
+echo "--- INNOV-427: Android layout nodes ---"
+# android-layouts.mjs adds .xml nodes under src/main/res/layout*/. They are in
+# scope (direction a), but they are not CODE: a module whose sources produced zero
+# nodes must still read missing even when its layouts are indexed (direction b).
+REPO_AND="$TMPROOT/repoAndroid"
+mkdir -p "$REPO_AND/app/src/main/java" "$REPO_AND/feature/src/main/java"
+printf 'class A\n' >"$REPO_AND/app/src/main/java/A.kt"
+printf 'class F\n' >"$REPO_AND/feature/src/main/java/F.kt"
+layout_graph() { # file layout-path... (after a code node for app/)
+  local f="$1" p
+  shift
+  {
+    printf '{"nodes":[{"id":"a","label":"A","source_file":"app/src/main/java/A.kt"}'
+    for p in "$@"; do
+      printf ',{"id":"l%s","label":"l","_origin":"android-layouts","source_file":"%s"}' "$RANDOM" "$p"
+    done
+    printf '],"links":[]}\n'
+  } >"$f"
+}
+printf '{"nodes":[{"id":"a","label":"A","source_file":"app/src/main/java/A.kt"},{"id":"f","label":"F","source_file":"feature/src/main/java/F.kt"},{"id":"l","label":"l","_origin":"android-layouts","source_file":"app/src/main/res/layout/x.xml"}],"links":[]}\n' \
+  >"$TMPROOT/and-ok.json"
+status="$(run_audit --graph "$(to_native "$TMPROOT/and-ok.json")" --repo-root "$(to_native "$REPO_AND")" --name android)"
+assert_eq "innov427/layout-nodes-are-in-scope" "0" "$status" "output: [$(audit_all)]"
+# Negative control for direction (a): a layout node under build/ is still OUT.
+layout_graph "$TMPROOT/and-build.json" app/build/intermediates/src/main/res/layout/x.xml
+status="$(run_audit --graph "$(to_native "$TMPROOT/and-build.json")" --name android)"
+assert_eq "innov427/layout-under-build-is-out" "OUT-OF-SCOPE" "$(audit_verdict)" "output: [$(audit_all)]"
+# Direction (b): feature/ has only layout nodes, so its code is missing.
+layout_graph "$TMPROOT/and-missing.json" feature/src/main/res/layout/f.xml
+status="$(run_audit --graph "$(to_native "$TMPROOT/and-missing.json")" --repo-root "$(to_native "$REPO_AND")" --name android)"
+assert_eq "innov427/layout-nodes-do-not-hide-missing-code" "MISSING-ROOTS" "$(audit_verdict)" "output: [$(audit_all)]"
+assert_contains "innov427/names-the-module" "feature/" "$(audit_all)"
+
 # ================================================================= PART G ===
 echo "--- G. the sync-graph gate ---"
 

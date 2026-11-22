@@ -35,7 +35,7 @@ When answering questions about the codebase or making changes, resolve context i
 
 The code graph is an AST extraction of app source files. A missing answer here is invisible, not an error:
 
-- **XML and other config formats** — Android `res/` layouts and `AndroidManifest.xml`, YAML, `.properties`. None of it is in the code graph (a package manifest such as `pom.xml` is read only as a dependency list).
+- **XML and other config formats** — `AndroidManifest.xml`, `res/values/` (strings, styles), drawables, menus, navigation graphs, YAML, `.properties`. None of it is in the code graph (a package manifest such as `pom.xml` is read only as a dependency list). Android **layouts are indexed** (INNOV-427): each `res/layout*/` file is a node (`variant_of` links a `layout-land/`-style variant to its layout), with `uses_layout` edges from the class that references it (`R.layout.*`, `setContentView`, `inflate`, view binding), `uses_view` edges to the custom view classes it inflates, and `includes` edges for `<include>`. These edges are matched by name, so a layout reached through a variable is not linked.
 - **Calls through a field or variable** — types are not resolved, so `mApp.launchKDS()` is not linked to `launchKDS`.
 - **Cross-language calls** — Java calling Kotlin, or any call that crosses a language boundary.
 
@@ -60,7 +60,7 @@ Scope is fixed **per stack**, never an engineer's per-run choice — otherwise t
 | Python | the importable package dir(s) |
 | C# / Unity | `Assets/Scripts/` |
 | C# / .NET | `src/` |
-| Android (Kotlin / Java / Gradle) | every module's `src/main/` (`java/`, `kotlin/`), built from the Gradle project root and carved back by the `android` carve-out — `res/` stays in (INNOV-427) |
+| Android (Kotlin / Java / Gradle) | every module's `src/main/` (`java/`, `kotlin/`), built from the Gradle project root and carved back by the `android` carve-out — `res/` stays in: sync adds `src/main/res/layout*/` files as layout nodes (INNOV-427) |
 | Go | repo root, minus `vendor/` + `*_test.go` |
 | Unknown | the human picks **once** at `/brain:init`, recorded in the repo table below — never re-asked |
 

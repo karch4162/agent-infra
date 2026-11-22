@@ -399,6 +399,50 @@ scope_audit() { # graph_path repo_root name
   return 0
 }
 
+# --- THE ANDROID LAYOUT PASS (INNOV-427) ------------------------------------
+# graphify does not read .xml, so an Android build's res/layout files never reach
+# its graph. android-layouts.mjs adds them deterministically (no LLM, so the CI
+# rebuild reproduces it). It runs HERE because this is the one place both publish
+# paths meet: /brain:save step 5 and ci-mirrors.mjs both publish through this
+# script. It edits the repo-side graph in place (atomically, and only when the
+# bytes change), so the local hook sees the layouts too.
+#
+# Gated on a cheap glob — a src/main/res/layout* directory at the build root or one
+# or two module levels down — so a non-Android mirror never pays for a walk.
+#
+# Same polarity as the scope gate's SKIPPED: a pass that fails or does not answer
+# is a LOUD warning and the publish proceeds without layouts. A missing layout
+# index is recoverable on the next sync; nothing here can corrupt the graph,
+# because the pass writes through a temp file and a rename.
+ANDROID_LAYOUTS="$SCRIPT_DIR/android-layouts.mjs"
+
+has_android_layouts() { # repo_root
+  local g
+  for g in "$1"/src/main/res/layout* "$1"/*/src/main/res/layout* "$1"/*/*/src/main/res/layout*; do
+    [[ -d "$g" ]] && return 0
+  done
+  return 1
+}
+
+android_layouts() { # repo_root graph_path name
+  local out="" rc=0 first=""
+  has_android_layouts "$1" || return 0
+  out="$(node "$ANDROID_LAYOUTS" "$1" --graph "$2" 2>&1)" || rc=$?
+  first="${out%%$'\n'*}"
+  case "$first:$rc" in
+    "ANDROID-LAYOUTS: OK"*:0 | "ANDROID-LAYOUTS: SKIPPED"*:0)
+      printf '%s\n' "$first" >&2 ;;
+    *)
+      {
+        echo "warn: the Android layout pass did not complete for $3 — publishing its graph WITHOUT layouts."
+        [[ -n "$out" ]] && printf '  %s\n' "$first"
+        echo "  This is NOT an OK: res/layout files are missing from this mirror until the pass runs."
+        echo "  Fix $ANDROID_LAYOUTS (or node), then re-run this sync."
+      } >&2 ;;
+  esac
+  return 0
+}
+
 # --- THE PROVENANCE GATE (INNOV-353) ----------------------------------------
 # provenance_check and the reference-branch map live in lib/provenance.sh (the
 # rationale is there too), shared with doctor's check-mirror-source.sh --behind.
@@ -466,6 +510,16 @@ for repo in "${repos[@]}"; do
     echo "skip $name: no graph at $src/graph.json" >&2
     continue
   fi
+  if [[ -f "$dst/graph.json" ]] && cmp -s "$src/graph.json" "$dst/graph.json"; then
+    echo "up-to-date: $name"
+    continue
+  fi
+
+  # THE ANDROID LAYOUT PASS. After the up-to-date check, not before it: an
+  # unchanged mirror must not be re-augmented from whatever is checked out now and
+  # republished under its old built_at_commit. Checked again afterwards, so a
+  # graphify rebuild that only dropped the layout nodes reads up-to-date.
+  android_layouts "$repo" "$src/graph.json" "$name"
   if [[ -f "$dst/graph.json" ]] && cmp -s "$src/graph.json" "$dst/graph.json"; then
     echo "up-to-date: $name"
     continue
