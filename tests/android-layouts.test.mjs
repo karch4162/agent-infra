@@ -288,3 +288,18 @@ class MainActivity : AppCompatActivity() {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('single-quoted include attributes count; a directory named *.xml is not a layout', () => {
+  const root = fixture();
+  try {
+    put(root, 'app/src/main/res/layout/item_row.xml', "<FrameLayout>\n    <include layout='@layout/toolbar' />\n</FrameLayout>\n");
+    mkdirSync(join(root, 'app/src/main/res/layout/not_a_layout.xml'), { recursive: true });
+    assert.equal(run(root).status, 0);
+    const t = tagged(load(root));
+    const L = (label) => t.nodes.find((x) => x.label === label).id;
+    assert.ok(has(t.links, L('item_row'), L('toolbar'), 'includes'));
+    assert.ok(!t.nodes.some((x) => x.label === 'not_a_layout'));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -135,7 +135,7 @@ function findLayoutFiles(root, carved) {
       if (LAYOUT_DIR.test(e.name) && r.endsWith(`src/main/res/${e.name}`)) {
         let files;
         try { files = readdirSync(join(abs, e.name), { withFileTypes: true }); } catch { continue; }
-        for (const f of files.map((x) => x.name).sort()) {
+        for (const f of files.filter((x) => x.isFile()).map((x) => x.name).sort()) {
           const fr = `${r}/${f}`;
           if (f.toLowerCase().endsWith('.xml') && !carved(fr)) found.push(fr);
         }
@@ -384,8 +384,8 @@ export function augment(graph, buildDir, readText = (p) => readFileSync(p, 'utf8
         const tag = m[1];
         const line = lineAt(starts, m.index);
         if (tag === 'include') {
-          const inc = /\blayout\s*=\s*"@layout\/([A-Za-z0-9_]+)"/.exec(m[2]);
-          const T = inc && resolveLayout(inc[1], L.module);
+          const inc = /\blayout\s*=\s*(["'])@layout\/([A-Za-z0-9_]+)\1/.exec(m[2]);
+          const T = inc && resolveLayout(inc[2], L.module);
           if (T && addLink(f.nodeId, T.id, 'includes', f.rel, line)) includeEdges++;
         } else if (tag.includes('.')) {
           const cls = resolveClass(tag);
