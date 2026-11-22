@@ -5,7 +5,8 @@
 # staged reverts, new files as untracked. reap-branches.sh (before it switches)
 # and land-save.sh (before it publishes) both need the same answer to "which
 # paths are stale, and is it safe to offer the reset?", so the rule lives here
-# once (INNOV-274). Sourced, not executed; reads $VAULT; bash 3.2-safe.
+# once (INNOV-274). vault-commit.sh prints its own WARNING's remedy with
+# stale_index_remedy too. Sourced, not executed; reads $VAULT; bash 3.2-safe.
 #
 # A path counts only when its index entry is still exactly the parent's version
 # (absent, for a file the commit added). A staged edit made AFTER the commit also
@@ -33,7 +34,22 @@ stale_index_paths() {
 }
 
 # stale_index_remedy — the one reset line that clears STALE, for a human to run.
+# Up to STALE_INLINE_MAX paths are named on the line. Past that the line could
+# not be pasted (2026-11-17: 1458 paths, INNOV-455), so the exact list goes
+# NUL-separated into a file under the git dir and the line reads it. Only the
+# exact list: a parent-directory reset would also drop staged work beside it.
+# If the file cannot be written, the inline form is still printed.
+STALE_INLINE_MAX=20
 stale_index_remedy() {
+  local gd list
+  if [[ ${#STALE[@]} -gt $STALE_INLINE_MAX ]] &&
+     gd="$(git -C "$VAULT" rev-parse --absolute-git-dir 2>/dev/null)" &&
+     list="$(mktemp "$gd/brain-index-remedy.XXXXXX" 2>/dev/null)" &&
+     printf '%s\0' "${STALE[@]}" >"$list" 2>/dev/null; then
+    printf '    git --literal-pathspecs -C %q reset -q HEAD --pathspec-from-file=%q --pathspec-file-nul\n' \
+      "$VAULT" "$list"
+    return 0
+  fi
   printf '    git --literal-pathspecs -C %q reset -q HEAD --' "$VAULT"
   printf ' %q' "${STALE[@]}"
   echo

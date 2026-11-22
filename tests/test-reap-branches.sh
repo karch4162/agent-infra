@@ -297,6 +297,36 @@ status="$(run_reap)"
 assert_eq "stale-index/remedy-unblocks-reap" "0" "$status"
 assert_eq "stale-index/on-main-after-remedy" "main" "$(cur_branch)"
 
+# INNOV-455: a missed sync on a big save (1458 paths on 2026-11-17) printed every
+# path on one line, too long to paste. Past the inline limit the exact list goes
+# to a file under the git dir and the line stays short whatever the count. Names
+# with a space and a non-ASCII character prove the file carries them verbatim.
+new_vault
+git -C "$VAULT" checkout -q -b "brain/save-2026-10-05" main
+i=0
+while [[ $i -lt 40 ]]; do
+  printf 'log %s\n' "$i" >"$VAULT/logs/community number $i é with a long descriptive name.md"
+  i=$((i + 1))
+done
+git -C "$VAULT" add -A >/dev/null 2>&1
+git -C "$VAULT" commit -qm "the big save" >/dev/null 2>&1
+git -C "$VAULT" reset -q HEAD~ -- logs/   # the sync that never landed
+
+status="$(run_reap)"
+err="$(cat "$BOX/err.txt")"
+assert_eq "stale-index-big/exit-1" "1" "$status"
+remedy="$(printf '%s\n' "$err" | grep 'reset -q HEAD --' | tail -n 1 | tr -d '\r')"
+assert_contains "stale-index-big/remedy-reads-a-file" "$remedy" "--pathspec-from-file="
+assert_contains "stale-index-big/remedy-literal-pathspecs" "$remedy" "--literal-pathspecs"
+# 40 inline names are ~2400 chars; the file form is the vault path plus ~150.
+if [[ ${#remedy} -lt $(( ${#VAULT} * 2 + 200 )) ]]; then pass "stale-index-big/remedy-is-short"
+else fail "stale-index-big/remedy-is-short" "${#remedy} chars: $remedy"; fi
+eval "$remedy"
+assert_eq "stale-index-big/remedy-clears-index" "0" \
+  "$(git -C "$VAULT" diff --cached --name-only HEAD | grep -c . || true)"
+status="$(run_reap)"
+assert_eq "stale-index-big/remedy-unblocks-reap" "0" "$status"
+
 # A STAGED edit made after the commit, on a path the commit touched, also differs
 # from HEAD, but it is somebody's work, not a missed sync: resetting it would
 # drop it. The diagnosis must match the parent's content, not just the name.
