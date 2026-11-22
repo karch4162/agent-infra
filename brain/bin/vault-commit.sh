@@ -167,6 +167,8 @@ BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$BIN_DIR/lib/branch.sh"
 # shellcheck source=lib/allowlist.sh
 . "$BIN_DIR/lib/allowlist.sh"
+# shellcheck source=lib/index-sync.sh
+. "$BIN_DIR/lib/index-sync.sh"
 
 MESSAGE=""
 unset PIN   # unset = no --pin; set-but-empty (--pin "") is malformed, never "unpinned"
@@ -617,8 +619,11 @@ if ! cas_err="$(git -C "$VAULT" update-ref -m "commit: ${MESSAGE%%$'\n'*}" "$REF
     "  Re-check the branch, then re-run the command."
 fi
 
-echo "VAULT-COMMIT: OK - committed ${#STAGED[@]} path(s) on '$CUR_BRANCH'"
-printf '  %s\n' "${STAGED[@]}"
+# Nothing is printed until steps 9 and 10 have run (INNOV-455). A caller that
+# pipes this command into `head` closes the pipe once it has its lines; with a
+# path list longer than the pipe buffer, the next write killed this script by
+# SIGPIPE after the commit and BEFORE the index sync. 2026-11-17: a 1458-path
+# save under `| head -5` printed VAULT-COMMIT: OK and left every path stale.
 
 # --- 9. bring the shared index in line, for the committed paths only --------
 # Until this runs, the shared index holds the pre-commit blobs for them, so
@@ -650,8 +655,6 @@ while :; do
   [[ $sync_rc -eq 1 && ( $tries -lt 6 || $SECONDS -lt $sync_until ) ]] || break
   sleep 0.5
 done
-[[ $sync_rc -eq 2 ]] &&
-  echo "  NOTE: HEAD moved past this commit before the index sync; the index was left alone."
 
 # --- 10. the session's recorded pin follows this commit (INNOV-380) ---------
 # This commit is the session's own HEAD move, exactly like check-freshness.sh's
@@ -666,8 +669,18 @@ done
 # the pre-commit sha, so the next pinned commit refuses that foreign move, and a
 # caller repinning before -> HEAD itself (runtime.mjs) is not refused.
 sid="${BRAIN_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"
+repin_failed=0
 if [[ $sync_rc -ne 2 && "$sid" =~ [A-Za-z0-9._] && -f "$VAULT/.brain/session.json" ]] &&
    ! BRAIN_ROOT="$VAULT" bash "$BIN_DIR/session.sh" --repin "$CUR_SHA" "$NEW" >/dev/null 2>&1; then
+  repin_failed=1
+fi
+
+# --- 11. report, only now that the index and the pin are settled -------------
+echo "VAULT-COMMIT: OK - committed ${#STAGED[@]} path(s) on '$CUR_BRANCH'"
+printf '  %s\n' "${STAGED[@]}"
+[[ $sync_rc -eq 2 ]] &&
+  echo "  NOTE: HEAD moved past this commit before the index sync; the index was left alone."
+if [[ $repin_failed -eq 1 ]]; then
   echo "  NOTE: the session pin was NOT updated to this commit (it did not record the"
   echo "        pre-commit sha); a later --print-pin commit will be refused as HEAD moved."
 fi
@@ -680,8 +693,7 @@ if [[ $sync_rc -eq 1 ]]; then
   echo "  of the paths above (shown as staged reverts in git status)."
   echo "  git said: $(printf '%s\n' "$SYNC_ERR" | sed -n '/./{p;q;}' | tr -d '\r')"
   echo "  Run:"
-  printf '    git --literal-pathspecs -C %q reset -q HEAD --' "$VAULT"
-  printf ' %q' "${STAGED[@]}"
-  echo
+  STALE=("${STAGED[@]}")
+  stale_index_remedy
 fi
 exit 0

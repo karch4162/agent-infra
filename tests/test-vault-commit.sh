@@ -847,6 +847,27 @@ assert_eq "sync-lock/index-stale-before-remedy" "2" "$(git -C "$VAULT" diff --ca
 eval "$last"
 assert_eq "sync-lock/remedy-clears-index" "0" "$(git -C "$VAULT" diff --cached --name-only HEAD | grep -c . || true)" "$(evidence)"
 
+# --- 21d5d. a caller piping into `head` cannot cut off the sync (INNOV-455) ---
+# Observed 2026-11-17: a 1458-path save run as `vault-commit.sh ... | head -5`.
+# The path list outgrew the pipe buffer, head exited, and the next write killed
+# the script by SIGPIPE after the commit but before the index sync, so the save
+# printed VAULT-COMMIT: OK and left every committed path stale. ~170 KB of
+# listing here, well past a 64 KB pipe buffer: the negative control is the old
+# order (print the list, then sync), which leaves 1500 staged reverts.
+sb_new "brain/work"
+GH_PATH="$GH_NONE"
+mkdir -p "$VAULT/graphify/alpha/communities"
+i=0
+while [[ $i -lt 1500 ]]; do
+  echo "c $i" >"$VAULT/graphify/alpha/communities/Community_${i}_with_a_long_descriptive_name_so_the_listing_outgrows_a_pipe_buffer.md"
+  i=$((i + 1))
+done
+( cd "$VAULT" && BRAIN_ROOT="$VAULT" bash "$GUARD" -m "big save" 2>&1 | head -n 1 ) >"$BOX/out.txt" 2>"$BOX/err.txt"
+STATUS=$?
+assert_prefix "sigpipe/first-line-ok" "VAULT-COMMIT: OK" "$(first_line "$BOX/out.txt")" "$(evidence)"
+assert_eq "sigpipe/committed" "big save" "$(head_subject)" "$(evidence)"
+assert_eq "sigpipe/index-synced" "0" "$(staged_count)" "staged: [$(staged_list | head -3 | tr '\n' ' ')]" "$(evidence)"
+
 # --- 21e. a staged RENAME out of a forbidden path is seen by its source -----
 # With rename detection, `diff --cached --name-only` prints only the destination,
 # so a rename chats/ -> logs/ read as an allowlisted logs/ path, and the commit
