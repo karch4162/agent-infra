@@ -124,7 +124,7 @@ On top of the direct runtime, **`autonomy/autonomy_tick.py`** is the loop that r
 the session from the merge path: one idempotent tick reconciles workers against their
 PIDs, finds their PRs, polls CI, runs the Grok challenge in the surviving worktree,
 merges through `merge_policy` (rating low, or medium once the owner sets
-`WAVE_AUTO_MERGE_MEDIUM=1` and the clean-wave streak holds; CI green, `REVIEW VERDICT: YES` (every such line, exactly), no
+`WAVE_AUTO_MERGE_MEDIUM=1` and the clean-wave streak holds; CI green, `REVIEW VERDICT: YES`, no
 challenge blocker, no fallback reviewer or tie-break, `MIGRATION: no`), picks the next
 agent-ready `rating:low` tickets (never unrated, never assigned) under the daily and concurrency caps, plans the thin ones first, and
 spawns. It is a dry run unless `--execute`, and it will not pick tickets until the

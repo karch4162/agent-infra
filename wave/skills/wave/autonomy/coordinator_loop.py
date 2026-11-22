@@ -121,7 +121,9 @@ def gate(pr):
 # Orca escalates whenever a worker's turn ends without worker_done, which includes a Claude
 # worker handing off to a background review or an advisor call (INNOV-464: all three workers of
 # run_634d93c19dcc were held this way while still live, then sent worker_done to nobody).
-TURN_END = 'ended its turn without sending worker_done'
+# Anchored to the start of Orca's own message: the body goes on to quote the worker's last
+# output, and the phrase quoted there must not turn a real escalation into a grace wait.
+TURN_END = re.compile(r'Worker \S+ ended its turn without sending worker_done\b')
 def turn_end_grace_s():
     try: m = float(os.environ.get('WAVE_TURN_END_GRACE_MIN') or 60)
     except ValueError: m = 60
@@ -132,8 +134,9 @@ def parked_why_not(v):
     Only a definite non-live state holds at once: 'unverifiable' (no status heartbeat for a while,
     e.g. a long review.sh) or an unreadable worker-show is waited on, bounded by the same cap."""
     v.setdefault('turnEndAt', time.time())
-    try: liveness = oj('orchestration', 'worker-show', '--dispatch', v['dispatch']).get('liveness')
+    try: liveness = (str(oj('orchestration', 'worker-show', '--dispatch', v['dispatch']).get('liveness') or '').split() or [None])[0]
     except Exception: liveness = None   # noqa: BLE001 - unknown, not dead; the cap still bounds the wait
+    # the concise view renders "unverifiable (<detail>)"; the state is the first word
     if liveness and liveness not in ('live', 'unverifiable'): return f'worker not live ({liveness})'
     cap = turn_end_grace_s()
     if time.time() - v['turnEndAt'] > cap:
@@ -166,7 +169,7 @@ def consume(d):
             v['status'] = 'done' if p.get('outcome') == 'succeeded' else 'held'
             v['doneAt'] = time.time()
             if v['status'] == 'held': v['reason'] = 'worker failed: ' + (m.get('body') or '')[:160]
-        elif m['type'] == 'escalation' and TURN_END in (m.get('body') or ''):
+        elif m['type'] == 'escalation' and TURN_END.match((m.get('body') or '').lstrip()):
             why = parked_why_not(v)
             if not why:
                 log(k, 'turn ended, worker still live; waiting for worker_done'); continue

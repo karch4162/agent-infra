@@ -328,8 +328,19 @@ class TurnEndEscalation(unittest.TestCase):
                 cl.consume(self.d)
                 self.assertEqual(self.d["issues"]["ABC-7"]["status"], "held")
 
+    def test_unverifiable_with_a_detail_still_waits(self):
+        # concise worker-show renders "unverifiable (<detail>)" when the projection has one
+        self.liveness = "unverifiable (stale_status)"
+        self.assertEqual(self.send("escalation", TURN_END)["status"], "running")
+        self.liveness = "exited (process gone)"
+        cl.consume(self.d)
+        self.assertEqual(self.d["issues"]["ABC-7"]["status"], "held")
+
     def test_questions_and_other_escalations_still_hold_while_live(self):
-        for type_, body in (("question", "which table?"), ("escalation", "worker reports a blocker")):
+        # the phrase quoted inside another escalation (a worker's last output) is not Orca's turn-end
+        quoted = "Worker hit an error. Last output: ... " + TURN_END
+        for type_, body in (("question", "which table?"), ("escalation", "worker reports a blocker"),
+                            ("escalation", quoted), ("question", TURN_END)):
             with self.subTest(type=type_):
                 self.d = {"issues": {"ABC-7": issue(status="running", pr=None)}}
                 v = self.send(type_, body)
