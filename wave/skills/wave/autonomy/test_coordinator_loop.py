@@ -373,6 +373,43 @@ class TurnEndEscalation(unittest.TestCase):
                 self.assertIn("needs human", v["reason"])
 
 
+class ConflictRedispatch(CoordinatorTracker):
+    """INNOV-465: worker-show returns "terminal" as a plain string; the CONFLICT rebase must use it."""
+
+    def conflict(self, terminal):
+        started = []
+
+        def fake_oj(*a):
+            if a[:2] == ("orchestration", "worker-show"):
+                return {} if terminal is None else {"terminal": terminal}
+            if a[:2] == ("orchestration", "worker-start"):
+                started.append(a[a.index("--terminal") + 1])
+                return {"dispatchId": "d2", "taskId": "t2"}
+            return {}
+        self.use("unset")
+        with mock.patch.object(cl, "oj", fake_oj):
+            v = self.settle("CONFLICT")
+        return v, started
+
+    def test_string_terminal_redispatches_with_that_handle(self):
+        v, started = self.conflict("structworker_abc")
+        self.assertEqual(started, ["structworker_abc"])
+        self.assertEqual((v["status"], v["rebased"], v["dispatch"]), ("running", True, "d2"))
+
+    def test_dict_terminal_still_works(self):
+        v, started = self.conflict({"handle": "term_1"})
+        self.assertEqual(started, ["term_1"])
+        self.assertEqual(v["status"], "running")
+
+    def test_no_handle_holds_with_the_wave_held_label(self):
+        edits = []
+        with mock.patch.object(cl, "gh", lambda *a: edits.append(a) or self.fake_gh(*a)):
+            v, started = self.conflict(None)
+        self.assertEqual(started, [])
+        self.assertEqual((v["status"], v["reason"]), ("held", "CONFLICT and no terminal handle to redispatch"))
+        self.assertIn(("pr", "edit", "12", "--add-label", "wave-held"), edits)
+
+
 class LinearAdapterCommands(unittest.TestCase):
     def test_writes_go_through_orca_linear(self):
         seen = []
