@@ -224,8 +224,10 @@ def settle(d):
                 v['status'], v['reason'] = 'held', 'gh pr merge failed'
         elif verdict == 'CONFLICT' and not v['rebased']:
             # one rebase on the same proven terminal; a second conflict is held
-            handle = oj('orchestration', 'worker-show', '--dispatch', v['dispatch']).get('terminal', {}).get('handle') \
-                or oj('orchestration', 'worker-show', '--dispatch', v['dispatch']).get('agentTerminalHandle')
+            # Orca returns "terminal" as a plain string handle; older builds sent {"handle": ...} (INNOV-465).
+            show = oj('orchestration', 'worker-show', '--dispatch', v['dispatch'])
+            t = show.get('terminal')
+            handle = (t if isinstance(t, str) else (t or {}).get('handle')) or show.get('agentTerminalHandle')
             if not handle:
                 v['status'], v['reason'] = 'held', 'CONFLICT and no terminal handle to redispatch'; track_hold(k, v); continue
             spec = (f"PR #{pr} conflicts with {BASE} after a sibling merged. Rebase this worktree on origin/{BASE}, "
