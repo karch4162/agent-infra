@@ -401,10 +401,13 @@ class ConflictRedispatch(CoordinatorTracker):
         self.assertEqual(started, ["term_1"])
         self.assertEqual(v["status"], "running")
 
-    def test_no_handle_holds(self):
-        v, started = self.conflict(None)
+    def test_no_handle_holds_with_the_wave_held_label(self):
+        edits = []
+        with mock.patch.object(cl, "gh", lambda *a: edits.append(a) or self.fake_gh(*a)):
+            v, started = self.conflict(None)
         self.assertEqual(started, [])
         self.assertEqual((v["status"], v["reason"]), ("held", "CONFLICT and no terminal handle to redispatch"))
+        self.assertIn(("pr", "edit", "12", "--add-label", "wave-held"), edits)
 
 
 class LinearAdapterCommands(unittest.TestCase):

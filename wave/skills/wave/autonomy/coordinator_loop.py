@@ -229,7 +229,7 @@ def settle(d):
             t = show.get('terminal')
             handle = (t if isinstance(t, str) else (t or {}).get('handle')) or show.get('agentTerminalHandle')
             if not handle:
-                v['status'], v['reason'] = 'held', 'CONFLICT and no terminal handle to redispatch'; track_hold(k, v); continue
+                v['status'], v['reason'] = 'held', 'CONFLICT and no terminal handle to redispatch'; hold_pr(k, v); track_hold(k, v); continue
             spec = (f"PR #{pr} conflicts with {BASE} after a sibling merged. Rebase this worktree on origin/{BASE}, "
                     "resolve conflicts, rerun /preflight, push with --force-with-lease, then send worker_done "
                     f"--outcome succeeded with PR #{pr} in the summary. Change nothing else.")
