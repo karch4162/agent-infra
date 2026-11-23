@@ -66,6 +66,8 @@ export RUN STATE WAVE_HOME MAIN_CHECKOUT BASE_BRANCH WAVE_BASE WAVE_TRACKER WAVE
 WAVE_CONFIG="$(cygpath -m "$WAVE_CONFIG" 2>/dev/null || echo "$WAVE_CONFIG")"; export WAVE_CONFIG
 # A held ticket goes back here; the start state unless config.env names one.
 export WAVE_STATE_HELD="${WAVE_STATE_HELD:-$WAVE_STATE_START}"
+# How long a live worker may sit after its turn ended without worker_done (default 60).
+export WAVE_TURN_END_GRACE_MIN
 # A crashed loop must not fall through to the report: that printed "merged 0; held 0"
 # as if the wave had settled, while every worker was still running unsupervised.
 python "$WAVE_HOME_NATIVE/autonomy/coordinator_loop.py" || { echo "wave: coordinator loop crashed (traceback above); workers are unsupervised. Fix, then: bash \"\$WAVE/coordinator.sh\" --resume $RUN" >&2; exit 1; }

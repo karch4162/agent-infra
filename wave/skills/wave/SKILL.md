@@ -261,7 +261,14 @@ it to send `worker_done`. The coordinator blocks on those, and on each one runs
 
 | Merged by the coordinator | Held for you (`wave-held` label, worktree kept) |
 |---|---|
-| `TIER: quick` or `normal` (incl. `quick -> normal`), `MIGRATION: no`, `REVIEWER: codex-terra`, no `TIE-BREAKER`, every required check green, mergeable | `TIER: risk`, `MIGRATION: yes`, a fallback reviewer, any `NO ... REVIEW`, a tie-break, a failed check, a worker question or escalation, a second conflict |
+| Every tier on every `TIER` line `quick` or `normal` (the leading `a -> b` chain, so `quick -> normal` merges), `MIGRATION: no`, `REVIEWER: codex-terra`, `REVIEW VERDICT: YES` (every such line, exactly), no `TIE-BREAKER`, every required check green, mergeable | `risk` anywhere in a `TIER` chain (`normal -> risk`, `risk -> normal`) or no tier, `MIGRATION: yes`, a fallback reviewer, `REVIEW VERDICT` `NO` or missing, any `NO ... REVIEW`, a tie-break, a failed check, a worker question, an escalation other than a live worker's turn ending, a second conflict |
+
+Orca escalates every time a worker's turn ends without `worker_done`, which includes a
+Claude worker waiting on a background review or an advisor call. The coordinator checks
+`orchestration worker-show`: while `liveness` is `live` (or `unverifiable`, or the call
+fails) it keeps waiting. It holds at once on any other liveness (`exited`), and holds any
+waiting worker that has not sent `worker_done` within `WAVE_TURN_END_GRACE_MIN` (default 60)
+minutes of its first turn-end; parked workers are re-checked on every poll (INNOV-464).
 
 A first conflict after a sibling merge gets one rebase on the same terminal. When
 `worker-list` shows nothing live, the coordinator fast-forwards the main checkout,

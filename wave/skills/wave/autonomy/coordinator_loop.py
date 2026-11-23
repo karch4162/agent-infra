@@ -5,7 +5,7 @@ driven by a test. coordinator.sh owns spawn, walk, sweep and the report; this fi
 moves data between orca, gh and the state file. Importing it has no side effects:
 the env is read here, the loop runs in main().
 """
-import json, os, re, subprocess, sys, time
+import json, math, os, re, subprocess, sys, time
 RUN, STATE, WAVE, MAIN = (os.environ.get(k, '') for k in ('RUN','STATE','WAVE_HOME','MAIN_CHECKOUT'))
 BASE = os.environ.get('BASE_BRANCH', '')
 CONFIG = os.environ.get('WAVE_CONFIG', '')   # the repo's config.env, as lib.sh resolved it
@@ -118,11 +118,58 @@ def gate(pr):
     inp = json.dumps({'body': view.get('body', ''), 'checks': checks, 'mergeable': view.get('mergeable')})
     return subprocess.run([sys.executable, os.path.join(WAVE, 'gate.py')], input=inp, capture_output=True, text=True).stdout.strip()
 
+# Orca escalates whenever a worker's turn ends without worker_done, which includes a Claude
+# worker handing off to a background review or an advisor call (INNOV-464: all three workers of
+# run_634d93c19dcc were held this way while still live, then sent worker_done to nobody).
+# Anchored to the start of Orca's own message: the body goes on to quote the worker's last
+# output, and the phrase quoted there must not turn a real escalation into a grace wait.
+TURN_END = re.compile(r'Worker \S+ ended its turn without sending worker_done\b')
+def turn_end_grace_s():
+    try: m = float(os.environ.get('WAVE_TURN_END_GRACE_MIN') or 60)
+    except ValueError: m = 60
+    return m * 60 if math.isfinite(m) and m > 0 else 60 * 60   # nan/inf/0 would never (or always) hold
+def parked_why_not(v):
+    """'' while a turn-ended worker may keep running; otherwise why it is held. The clock starts
+    at the first turn-end and later ones never reset it, or a looping worker never hits the cap.
+    Only a definite non-live state holds at once: 'unverifiable' (no status heartbeat for a while,
+    e.g. a long review.sh) or an unreadable worker-show is waited on, bounded by the same cap."""
+    v.setdefault('turnEndAt', time.time())
+    try: liveness = (str(oj('orchestration', 'worker-show', '--dispatch', v['dispatch']).get('liveness') or '').split() or [None])[0]
+    except Exception: liveness = None   # noqa: BLE001 - unknown, not dead; the cap still bounds the wait
+    # the concise view renders "unverifiable (<detail>)"; the state is the first word
+    if liveness and liveness not in ('live', 'unverifiable'): return f'worker not live ({liveness})'
+    cap = turn_end_grace_s()
+    if time.time() - v['turnEndAt'] > cap:
+        return f"{liveness or 'unreadable'} {cap / 60:g} min after its turn ended, no worker_done"
+    return ''
+def recheck_parked(d):
+    # escalations are events: a parked worker that goes quiet is only caught by this poll
+    for k, v in d['issues'].items():
+        if v['status'] != 'running' or not v.get('turnEndAt'): continue
+        why = parked_why_not(v)
+        if why:
+            v['status'], v['reason'] = 'held', f'escalation needs human ({why})'
+            log(k, '->', v['status'], v['reason']); hold_pr(k, v); track_hold(k, v)
+def hold_pr(k, v):
+    # a hold from consume/recheck gets what settle's holds get: the wave-held label and a kept
+    # worktree. A worker held at the cap is often still working, and its late worker_done is
+    # ignored, so the label is what tells a human the PR needs them. Best effort, never raises.
+    try:
+        pr = pr_number(v)
+        if pr: v['pr'] = pr; gh('pr', 'edit', str(pr), '--add-label', 'wave-held')
+        oj('orchestration', 'worker-retain', '--dispatch', v['dispatch'])
+    except Exception as e: log(k, 'labelling the hold failed:', str(e)[:200])  # noqa: BLE001
+
 def consume(d):
     r = oj('orchestration', 'check', '--run', RUN, '--wait', '--types', 'worker_done,escalation,question', '--timeout-ms', '120000')
-    for m in r.get('messages', []):
+    def payload(m):
         p = m.get('payload') or {}
-        p = json.loads(p) if isinstance(p, str) else p   # older Orca builds sent a JSON string
+        return json.loads(p) if isinstance(p, str) else p   # older Orca builds sent a JSON string
+    # a worker that yielded, then finished and exited, has its turn-end ahead of its worker_done
+    # in one batch: the worker_done settles it, the turn-end must not hold it first
+    finished = {payload(m).get('dispatchId') for m in r.get('messages', []) if m.get('type') == 'worker_done'}
+    for m in r.get('messages', []):
+        p = payload(m)
         if m.get('type') not in ('worker_done', 'question', 'escalation'):
             continue   # heartbeats ride in the same FIFO batch (--types is only the wake condition)
         k = by_dispatch(d, p.get('dispatchId'), p.get('taskId'))
@@ -136,12 +183,20 @@ def consume(d):
             v['status'] = 'done' if p.get('outcome') == 'succeeded' else 'held'
             v['doneAt'] = time.time()
             if v['status'] == 'held': v['reason'] = 'worker failed: ' + (m.get('body') or '')[:160]
-        else:  # question or escalation: the coordinator never guesses for a worker
+        elif m['type'] == 'escalation' and TURN_END.match((m.get('body') or '').lstrip()):
+            if p.get('dispatchId') in finished:
+                log(k, 'turn ended, worker_done follows in this batch'); continue
+            why = parked_why_not(v)
+            if not why:
+                log(k, 'turn ended, worker still live; waiting for worker_done'); continue
+            v['status'] = 'held'; v['reason'] = f"escalation needs human ({why}): " + (m.get('body') or '')[:160]
+        else:  # a question or any other escalation: the coordinator never guesses for a worker
             v['status'] = 'held'; v['reason'] = f"{m['type']} needs human: " + (m.get('body') or '')[:160]
         log(k, '->', v['status'], v['reason'])
-        if v['status'] == 'held': track_hold(k, v)
+        if v['status'] == 'held': hold_pr(k, v); track_hold(k, v)
     if r.get('deliveryId'):
         oj('orchestration', 'check', '--run', RUN, '--ack', r['deliveryId'], '--timeout-ms', '1')
+    recheck_parked(d)
 
 def settle(d):
     for k, v in d['issues'].items():
@@ -179,6 +234,7 @@ def settle(d):
             r = oj('orchestration', 'worker-start', '--run', RUN, '--terminal', handle, '--worktree', f"name:{v['slug']}", '--spec', spec)
             if r.get('dispatchId'):
                 v.update(status='running', rebased=True, task=r.get('taskId', v['task']), dispatch=r['dispatchId'])
+                v.pop('turnEndAt', None)   # a new dispatch gets its own turn-end clock
             else:
                 v['status'], v['reason'] = 'held', 'CONFLICT; rebase redispatch failed'
         elif verdict.startswith('PENDING'):
@@ -195,7 +251,8 @@ def main():
     take_lock()
     d = load(); reconcile(d); save(d)
     while any(v['status'] in ('running', 'done') for v in d['issues'].values()):
-        if any(v['status'] == 'running' for v in d['issues'].values()): consume(d)
+        if any(v['status'] == 'running' for v in d['issues'].values()):
+            consume(d); save(d)   # the acked turn-end clock must survive a crash in settle
         settle(d); save(d)
         if all(v['status'] == 'done' for v in d['issues'].values() if v['status'] in ('running','done')): time.sleep(60)  # CI pending
     save(d)
