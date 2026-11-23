@@ -33,13 +33,14 @@ def wave_block(body):
 
 
 def tier_chain(tier):
-    # The leading "<tier> -> <tier> ..." chain of a TIER line (INNOV-464): "normal -> risk -
-    # recovery path" is [normal, risk]. An arrow in the reason is not a tier; a dangling "->"
-    # gives [] (no tier at all).
-    m = re.match(r"\s*[A-Za-z]+(?:\s*->\s*[A-Za-z]+)*", tier)
-    if not m or tier[m.end():].lstrip().startswith("->"):
+    # The "<tier> -> <tier> ..." chain before the " - <why>" of a TIER line (INNOV-464):
+    # "normal -> risk - recovery path" is [normal, risk]. An arrow in the reason is not a tier.
+    # Anything but a clean chain ("normal (bumped) -> risk", "normal => risk", a dangling "->")
+    # gives [] (no tier), so a misspelt escalation holds instead of merging as its first word.
+    head = tier.split(" - ", 1)[0].strip()
+    if not re.fullmatch(r"[A-Za-z]+(?:\s*->\s*[A-Za-z]+)*", head):
         return []
-    return [t.strip().lower() for t in m.group(0).split("->")]
+    return [t.strip().lower() for t in head.split("->")]
 
 
 def tier_hold(tiers):

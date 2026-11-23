@@ -296,6 +296,22 @@ class TurnEndEscalation(unittest.TestCase):
         self.assertEqual(v["status"], "held")
         self.assertIn("60 min", v["reason"])
 
+    def test_cap_hold_labels_the_pr_and_keeps_the_worktree(self):
+        # the worker is usually still working, and its late worker_done is ignored: the
+        # wave-held label is what tells a human this PR needs them
+        edits, calls = [], []
+        oj = lambda *a: calls.append(a) or ({"worktrees": [{"displayName": "abc-7", "linkedPR": {"number": 41}}]}
+                                           if a[:2] == ("worktree", "list") else self.fake_oj(*a))  # noqa: E731
+        with mock.patch.object(cl, "oj", oj), mock.patch.object(cl, "gh", lambda *a: edits.append(a) or ""):
+            self.send("escalation", TURN_END)
+            self.assertEqual(edits, [])
+            self.now += 61 * 60
+            cl.consume(self.d)
+        v = self.d["issues"]["ABC-7"]
+        self.assertEqual((v["status"], v["pr"]), ("held", 41))
+        self.assertIn(("pr", "edit", "41", "--add-label", "wave-held"), edits)
+        self.assertIn(("orchestration", "worker-retain", "--dispatch", "d1"), calls)
+
     def test_later_turn_ends_do_not_reset_the_clock(self):
         self.send("escalation", TURN_END)
         self.now += 40 * 60

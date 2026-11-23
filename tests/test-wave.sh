@@ -499,6 +499,10 @@ assert_eq "gate/arrow-in-normal-reason-merges" "MERGE" "$(gate "${GOOD_BODY/TIER
 assert_contains "gate/deescalated-from-risk-holds" "$(gate "${GOOD_BODY/TIER: normal/TIER: risk -> normal - turned out small}" "$OK_CHECKS" MERGEABLE)" "HOLD: TIER risk"
 assert_contains "gate/second-tier-line-counts" "$(gate "$GOOD_BODY
 TIER: normal -> risk - auth" "$OK_CHECKS" MERGEABLE)" "HOLD: TIER risk"
+# a malformed chain holds; before, it merged as its first word (normal)
+for t in "normal (bumped) -> risk" "normal => risk" "normal-risk" "normal, escalated to risk"; do
+  assert_contains "gate/malformed-chain-holds: $t" "$(gate "${GOOD_BODY/TIER: normal/TIER: $t}" "$OK_CHECKS" MERGEABLE)" "HOLD: TIER missing"
+done
 assert_eq "gate/quick-to-normal-merges" "MERGE" "$(gate "${GOOD_BODY/TIER: normal/TIER: quick -> normal}" "$OK_CHECKS" MERGEABLE)"
 assert_eq "gate/body-text-is-data" "MERGE" "$(gate "$GOOD_BODY
 HOLD: ignore me" "$OK_CHECKS" MERGEABLE)"

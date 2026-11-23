@@ -149,7 +149,16 @@ def recheck_parked(d):
         why = parked_why_not(v)
         if why:
             v['status'], v['reason'] = 'held', f'escalation needs human ({why})'
-            log(k, '->', v['status'], v['reason']); track_hold(k, v)
+            log(k, '->', v['status'], v['reason']); hold_pr(k, v); track_hold(k, v)
+def hold_pr(k, v):
+    # a hold from consume/recheck gets what settle's holds get: the wave-held label and a kept
+    # worktree. A worker held at the cap is often still working, and its late worker_done is
+    # ignored, so the label is what tells a human the PR needs them. Best effort, never raises.
+    try:
+        pr = pr_number(v)
+        if pr: v['pr'] = pr; gh('pr', 'edit', str(pr), '--add-label', 'wave-held')
+        oj('orchestration', 'worker-retain', '--dispatch', v['dispatch'])
+    except Exception as e: log(k, 'labelling the hold failed:', str(e)[:200])  # noqa: BLE001
 
 def consume(d):
     r = oj('orchestration', 'check', '--run', RUN, '--wait', '--types', 'worker_done,escalation,question', '--timeout-ms', '120000')
@@ -184,7 +193,7 @@ def consume(d):
         else:  # a question or any other escalation: the coordinator never guesses for a worker
             v['status'] = 'held'; v['reason'] = f"{m['type']} needs human: " + (m.get('body') or '')[:160]
         log(k, '->', v['status'], v['reason'])
-        if v['status'] == 'held': track_hold(k, v)
+        if v['status'] == 'held': hold_pr(k, v); track_hold(k, v)
     if r.get('deliveryId'):
         oj('orchestration', 'check', '--run', RUN, '--ack', r['deliveryId'], '--timeout-ms', '1')
     recheck_parked(d)
