@@ -100,10 +100,17 @@ const slashed = p => (p || '').replace(/\\/g, '/').replace(/^\.\//, '').replace(
 function repoRow(vaultPath, top, prefix) {
   const repos = readJson(join(vaultPath, 'repos.json'))?.repos || {};
   const remote = remoteOf(top);
+  const mirrored = n => existsSync(join(vaultPath, 'graphify', n));
   const rows = remote ? Object.entries(repos).filter(([, spec]) => normalizeRemote(spec?.remote) === remote) : [];
-  return { name: rows.find(([, spec]) => slashed(spec?.subPath) === prefix)?.[0],
-    // Only subPath rows with a mirror: one without is an anchor alias (doctor 4c), not a build target.
-    subRows: rows.filter(([n, spec]) => slashed(spec?.subPath) && existsSync(join(vaultPath, 'graphify', n))).map(([n, spec]) => `${n} (${slashed(spec.subPath)})`) };
+  // Several rows can share a remote and subPath (tray-brain: edge and store-hub); the one with
+  // a mirror is the build target. With no single answer, keep the old basename.
+  const matches = rows.filter(([, spec]) => slashed(spec?.subPath) === prefix).map(([n]) => n);
+  const hits = matches.filter(mirrored);
+  const name = hits.length === 1 ? hits[0] : !hits.length && matches.length === 1 ? matches[0] : undefined;
+  // The name becomes graphify/<name>/: never a path.
+  if (name !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) throw new Error(`repos.json row ${JSON.stringify(name)} is not a valid mirror name.`);
+  // Only subPath rows with a mirror: one without is an anchor alias (doctor 4c), not a build target.
+  return { name, subRows: rows.filter(([n, spec]) => slashed(spec?.subPath) && mirrored(n)).map(([n, spec]) => `${n} (${slashed(spec.subPath)})`) };
 }
 
 export function buildGraph(root, vault, { scopes = ['.'], stack, session } = {}) {
@@ -116,8 +123,8 @@ export function buildGraph(root, vault, { scopes = ['.'], stack, session } = {})
   const name = row.name || basename(root);
   const stacks = readdirSync(templates).filter(f => f !== 'README.md');
   const carveOut = join(vault.path, 'graphify', name, '.graphifyignore');
+  if (!prefix && row.subRows.length) throw new Error(`${name} is the checkout of mirrored repos.json subPath rows, not a mirror: pass --root <checkout>/<subPath> for each of ${row.subRows.join(', ')}.`);
   if (!existsSync(carveOut)) {
-    if (!prefix && row.subRows.length) throw new Error(`${name} is the checkout of repos.json subPath rows, not a mirror: pass --root <checkout>/<subPath> for each of ${row.subRows.join(', ')}.`);
     if (!stacks.includes(stack)) throw new Error(`First build: pass --stack, one of ${stacks.join(', ')}.`);
     mkdirSync(join(vault.path, 'graphify', name), { recursive: true });
     copyFileSync(join(templates, stack), carveOut);

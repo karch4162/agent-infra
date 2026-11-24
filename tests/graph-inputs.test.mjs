@@ -77,3 +77,34 @@ console.log('fake rebuilt');`);
   writeFileSync(fake, 'console.error("boom"); process.exit(1);');
   assert.throws(() => buildGraph(repo, { path: vault }, { scopes: ['src'] }), /not runnable/);
 });
+
+test('graph build picks the mirrored row among rows sharing a remote, refuses unsafe names, and never builds a checkout of mirrored subPath rows (INNOV-451)', t => {
+  const base = mkdtempSync(join(tmpdir(), 'brain-rows-'));
+  t.after(() => rmSync(base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
+  const git = (cwd, ...args) => { const r = spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); };
+  const repo = join(base, 'edge'); mkdirSync(join(repo, 'src'), { recursive: true }); mkdirSync(join(repo, 'web'));
+  writeFileSync(join(repo, 'src/a.js'), 'x'); writeFileSync(join(repo, 'web/b.js'), 'y');
+  git(repo, 'init', '-b', 'main'); git(repo, 'remote', 'add', 'origin', 'https://github.com/acme/edge.git');
+  const vault = join(base, 'vault'); mkdirSync(join(vault, 'wiki'), { recursive: true });
+  const fake = join(base, 'fake.mjs');
+  writeFileSync(fake, `import { mkdirSync, writeFileSync } from 'node:fs';
+if (process.argv[2] === '--version') { console.log('graphify 0.0.0-fake'); process.exit(0); }
+mkdirSync('graphify-out', { recursive: true }); writeFileSync('graphify-out/graph.json', '{"nodes":[],"links":[]}');`);
+  process.env.BRAIN_GRAPHIFY = JSON.stringify([process.execPath, fake]);
+  t.after(() => delete process.env.BRAIN_GRAPHIFY);
+  const rows = repos => writeFileSync(join(vault, 'repos.json'), JSON.stringify({ repos }).replace(/,/g, ',\r\n'));
+  const remote = 'github.com/acme/edge';
+  // tray-brain's edge and store-hub: one remote, no subPath; the mirrored row wins.
+  rows({ edge: { remote }, 'store-hub': { remote } });
+  mkdirSync(join(vault, 'graphify/store-hub'), { recursive: true }); writeFileSync(join(vault, 'graphify/store-hub/.graphifyignore'), '');
+  assert.equal(buildGraph(repo, { path: vault }, { scopes: ['src'] }).name, 'store-hub');
+  assert.ok(!existsSync(join(vault, 'graphify/edge/graph.json')), 'not under the unmirrored row');
+  // A row name is a directory under graphify/: a path is refused before anything is written.
+  rows({ '../wiki': { remote } });
+  assert.throws(() => buildGraph(repo, { path: vault }, { scopes: ['src'], stack: 'node-ts' }), /not a valid mirror name/);
+  // A root carve-out does not make the checkout of mirrored subPath rows buildable.
+  rows({ edge: { remote }, 'edge-web': { remote, subPath: 'web' } });
+  mkdirSync(join(vault, 'graphify/edge-web'), { recursive: true });
+  mkdirSync(join(vault, 'graphify/edge'), { recursive: true }); writeFileSync(join(vault, 'graphify/edge/.graphifyignore'), '');
+  assert.throws(() => buildGraph(repo, { path: vault }, { scopes: ['src'] }), /edge-web \(web\)/);
+});
