@@ -102,7 +102,8 @@ function repoRow(vaultPath, top, prefix) {
   const remote = remoteOf(top);
   const rows = remote ? Object.entries(repos).filter(([, spec]) => normalizeRemote(spec?.remote) === remote) : [];
   return { name: rows.find(([, spec]) => slashed(spec?.subPath) === prefix)?.[0],
-    subRows: rows.filter(([, spec]) => slashed(spec?.subPath)).map(([n, spec]) => `${n} (${slashed(spec.subPath)})`) };
+    // Only subPath rows with a mirror: one without is an anchor alias (doctor 4c), not a build target.
+    subRows: rows.filter(([n, spec]) => slashed(spec?.subPath) && existsSync(join(vaultPath, 'graphify', n))).map(([n, spec]) => `${n} (${slashed(spec.subPath)})`) };
 }
 
 export function buildGraph(root, vault, { scopes = ['.'], stack, session } = {}) {
