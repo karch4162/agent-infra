@@ -206,6 +206,8 @@ printf 'node_modules/\r\n/tests/\r\n' > "$V/graphify/web/.graphifyignore"
 printf 'node_modules/\n' > "$V/graphify/noscope/.graphifyignore"
 for m in app noscope nocarve; do printf '{"nodes":[{"id":"n0","label":"a.js","source_file":"src/a.js","community":0}],"links":[],"built_at_commit":"%s"}' "$APP0" > "$V/graphify/$m/graph.json"; done
 printf '{"nodes":[{"id":"n0","label":"w.js","source_file":"src/w.js","community":0}],"links":[],"built_at_commit":"%s"}' "$MONO0" > "$V/graphify/web/graph.json"
+# A real CI vault commits the workflow; sync-graph.sh warns a local build there (INNOV-468).
+mkdir -p "$V/.github/workflows" && cp "$WF" "$V/.github/workflows/brain-mirrors.yml"
 git -C "$V" init -q
 git -C "$V" add -A
 git -C "$V" commit -qm vault
@@ -222,6 +224,7 @@ assert_eq "no --vault: wrote nothing" "" "$(changed)"
 out=$(BRAIN_SOURCE_AUTH='AUTHORIZATION: basic ZHVtbXk=' ci); rc=$?
 assert_eq "run 1: exit 1 (noscope and nocarve fail)" "1" "$rc"
 assert_not_contains "run 1: the source credential never reaches graphify" "$out" "credential leaked"
+assert_not_contains "run 1: the CI build is not warned about CI-built mirrors" "$out" "MIRRORS: WARN"
 assert_contains "run 1: app BUILT" "$out" "CI-MIRRORS: BUILT app - origin/main"
 assert_contains "run 1: web (subPath) BUILT" "$out" "CI-MIRRORS: BUILT web - origin/main"
 assert_contains "run 1: provenance OK for web" "$out" "PROVENANCE: OK web"

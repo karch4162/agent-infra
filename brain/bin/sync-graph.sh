@@ -217,6 +217,8 @@ FORCE_COMMIT=0
 SYNC_ALL=0
 CI_CHECK=0
 CI_SIGNAL=".github/workflows/brain-mirrors.yml"
+# Committed at HEAD, not merely present: an untracked copy must not switch saves off.
+ci_built() { git -C "$VAULT" cat-file -e "HEAD:$CI_SIGNAL" 2>/dev/null; }
 # Flags may be given in any order and anywhere before the repo args; the first
 # non-flag argument ends flag parsing (repo paths can legitimately start with
 # anything, and `--` explicitly terminates the flags).
@@ -233,8 +235,8 @@ done
 # --no-commit wins over --force-commit if both were passed.
 if [[ $COMMIT -eq 0 ]]; then FORCE_COMMIT=0; fi
 if [[ $CI_CHECK -eq 1 ]]; then
-  if [[ -f "$VAULT/$CI_SIGNAL" ]]; then echo "Graph sync: skipped - mirrors built in CI ($CI_SIGNAL)"
-  else echo "Graph sync: local - no $CI_SIGNAL in this vault"; fi
+  if ci_built; then echo "Graph sync: skipped - mirrors built in CI ($CI_SIGNAL)"
+  else echo "Graph sync: local - no $CI_SIGNAL committed in this vault"; fi
   exit 0
 fi
 
@@ -521,7 +523,7 @@ if [[ ${#repos[@]} -eq 0 ]]; then
   echo "selected ${#selected[@]} mirror(s): ${selected[*]}" >&2
 fi
 
-if [[ -f "$VAULT/$CI_SIGNAL" && "${BRAIN_MIRRORS_BUILDER:-}" != ci ]]; then
+if [[ "${BRAIN_MIRRORS_BUILDER:-}" != ci ]] && ci_built; then
   _names=""
   for repo in "${repos[@]}"; do _names="${_names:+$_names,}$(mirror_name_for "$repo")"; done
   echo "MIRRORS: WARN - this vault builds its code mirrors in CI ($CI_SIGNAL). A local build clusters differently (community ids are stable per platform only), so this publish and the next nightly rebuild will re-cluster the mirror. Prefer running the workflow with --only $_names. Publishing anyway."
