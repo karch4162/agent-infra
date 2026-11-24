@@ -518,6 +518,48 @@ status="$(run_gl "$GLOB_CARVE"'[z-a]\nmigrations/[^0]*.js\n')"
 assert_eq "glob-carve-out/reversed-range-does-not-crash" "0" "$status" "output: [$(audit_all)]"
 status="$(run_gl 'migrations/[^0]*.js\nmigrations/versions/\n*.Tests/\n')"
 assert_eq "glob-carve-out/caret-is-literal-in-class" "0" "$status" "output: [$(audit_all)]"
+
+# INNOV-434: package depth must not decide carved-vs-missing. On the real POS
+# project feature-splash/ keeps its code 8 levels deep and its only shallow
+# source file is build.gradle.kts, which the android carve-out drops; a depth-6
+# re-walk found nothing left and called the module "carved" instead of checking it.
+REPO_DEEP="$TMPROOT/repoDeep"
+make_repo "$REPO_DEEP" src
+DEEP_PKG="feature-splash/src/main/java/com/tray/feature/splash/presentation"
+mkdir -p "$REPO_DEEP/$DEEP_PKG"
+printf 'plugins {}\n' >"$REPO_DEEP/feature-splash/build.gradle.kts"
+printf 'class SplashScreen\n' >"$REPO_DEEP/$DEEP_PKG/SplashScreen.kt"
+VAULT_DEEP="$TMPROOT/vaultDeep"
+mkdir -p "$VAULT_DEEP/graphify/deeprepo"
+run_deep() { # carve-out-text graph -> exit code
+  printf "$1" >"$VAULT_DEEP/graphify/deeprepo/.graphifyignore"
+  BRAIN_ROOT="$(to_native "$VAULT_DEEP")" node "$(to_native "$AUDIT")" \
+    --graph "$(to_native "$2")" --repo-root "$(to_native "$REPO_DEEP")" \
+    --name deeprepo >"$AOUT" 2>"$AERR"
+  echo $?
+}
+make_graph "$TMPROOT/deep-src-only.json" src/index.ts
+make_graph "$TMPROOT/deep-both.json" src/index.ts "$DEEP_PKG/SplashScreen.kt"
+
+# Zero nodes under an un-carved deep module is MISSING code, not a carve-out.
+for eol in lf crlf; do
+  carve='*.gradle.kts\n'
+  [[ $eol == crlf ]] && carve='*.gradle.kts\r\n'
+  status="$(run_deep "$carve" "$TMPROOT/deep-src-only.json")"
+  assert_eq "deep-module/$eol-zero-nodes-is-missing-roots" "MISSING-ROOTS" "$(audit_verdict)" "output: [$(audit_all)]"
+  assert_contains "deep-module/$eol-names-the-module" "feature-splash/" "$(audit_all)"
+done
+
+# With its nodes present the module is a covered source root, not "carved".
+status="$(run_deep '*.gradle.kts\n' "$TMPROOT/deep-both.json")"
+assert_eq "deep-module/present-exit-0" "0" "$status" "output: [$(audit_all)]"
+assert_contains "deep-module/present-is-a-source-root" "source roots covered: feature-splash src" "$(audit_all)"
+assert_not_contains "deep-module/present-not-called-carved" "carved out vault-side" "$(audit_all)"
+
+# Negative control: carving the deep sources too makes it a real carve-out.
+status="$(run_deep '*.gradle.kts\nfeature-splash/src/\n' "$TMPROOT/deep-src-only.json")"
+assert_eq "deep-module/fully-carved-exit-0" "0" "$status" "output: [$(audit_all)]"
+assert_contains "deep-module/fully-carved-is-named" "carved out vault-side: feature-splash" "$(audit_all)"
 status="$(run_gl 'migrations/[!a]*.js\nmigrations/versions/\n*.Tests/\n')"
 assert_eq "glob-carve-out/bang-negates-class" "0" "$status" "output: [$(audit_all)]"
 # A `]` right after `[` is a class member in fnmatch, not an empty class.
