@@ -98,7 +98,8 @@ class Config:
         self.stop_file = control / (v["STOP_FILE"] or "STOP")
         self.python = v["PYTHON"] or sys.executable
         self.tick_timeout_s = int(float(v["TICK_TIMEOUT_MIN"] or 90) * 60)
-        self.max_wave_size = int(v["MAX_WAVE_SIZE"]) if v["MAX_WAVE_SIZE"] else None
+        mws = v["MAX_WAVE_SIZE"].strip()   # not a count -> -1, reported by problems() as a config error
+        self.max_wave_size = (int(mws) if mws.isdigit() else -1) if mws else None
         self.allowed_models = ",".join(m.strip() for m in v["ALLOWED_MODELS"].split(",") if m.strip())
 
     def problems(self) -> list[str]:
@@ -110,7 +111,7 @@ class Config:
         if self.max_workers < 1 or self.daily_ticket_cap < 0 or self.max_waves_per_day < 0:
             p.append("MAX_WORKERS must be >= 1; DAILY_TICKET_CAP and MAX_WAVES_PER_DAY >= 0")
         if self.max_wave_size is not None and self.max_wave_size < 0:
-            p.append("MAX_WAVE_SIZE must be >= 0")
+            p.append("MAX_WAVE_SIZE must be a whole number >= 0 (or empty)")
         return p
 
 

@@ -480,6 +480,10 @@ class WaveRun(unittest.TestCase):
             ctl = self._ctl(control, lambda *a: self.fail("must not tick"))
             self.assertEqual(ctl.run("scheduled"), 3)        # SCHEDULE_WAVE empty
             self.assertEqual(ctl.run("bogus"), 2)
+            for bad in ("x", "-1"):   # a bad MAX_WAVE_SIZE is a config error, not a traceback
+                with open(control / "config.env", "a", encoding="utf-8") as f:
+                    f.write(f"MAX_WAVE_SIZE={bad}\n")
+                self.assertEqual(self._ctl(control, ctl.tick).run("owner"), 2)
             (control / "STOP").write_text("", encoding="utf-8")
             self.assertEqual(ctl.precheck("owner"), 3)
 
