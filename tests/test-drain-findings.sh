@@ -104,21 +104,24 @@ assert_eq "done/left-incl-malformed" "4" "$(q 'o.left')"
 assert_eq "done/kept-f3" "1" "$(grep -c 'brain-fp-f3' "$QUEUE")"
 assert_eq "done/kept-malformed" "1" "$(grep -c 'not json' "$QUEUE")"
 assert_eq "done/f1-gone" "0" "$(grep -c 'brain-fp-f1' "$QUEUE")"
-run plan
-assert_eq "plan/counts-malformed" "1" "$(q 'o.malformed')"
+printf '{"fingerprint":"brain-fp-x OR project = SECRET","class":"c","repo":"r"}
+' >>"$QUEUE"
+run search
+assert_eq "plan/counts-malformed" "2" "$(q 'o.malformed')"
+assert_eq "search/injected-fp-never-reaches-jql" "false" "$(q "JSON.stringify(o.findings).includes('SECRET')")"
 new_vault "$JIRA"
-line g1 c1 >"$QUEUE"
-run done brain-fp-g1
+line d1 c1 >"$QUEUE"
+run done brain-fp-d1
 [[ -e "$QUEUE" ]] && fail "done/empty-deletes-file" "queue file still exists" || pass "done/empty-deletes-file"
 
 # --- 6. no tracker / tracker none / empty queue: status, exit 0, no payloads ----
 echo "--- 6. states ---"
 new_vault
-line h1 c1 >"$QUEUE"
+line e1 c1 >"$QUEUE"
 run plan
 assert_eq "state/no-tracker" "no-tracker:0:undefined" "$(q 'o.state')":"$STATUS":"$(q 'String(o.actions)')"
 new_vault '{"type": "none"}'
-line h1 c1 >"$QUEUE"
+line e1 c1 >"$QUEUE"
 run search
 assert_eq "state/none" "none" "$(q 'o.state')"
 new_vault "$JIRA"

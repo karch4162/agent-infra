@@ -31,6 +31,7 @@ import { join } from 'node:path';
 
 const CAP = 3;
 const LABELS = ['brain-plugin', 'brain-autofiled'];
+const FP = /^brain-fp-[0-9a-f-]{1,12}$/;
 
 const argv = process.argv.slice(2);
 const vi = argv.indexOf('--vault');
@@ -49,7 +50,8 @@ function readQueue() {
   for (const l of lines) {
     try {
       const f = JSON.parse(l);
-      if (typeof f.fingerprint === 'string' && f.fingerprint) findings.push(f); else malformed++;
+      // Only file-finding.sh's own shape: the fingerprint goes into JQL and labels.
+      if (FP.test(f.fingerprint)) findings.push(f); else malformed++;
     } catch { malformed++; }
   }
   return { lines, findings, malformed };
@@ -106,7 +108,7 @@ if (verb === 'search' || verb === 'plan') {
   const open = new Map();
   for (let i = 0; i < rest.length; i++) {
     if (rest[i] !== '--open') usage(`unexpected argument ${rest[i]}`);
-    const m = /^(brain-fp-[^=\s]+)=(\S+)$/.exec(rest[++i] || '');
+    const m = /^(brain-fp-[0-9a-f-]+)=([A-Za-z0-9_-]+)$/.exec(rest[++i] || '');
     if (!m) usage('--open takes <fingerprint>=<KEY>');
     if (!q.findings.some(f => f.fingerprint === m[1])) usage(`--open ${m[1]} is not in the queue`);
     open.set(m[1], m[2]);
