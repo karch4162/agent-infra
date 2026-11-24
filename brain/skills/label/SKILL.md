@@ -1,6 +1,6 @@
 ---
 name: label
-description: "Name a graph mirror's communities vault-side — no repo checkout, no resync. Reads graphify/<repo>/graph.json, names clusters in-session (keyless), rewrites <repo>-GRAPH_REPORT.md preserving existing names, regenerates stubs. Trigger: /brain:label [repo ...], or 'label the communities' / 'fix the unlabeled mirrors'."
+description: "Name a graph mirror's communities vault-side — no repo checkout, no resync. Reads graphify/<repo>/graph.json (or the vault's own wiki concept graph, graphify-out/), names clusters in-session (keyless), rewrites <repo>-GRAPH_REPORT.md (graphify-out/GRAPH_REPORT.md) preserving existing names, regenerates stubs. Trigger: /brain:label [repo ...], or 'label the communities' / 'fix the unlabeled mirrors'."
 ---
 
 # /brain:label — vault-side community labeling
@@ -13,6 +13,8 @@ In Codex, GitHub Copilot CLI, Grok Build, Grok Bot, or a project using a .brain/
 Fixes the two freshness findings **"Graph mirrors never labeled (no community report)"** and **"all-generic community labels"** without touching any repo checkout. A mirror's `graph.json` carries every node's `community` id, member labels, and `source_file` — naming a cluster is a pure function of that data. The mirror is self-sufficient.
 
 Resolve the vault root as `$BRAIN_ROOT` (else the current project dir / cwd).
+
+**The wiki concept graph is a target too (INNOV-412).** Pass `graphify-out` where a step says `<repo>` to name the vault's own concept graph: it reads `graphify-out/graph.json`, rewrites `graphify-out/GRAPH_REPORT.md` and `graphify-out/.community-labels.json` in place, and its stubs regenerate with `build-community-notes.mjs graphify-out`. A bare `--digest` includes it once it has a report. Its derived names are note slugs (`sm-pool-team-id-is-not-a-team-id`): save 5c mints one when a new cluster gets no graphify Step 5 name, and the digest offers every one for naming, with or without a `derived` record. Clusters graphify omitted from the report as thin stay omitted, as save 5c's reconcile leaves them. `--apply graphify-out` refuses when there is no `GRAPH_REPORT.md` yet: build the concept graph first (`/brain:save` step 5c).
 
 **This is agent-driven LLM work** (same host-session pattern as `/brain:save` step 5c): the bundled script prepares the work order and renders the result; **you** do the naming, in this session, keyless.
 
@@ -49,7 +51,7 @@ Resolve the vault root as `$BRAIN_ROOT` (else the current project dir / cwd).
    ```bash
    node "${CLAUDE_PLUGIN_ROOT}/bin/label-communities.mjs" --apply <repo> --labels <scratch>/labels-<repo>.json
    ```
-   The script merges (preserved always wins, invalid/missing entries fall back to derived names) and rewrites `graphify/<repo>/<repo>-GRAPH_REPORT.md` — **in place** if a report exists (only generic headings + hub links change; omitted thin communities are appended in an "Additional communities" section), or generated fresh if the mirror had no report at all. It also records each name's members in `.community-labels.json`; later passes check a kept name against those, so a name cannot drift onto an unrelated cluster one rebuild at a time. (`/brain:save`'s sync runs `label-communities.mjs --reconcile <repo>` on a kept report: names move with their members, and a name that describes nothing is replaced by a derived name, which this skill's next digest puts back in `batches`.)
+   The script merges (preserved always wins, invalid/missing entries fall back to derived names) and rewrites `graphify/<repo>/<repo>-GRAPH_REPORT.md` (for `graphify-out`, `graphify-out/GRAPH_REPORT.md`, hub list included) — **in place** if a report exists (only generic headings + hub links change; omitted thin communities are appended in an "Additional communities" section), or generated fresh if the mirror had no report at all. It also records each name's members in `.community-labels.json`; later passes check a kept name against those, so a name cannot drift onto an unrelated cluster one rebuild at a time. (`/brain:save`'s sync runs `label-communities.mjs --reconcile <repo>` on a kept report: names move with their members, and a name that describes nothing is replaced by a derived name, which this skill's next digest puts back in `batches`.)
 
 4. **Regenerate the stubs** so `[[_COMMUNITY_*]]` links resolve to the new names:
    ```bash
@@ -59,7 +61,7 @@ Resolve the vault root as `$BRAIN_ROOT` (else the current project dir / cwd).
 
 5. **Verify.** Run the freshness scan (`node "${CLAUDE_PLUGIN_ROOT}/bin/freshness.mjs" --stdout`) and confirm: the labeled repo no longer appears under either labeling finding, and unresolved `_COMMUNITY_*` link targets are 0. If ghosts appeared, a wiki note was linking a renamed generic stub (`[[_COMMUNITY_Community N]]`) — list those notes for the user; fixing their `Code:` lines is a note edit and follows the vault's PR convention.
 
-6. **Offer to commit** (ask first — vault governance): `git -C <vault> add graphify/<repo>` plus a `wiki/log.md` line, e.g.
+6. **Offer to commit** (ask first — vault governance): `git -C <vault> add graphify/<repo>` (or `graphify-out/GRAPH_REPORT.md graphify-out/.community-labels.json graphify-out/communities`) plus a `wiki/log.md` line, e.g.
    `- <date> — <repo> communities labeled vault-side via /brain:label (N named, M derived, K preserved).`
    Mirror the commit style of `sync-graph.sh` (`Label communities: <repos>`); push is left to the user.
 
@@ -73,4 +75,4 @@ Resolve the vault root as `$BRAIN_ROOT` (else the current project dir / cwd).
 
 - Large mirrors are batched (POS ≈ 623 communities → ~1 batch of 100 for you + ~523 derived tail names). Work through batches sequentially; don't skip the tail — the script derives it automatically on apply.
 - `--top N` on `--digest` adjusts how many communities get LLM names vs derived names (default 100, largest first).
-- Read-only except `graphify/<repo>/<repo>-GRAPH_REPORT.md` (via `--apply`) and `graphify/<repo>/communities/` (via the stub regenerator). `graph.json` is never written.
+- Read-only except `graphify/<repo>/<repo>-GRAPH_REPORT.md` and `.community-labels.json` (via `--apply`) and `graphify/<repo>/communities/` (via the stub regenerator); for the wiki graph, the same three under `graphify-out/`. `graph.json` is never written.

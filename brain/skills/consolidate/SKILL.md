@@ -95,6 +95,6 @@ Resolve the vault root as `$BRAIN_ROOT` (else the current project dir / cwd). Sa
 
 ## Notes
 
-- Prerequisite: a built and labelled wiki concept graph (`graphify-out/communities/` with named stubs). Unlabelled `Community N` stubs → run `/brain:label` first.
+- Prerequisite: a built and labelled wiki concept graph (`graphify-out/communities/` with named stubs). Unlabelled `Community N` stubs, or note-slug names → run `/brain:label graphify-out` first.
 - Stubs list at most 12 Top files. A very large community's long tail is not in the brief. Say so in the draft if it matters.
 - No temporal clustering, and no loop-until-dry: the community set is finite, and one pass per community is the unit.
