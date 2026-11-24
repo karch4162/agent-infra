@@ -11,7 +11,8 @@ the folder's bin/wave_run.py launcher, which finds the installed wave plugin. Ev
 lives here, so a misconfigured scheduler cannot skip one:
 
   stop file -> config -> trigger allowed -> waves today -> machine lock -> per repo:
-  cooldown -> machine-wide worker / start / spend caps (handed to the tick as env overrides)
+  cooldown -> machine-wide worker / start / spend caps, the firing's MAX_WAVE_SIZE allowance
+  and ALLOWED_MODELS (handed to the tick as env overrides)
 
 Each firing is ONE tick per repo, never a whole wave: wave state lives in each repo's
 .claude/wave/ between firings, so a missed or crashed firing loses nothing. intake = dry run
@@ -61,6 +62,8 @@ DEFAULTS = {
     "STOP_FILE": "STOP",
     "PYTHON": "",
     "TICK_TIMEOUT_MIN": "90",
+    "MAX_WAVE_SIZE": "",         # most workers one firing may start, all repos; empty = no cap
+    "ALLOWED_MODELS": "",        # comma list of implementer/reviewer models; empty = any
 }
 
 
@@ -95,6 +98,11 @@ class Config:
         self.stop_file = control / (v["STOP_FILE"] or "STOP")
         self.python = v["PYTHON"] or sys.executable
         self.tick_timeout_s = int(float(v["TICK_TIMEOUT_MIN"] or 90) * 60)
+        try:   # not a count -> -1, reported by problems() as a config error
+            self.max_wave_size = int(v["MAX_WAVE_SIZE"]) if v["MAX_WAVE_SIZE"].strip() else None
+        except ValueError:
+            self.max_wave_size = -1
+        self.allowed_models = ",".join(m.strip() for m in v["ALLOWED_MODELS"].split(",") if m.strip())
 
     def problems(self) -> list[str]:
         p = []
@@ -104,6 +112,8 @@ class Config:
             p.append("WAVE_CONTROL_REPOS is empty")
         if self.max_workers < 1 or self.daily_ticket_cap < 0 or self.max_waves_per_day < 0:
             p.append("MAX_WORKERS must be >= 1; DAILY_TICKET_CAP and MAX_WAVES_PER_DAY >= 0")
+        if self.max_wave_size is not None and self.max_wave_size < 0:
+            p.append("MAX_WAVE_SIZE must be a whole number >= 0 (or empty)")
         return p
 
 
@@ -179,12 +189,15 @@ class Control:
         except ValueError:
             return default
 
-    def caps_for(self, repo: Path) -> dict[str, str]:
+    def caps_for(self, repo: Path, started: int = 0) -> dict[str, str]:
         """Env overrides that make this repo's tick take no more than the machine has left.
-        The tick reads env before config.env and computes slots = cap - (its own count)."""
+        The tick reads env before config.env and computes slots = cap - (its own count).
+        started: workers earlier repos' ticks started in this firing (MAX_WAVE_SIZE)."""
         cfg, repos = self.cfg, self.cfg.repos
         free_workers = max(0, cfg.max_workers - sum(self.live(r) for r in repos))
         free_starts = max(0, cfg.daily_ticket_cap - sum(self.starts(r) for r in repos))
+        if cfg.max_wave_size is not None:   # the firing's allowance rides on the start cap
+            free_starts = min(free_starts, max(0, cfg.max_wave_size - started))
         live, mine = self.live(repo), self.starts(repo)
         env = {
             "WAVE_MAX_IMPLEMENT_WORKERS": str(live + max(0, min(self.repo_cap(repo, "WAVE_MAX_IMPLEMENT_WORKERS", 3) - live, free_workers))),
@@ -194,6 +207,8 @@ class Control:
         if cfg.budget is not None:   # the tick refuses a start that would cross spent-here + what's left
             left = max(0.0, cfg.budget - sum(self.spent(r) for r in repos))
             env["WAVE_BUDGET_PER_DAY_USD"] = f"{self.spent(repo) + left:.4f}"
+        if cfg.allowed_models:   # the tick's picker skips a pick whose roles name another model
+            env["WAVE_ALLOWED_MODELS"] = cfg.allowed_models
         return env
 
     # ---- gates ----
@@ -255,7 +270,8 @@ class Control:
             print(f"wave {trigger}: skipped (another wave run holds the machine lock)")
             return EXIT_SKIP
         lines: list[str] = []
-        failed = started = False
+        failed = False
+        started = 0   # workers this firing started, all repos so far (MAX_WAVE_SIZE)
         try:
             self.audit({"run_id": run_id, "stage": "start", "trigger": trigger, "repos": [str(r) for r in cfg.repos]})
             for repo in cfg.repos:
@@ -272,11 +288,11 @@ class Control:
                     lines.append(f"- {repo.name}: skipped (cooldown after a failed wave, until {until})")
                     self.audit({"run_id": run_id, "stage": "repo", "repo": str(repo), "decision": "skip", "reason": "cooldown", "until": until})
                     continue
-                env_over = self.caps_for(repo)   # recounted per repo: the previous tick may have spawned
+                env_over = self.caps_for(repo, started)   # recounted per repo: the previous tick may have spawned
                 t0 = time.time()
                 trc, notices, tail = self.tick(repo, trigger, env_over)
                 spawned = spawned_since(repo, t0)
-                started = started or bool(spawned)
+                started += len(spawned)
                 if trc == 0 and notices is None:
                     trc, notices = 1, ["tick exited 0 but printed no report"]
                 notices = notices or []

@@ -46,9 +46,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ci_wait  # noqa: E402
 from auto_merge import evaluate_and_maybe_merge, record_closeout  # noqa: E402
 from autonomy_config import load_autonomy_config, repo_root, wave_dir as _wave_dir  # noqa: E402
-from backlog_watch import run_watch  # noqa: E402
+from backlog_watch import MODEL_NOTICE, run_watch  # noqa: E402
 from daily_cap import ET, RunLock, record_start  # noqa: E402
 from grok_challenge import run_grok_challenge  # noqa: E402
+from model_roles import role_models  # noqa: E402
 from plan_step import run_plan_loop, write_plan_artifacts  # noqa: E402
 from worker_runtime import DirectWorkerRuntime, OrcaWorkerRuntime, WorkerError, codex_inherits_all, orca_worker_state, _orca, build_claude_reviewer_cmd, build_codex_reviewer_cmd, _resolve_agent_bin, pid_alive  # noqa: E402
 
@@ -481,7 +482,10 @@ class Tick:
                         lock=lock, record_starts=False, trigger=trigger)
         self.report["watch"] = rep.to_dict()
         for n in rep.notices:
-            self.log("watch: " + n)
+            if n.startswith(MODEL_NOTICE):
+                self.notice(n)
+            else:
+                self.log("watch: " + n)
         if rep.flagged_risky:
             self.notice(f"risky tickets waiting for a human: {[r['id'] for r in rep.flagged_risky]}", "human_risky.md")
         if not rep.picks:
@@ -491,8 +495,10 @@ class Tick:
             tier = "quick" if pick.rating == "low" else "normal"
             agent = (pick.roles or {}).get("implementer", "claude")
             model = (pick.roles or {}).get("implementer_model")
+            if self.cfg.allowed_models and pick.roles:   # run the model the gate checked, not Codex's own default
+                model = role_models(pick.roles)[0]
             if not self.execute:
-                self.ev(pick.ticket_id, "would_spawn", action=pick.action, agent=agent, tier=tier, runtime=self.cfg.runtime)
+                self.ev(pick.ticket_id, "would_spawn", action=pick.action, agent=agent, model=model, tier=tier, runtime=self.cfg.runtime)
                 continue
             try:
                 prompt = self._prompt_for(pick.ticket_id, tier)
