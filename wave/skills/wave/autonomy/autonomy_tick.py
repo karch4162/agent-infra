@@ -529,6 +529,14 @@ class Tick:
                     use = DirectWorkerRuntime(repo_path=str(self.repo), base_branch=self.cfg.wave_base)
                     self.notice(f"{pick.ticket_id}: Codex worker spawned direct: Orca cannot pass it CLICKUP_*/WAVE_*; "
                                 "set shell_environment_policy.inherit = \"all\" in ~/.codex/config.toml to run it in Orca")
+                # review.sh gates its quota fallback on this list and an Orca worker has no WAVE_* env.
+                # Written before launch, beside status.json, which both runtimes overwrite (INNOV-469).
+                allow = self.runs / pick.ticket_id.lower() / "allowed_models"
+                if self.cfg.allowed_models:
+                    allow.parent.mkdir(parents=True, exist_ok=True)
+                    allow.write_text(",".join(self.cfg.allowed_models) + "\n", encoding="utf-8")
+                else:
+                    allow.unlink(missing_ok=True)
                 rec = use.spawn(ticket_id=pick.ticket_id, prompt=prompt, agent=agent, model=model)
             except WorkerError as e:
                 self.ev(pick.ticket_id, "spawn_failed", error=str(e)[:300])
@@ -537,8 +545,6 @@ class Tick:
             record_start(pick.ticket_id, self.wave_dir)  # counted only now: the worker exists
             st = _read(Path(rec.status_path))
             st.update(rating=pick.rating, roles=pick.roles, tier=tier)
-            if self.cfg.allowed_models:   # review.sh gates its quota fallback on it; an Orca worker has no WAVE_* env
-                st["allowed_models"] = ",".join(self.cfg.allowed_models)
             _write(Path(rec.status_path), st)
             self.ev(pick.ticket_id, "spawned", agent=agent, pid=rec.pid, branch=rec.branch)
             self.track(pick.ticket_id, status=self.cfg.state_start or None,

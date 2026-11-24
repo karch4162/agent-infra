@@ -22,10 +22,11 @@ if [ -z "${WAVE_IMPLEMENTER:-}" ] && [ -n "$ISSUE" ]; then
   [ -f "$run_status" ] && WAVE_IMPLEMENTER="$(sed -n 's/.*"agent": *"\([a-z]*\)".*/\1/p' "$run_status" | head -1)"
 fi
 # ALLOWED_MODELS (INNOV-469): the quota fallback never runs a model outside it. The tick
-# exports WAVE_ALLOWED_MODELS; an Orca worker's shell does not, so read the run's copy.
+# exports WAVE_ALLOWED_MODELS; an Orca worker's shell does not, so read the copy the tick
+# wrote into the run before launching the worker.
 if [ -z "${WAVE_ALLOWED_MODELS:-}" ] && [ -n "$ISSUE" ]; then
-  run_status="$MAIN_CHECKOUT/.claude/wave/runs/$(printf '%s' "$ISSUE" | tr '[:upper:]' '[:lower:]')/status.json"
-  [ -f "$run_status" ] && WAVE_ALLOWED_MODELS="$(sed -n 's/.*"allowed_models": *"\([^"]*\)".*/\1/p' "$run_status" | head -1)"
+  run_allow="$MAIN_CHECKOUT/.claude/wave/runs/$(printf '%s' "$ISSUE" | tr '[:upper:]' '[:lower:]')/allowed_models"
+  [ -f "$run_allow" ] && WAVE_ALLOWED_MODELS="$(head -1 "$run_allow")"
 fi
 ALLOWED="$(printf '%s' "${WAVE_ALLOWED_MODELS:-}" | tr -d ' \r' | tr '[:upper:]' '[:lower:]')"
 model_allowed() {  # $1 = model; an empty list allows any

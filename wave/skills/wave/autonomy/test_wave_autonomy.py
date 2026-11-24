@@ -1389,7 +1389,9 @@ class PlanReviewerAllowedModels(unittest.TestCase):
         pick = backlog_watch.Pick(ticket_id="ENT-5", title="t", rating="medium", action="plan_first",
                                   reason="plan needed", roles=model_roles.assign_roles("medium").to_dict())
         watch = types.SimpleNamespace(picks=[pick], notices=[], flagged_risky=[], to_dict=lambda: {})
-        calls, loops = [], []
+        allow = wave / "runs" / "ent-5" / "allowed_models"
+        allow.write_text("stale\n", encoding="utf-8")   # an earlier run's list must not outlive a cleared one
+        calls, loops, at_launch = [], [], []
 
         def sh(args, cwd, **kw):
             calls.append(list(args))
@@ -1399,7 +1401,8 @@ class PlanReviewerAllowedModels(unittest.TestCase):
             loops.append(kw["reviewer"]("the plan"))
             return types.SimpleNamespace(approved=True, hold_reason=None, plan_md="the plan")
 
-        def spawn(**kw):
+        def spawn(**kw):   # what review.sh in the launched worker will read
+            at_launch.append(allow.read_text(encoding="utf-8") if allow.exists() else None)
             status.write_text(json.dumps({"ticket_id": "ENT-5", "state": "running"}), encoding="utf-8")
             return types.SimpleNamespace(status_path=str(status), pid=1, branch="b", mode="direct")
 
@@ -1419,7 +1422,7 @@ class PlanReviewerAllowedModels(unittest.TestCase):
             tick.runtime = lambda: types.SimpleNamespace(spawn=spawn)
             tick.spawn(None)
         codex = [c for c in calls if c[0] == "codex"]
-        return tick.report, codex, loops, (json.loads(status.read_text(encoding="utf-8")) if status.exists() else {})
+        return tick.report, codex, loops, at_launch
 
     def test_plan_reviewer_outside_the_list_holds_the_pick(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1431,16 +1434,16 @@ class PlanReviewerAllowedModels(unittest.TestCase):
 
     def test_plan_reviewer_is_pinned_to_the_checked_model(self):
         with tempfile.TemporaryDirectory() as td:
-            rep, codex, loops, st = self._spawn(td, "opus,gpt-5.6-terra")
+            rep, codex, loops, at_launch = self._spawn(td, "opus,gpt-5.6-terra")
         self.assertEqual(len(codex), 1)
         self.assertEqual(codex[0][codex[0].index("--model") + 1], "gpt-5.6-terra")
-        self.assertEqual(st.get("allowed_models"), "opus,gpt-5.6-terra")   # review.sh reads it in an Orca worker
+        self.assertEqual(at_launch, ["opus,gpt-5.6-terra\n"])   # on disk before the worker exists
 
     def test_no_list_leaves_the_plan_reviewer_unchanged(self):
         with tempfile.TemporaryDirectory() as td:
-            rep, codex, loops, st = self._spawn(td, None)
+            rep, codex, loops, at_launch = self._spawn(td, None)
         self.assertEqual(codex, [["codex", "exec", "-s", "read-only", "-"]])
-        self.assertNotIn("allowed_models", st)
+        self.assertEqual(at_launch, [None])
 
 
 if __name__ == "__main__":

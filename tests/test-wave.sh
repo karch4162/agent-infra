@@ -447,9 +447,9 @@ assert_eq "allowed-none/exit-1" "1" "$st"
 assert_contains "allowed-none/NO" "$(cat "$BOX/out.txt")" "NO CODEX REVIEW: Codex quota exhausted and no fallback"
 assert_eq "allowed-none/no-grok" "" "$(cat "$STUB/grok.n" 2>/dev/null)"
 assert_eq "allowed-none/no-sonnet" "" "$(cat "$STUB/claude.calls" 2>/dev/null)"
-# an Orca worker has no WAVE_* env: the list comes from the run's status.json; Grok is skipped
+# an Orca worker has no WAVE_* env: the list comes from the file the tick wrote into the run; Grok is skipped
 mkdir -p "$BOX/.claude/wave/runs/abc-7"
-printf '{\r\n  "agent": "claude",\r\n  "allowed_models": "opus,gpt-5.6-terra,sonnet"\r\n}\r\n' >"$BOX/.claude/wave/runs/abc-7/status.json"
+printf 'opus,gpt-5.6-terra,sonnet\r\n' >"$BOX/.claude/wave/runs/abc-7/allowed_models"
 st="$(unset WAVE_ALLOWED_MODELS; CODEX_QUOTA=1 RISK=0 grok_run review.sh "$FB_OUT")"
 assert_eq "allowed-status/exit-0" "0" "$st"
 assert_contains "allowed-status/sonnet" "$(cat "$BOX/out.txt")" "REVIEWER: sonnet-fallback (codex quota exhausted)"
