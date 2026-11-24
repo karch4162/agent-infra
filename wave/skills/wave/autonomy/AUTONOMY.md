@@ -48,7 +48,12 @@ the start cap handed to later ones, which are still ticked so their CI, merges a
 `WAVE_ALLOWED_MODELS`: a pick whose implementer or reviewer model is outside it is skipped with
 one `ALLOWED_MODELS ...` notice per tick, never swapped. With a list set, a Codex worker is
 pinned to the model checked (`gpt-5.6-terra`) instead of Codex's own default. Every assignment
-pairs Claude with Codex, so a list missing either skips every pick.
+pairs Claude with Codex, so a list missing either skips every pick. The list gates the implementer,
+the diff reviewer, the Codex plan reviewer on `plan_first` picks (pinned to `gpt-5.6-terra`; a list
+without it holds the pick) and `review.sh`'s Codex-quota fallback (`grok`, then `sonnet`, each tried
+only if listed; none listed blocks with `NO CODEX REVIEW`). The tick copies the list into the run's
+`status.json`, where `review.sh` reads it for an Orca worker. It does not gate the Grok challenge,
+the risk-tier Grok architecture review, `plan-review.sh` or `tiebreak.sh`.
 Gates: stop file, trigger, empty `SCHEDULE_WAVE`, `MAX_WAVES_PER_DAY`, per-repo cooldown
 after a failed tick. Exit codes: 0 ok, 1 a repo failed (escalated), 2 config error, 3 skipped.
 

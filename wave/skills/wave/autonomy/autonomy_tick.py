@@ -49,7 +49,7 @@ from autonomy_config import load_autonomy_config, repo_root, wave_dir as _wave_d
 from backlog_watch import MODEL_NOTICE, run_watch  # noqa: E402
 from daily_cap import ET, RunLock, record_start  # noqa: E402
 from grok_challenge import run_grok_challenge  # noqa: E402
-from model_roles import role_models  # noqa: E402
+from model_roles import AGENT_MODEL, role_models  # noqa: E402
 from plan_step import run_plan_loop, write_plan_artifacts  # noqa: E402
 from worker_runtime import DirectWorkerRuntime, OrcaWorkerRuntime, WorkerError, codex_inherits_all, orca_worker_state, _orca, build_claude_reviewer_cmd, build_codex_reviewer_cmd, _resolve_agent_bin, pid_alive  # noqa: E402
 
@@ -462,6 +462,8 @@ class Tick:
 
     def _plan_reviewer(self, ticket: str, title: str, body: str):
         codex = build_codex_reviewer_cmd(_resolve_agent_bin("codex"), read_only=True)
+        if self.cfg.allowed_models:   # run the model spawn() checked, not Codex's own default (INNOV-469)
+            codex += ["--model", AGENT_MODEL["codex"]]
 
         def review(plan_md: str) -> str:
             # codex exec ignores stdin when given a positional prompt, so plan and ticket travel on stdin via "-"
@@ -505,15 +507,20 @@ class Tick:
                 if pick.action == "plan_first":
                     t = self.tracker()
                     body = t.get(pick.ticket_id).text if t else ""
-                    out = run_plan_loop(ticket_id=pick.ticket_id, title=pick.title, body=body, plan_needed=True,
-                                        max_rounds=self.cfg.plan_rounds_cap,
-                                        planner=self._planner(pick.ticket_id, pick.title, body),
-                                        reviewer=self._plan_reviewer(pick.ticket_id, pick.title, body))
-                    write_plan_artifacts(self.runs / pick.ticket_id.lower(), out)
-                    if not out.approved:
-                        self.ev(pick.ticket_id, "plan_held", reason=out.hold_reason)
-                        self.notice(f"{pick.ticket_id}: {out.hold_reason}", "human_held.md")
-                        self.track(pick.ticket_id, comment=f"wave: not started — {out.hold_reason}")
+                    hold = None
+                    if self.cfg.allowed_models and AGENT_MODEL["codex"] not in self.cfg.allowed_models:
+                        hold = f"plan reviewer model not allowed: {AGENT_MODEL['codex']}"   # held, never swapped
+                    else:
+                        out = run_plan_loop(ticket_id=pick.ticket_id, title=pick.title, body=body, plan_needed=True,
+                                            max_rounds=self.cfg.plan_rounds_cap,
+                                            planner=self._planner(pick.ticket_id, pick.title, body),
+                                            reviewer=self._plan_reviewer(pick.ticket_id, pick.title, body))
+                        write_plan_artifacts(self.runs / pick.ticket_id.lower(), out)
+                        hold = None if out.approved else out.hold_reason
+                    if hold:
+                        self.ev(pick.ticket_id, "plan_held", reason=hold)
+                        self.notice(f"{pick.ticket_id}: {hold}", "human_held.md")
+                        self.track(pick.ticket_id, comment=f"wave: not started — {hold}")
                         continue
                     self.track(pick.ticket_id, comment="wave: approved plan\n\n" + (out.plan_md or ""))
                     prompt += "\n\nAPPROVED PLAN (reviewed before code; follow it):\n" + (out.plan_md or "")
@@ -530,6 +537,8 @@ class Tick:
             record_start(pick.ticket_id, self.wave_dir)  # counted only now: the worker exists
             st = _read(Path(rec.status_path))
             st.update(rating=pick.rating, roles=pick.roles, tier=tier)
+            if self.cfg.allowed_models:   # review.sh gates its quota fallback on it; an Orca worker has no WAVE_* env
+                st["allowed_models"] = ",".join(self.cfg.allowed_models)
             _write(Path(rec.status_path), st)
             self.ev(pick.ticket_id, "spawned", agent=agent, pid=rec.pid, branch=rec.branch)
             self.track(pick.ticket_id, status=self.cfg.state_start or None,

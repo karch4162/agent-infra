@@ -6,7 +6,8 @@
 #
 # Codex Terra is the one correctness reviewer. Grok is added only for a defined
 # architecture risk. A failed Codex verdict is never retried elsewhere; only Codex
-# quota exhaustion falls back (grok, then sonnet), and the REVIEWER line says so.
+# quota exhaustion falls back (grok, then sonnet, each only if ALLOWED_MODELS allows it),
+# and the REVIEWER line says so.
 # Every attempt leaves .wave-review.<name>.log/.err in the worktree. Every reviewer is
 # read-only: Codex and Sonnet by flags, Grok by guard_readonly (lib.sh).
 set -uo pipefail
@@ -20,6 +21,18 @@ if [ -z "${WAVE_IMPLEMENTER:-}" ] && [ -n "$ISSUE" ]; then
   run_status="$MAIN_CHECKOUT/.claude/wave/runs/$(printf '%s' "$ISSUE" | tr '[:upper:]' '[:lower:]')/status.json"
   [ -f "$run_status" ] && WAVE_IMPLEMENTER="$(sed -n 's/.*"agent": *"\([a-z]*\)".*/\1/p' "$run_status" | head -1)"
 fi
+# ALLOWED_MODELS (INNOV-469): the quota fallback never runs a model outside it. The tick
+# exports WAVE_ALLOWED_MODELS; an Orca worker's shell does not, so read the run's copy.
+if [ -z "${WAVE_ALLOWED_MODELS:-}" ] && [ -n "$ISSUE" ]; then
+  run_status="$MAIN_CHECKOUT/.claude/wave/runs/$(printf '%s' "$ISSUE" | tr '[:upper:]' '[:lower:]')/status.json"
+  [ -f "$run_status" ] && WAVE_ALLOWED_MODELS="$(sed -n 's/.*"allowed_models": *"\([^"]*\)".*/\1/p' "$run_status" | head -1)"
+fi
+ALLOWED="$(printf '%s' "${WAVE_ALLOWED_MODELS:-}" | tr -d ' \r' | tr '[:upper:]' '[:lower:]')"
+model_allowed() {  # $1 = model; an empty list allows any
+  [ -z "$ALLOWED" ] && return 0
+  case ",$ALLOWED," in *",$1,"*) return 0 ;; esac
+  return 1
+}
 
 wave_exclude '.wave-review.*'
 wave_exclude '.wave-plan*'   # a risk-tier plan is scratch, never part of the reviewed diff
@@ -65,21 +78,24 @@ elif grep -qiE 'usage limit|usage_limit_exceeded|rate limit' "$ROOT/.wave-review
   # retried elsewhere. Grok first (different family from the Claude worker), then
   # Sonnet. The REVIEWER line names the fallback so human review sees the weaker gate.
   fallback_prompt="${correctness_prompt/supplied on stdin/in the file .wave-review.diff at the repo root (read it first; you are read-only, edit nothing)}"
-  name=grok-fallback
-  run_grok "$fallback_prompt" "$ROOT/.wave-review.$name.err"
-  fb_out="$GROK_OUT"
-  if [ "$GROK_RC" -eq 3 ]; then
-    echo "NO CODEX REVIEW: the grok fallback modified the worktree; inspect git status before anything else"
-    exit 1
+  fb_out="" GROK_WHY="not in ALLOWED_MODELS"
+  if model_allowed grok; then
+    name=grok-fallback
+    run_grok "$fallback_prompt" "$ROOT/.wave-review.$name.err"
+    fb_out="$GROK_OUT"
+    if [ "$GROK_RC" -eq 3 ]; then
+      echo "NO CODEX REVIEW: the grok fallback modified the worktree; inspect git status before anything else"
+      exit 1
+    fi
+    printf '%s\n' "$fb_out" > "$ROOT/.wave-review.$name.log"
   fi
-  printf '%s\n' "$fb_out" > "$ROOT/.wave-review.$name.log"
-  if ! review_complete "$fb_out"; then
+  if ! review_complete "$fb_out" && model_allowed sonnet; then
     name=sonnet-fallback
     fb_out="$(timeout 900 claude -p --model sonnet "$fallback_prompt" --allowedTools Read,Grep,Glob 2>"$ROOT/.wave-review.$name.err")"
     printf '%s\n' "$fb_out" > "$ROOT/.wave-review.$name.log"
   fi
   if ! review_complete "$fb_out"; then
-    echo "NO CODEX REVIEW: Codex quota exhausted and no fallback returned a complete REVIEW VERDICT and TEST VERDICT (grok: $GROK_WHY); see .wave-review.*-fallback.log/.err"
+    echo "NO CODEX REVIEW: Codex quota exhausted and no fallback returned a complete REVIEW VERDICT and TEST VERDICT (grok: $GROK_WHY; ALLOWED_MODELS: ${ALLOWED:-any}); see .wave-review.*-fallback.log/.err"
     exit 1
   fi
   printf '%s\nREVIEWER: %s (codex quota exhausted)\n' "$fb_out" "$name"

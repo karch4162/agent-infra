@@ -359,6 +359,7 @@ EOF
 cat >"$STUB/bin/codex" <<'EOF'
 #!/bin/sh
 cat >/dev/null
+[ -z "${CODEX_QUOTA:-}" ] || { echo "error: usage limit reached" >&2; exit 1; }
 case "$*" in *"PLAN VERDICT"*) echo "PLAN VERDICT: APPROVE" ;; *) [ -n "${CODEX_NO_VERDICT:-}" ] || echo "REVIEW VERDICT: YES"; echo "TEST VERDICT: none" ;; esac
 EOF
 cat >"$STUB/bin/cygpath" <<'EOF'
@@ -371,7 +372,7 @@ grok_run() { # script plan-lines... ; output in $BOX/out.txt, prints exit status
   local script="$1"; shift
   rm -f "$STUB/grok.n" "$STUB/grok.env" "$STUB/timeout.limits"
   printf '%s\n' "$@" >"$STUB/grok.plan"
-  (cd "$BOX" && PATH="$STUB/bin:$PATH" RISK_REVIEW=1 bash "$WAVE/$script" ABC-7) >"$BOX/out.txt" 2>&1
+  (cd "$BOX" && PATH="$STUB/bin:$PATH" RISK_REVIEW="${RISK:-1}" bash "$WAVE/$script" ABC-7) >"$BOX/out.txt" 2>&1
   echo $?
 }
 new_sandbox "$JIRA_CONFIG"
@@ -423,6 +424,37 @@ assert_eq "no-review-verdict/exit-1" "1" "$st"
 assert_contains "no-review-verdict/says" "$(cat "$BOX/out.txt")" "NO CODEX REVIEW: Codex Terra did not return a complete REVIEW VERDICT"
 st="$(grok_run review.sh "$PASS_OUT")"
 assert_contains "review-verdict/passed-through" "$(cat "$BOX/out.txt")" "REVIEW VERDICT: YES"
+
+echo "--- 26d. Codex quota fallback honours ALLOWED_MODELS (INNOV-469) ---"
+cat >"$STUB/bin/claude" <<'EOF2'
+#!/bin/sh
+cat >/dev/null
+echo called >>"$STUB/claude.calls"
+echo "REVIEW VERDICT: YES"
+echo "TEST VERDICT: none"
+EOF2
+chmod +x "$STUB/bin/claude"
+FB_OUT='0 fine\nREVIEW VERDICT: YES\nTEST VERDICT: none'
+# negative control: no list, Grok is still the first fallback
+rm -f "$STUB/claude.calls"
+st="$(unset WAVE_ALLOWED_MODELS; CODEX_QUOTA=1 RISK=0 grok_run review.sh "$FB_OUT")"
+assert_eq "allowed-unset/exit-0" "0" "$st"
+assert_contains "allowed-unset/grok" "$(cat "$BOX/out.txt")" "REVIEWER: grok-fallback (codex quota exhausted)"
+# Grok and Sonnet both outside the list: blocks, neither runs
+rm -f "$STUB/claude.calls"
+st="$(WAVE_ALLOWED_MODELS='opus, GPT-5.6-terra' CODEX_QUOTA=1 RISK=0 grok_run review.sh "$FB_OUT")"
+assert_eq "allowed-none/exit-1" "1" "$st"
+assert_contains "allowed-none/NO" "$(cat "$BOX/out.txt")" "NO CODEX REVIEW: Codex quota exhausted and no fallback"
+assert_eq "allowed-none/no-grok" "" "$(cat "$STUB/grok.n" 2>/dev/null)"
+assert_eq "allowed-none/no-sonnet" "" "$(cat "$STUB/claude.calls" 2>/dev/null)"
+# an Orca worker has no WAVE_* env: the list comes from the run's status.json; Grok is skipped
+mkdir -p "$BOX/.claude/wave/runs/abc-7"
+printf '{\r\n  "agent": "claude",\r\n  "allowed_models": "opus,gpt-5.6-terra,sonnet"\r\n}\r\n' >"$BOX/.claude/wave/runs/abc-7/status.json"
+st="$(unset WAVE_ALLOWED_MODELS; CODEX_QUOTA=1 RISK=0 grok_run review.sh "$FB_OUT")"
+assert_eq "allowed-status/exit-0" "0" "$st"
+assert_contains "allowed-status/sonnet" "$(cat "$BOX/out.txt")" "REVIEWER: sonnet-fallback (codex quota exhausted)"
+assert_eq "allowed-status/no-grok" "" "$(cat "$STUB/grok.n" 2>/dev/null)"
+rm -rf "$BOX/.claude/wave/runs" "$STUB/bin/claude" "$STUB/claude.calls"
 
 echo "--- 27. plan-review: REVISE still reported, timeouts fall back ---"
 st="$(grok_run plan-review.sh '0 the plan misses a caller\nPLAN VERDICT: REVISE')"

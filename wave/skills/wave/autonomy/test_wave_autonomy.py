@@ -1376,5 +1376,72 @@ class Phase1Fixes(unittest.TestCase):
             }).startswith("HOLD: challenge review timed out"))
 
 
+class PlanReviewerAllowedModels(unittest.TestCase):
+    """INNOV-469: the Codex plan reviewer is gated by ALLOWED_MODELS like the implementer and diff reviewer."""
+
+    def _spawn(self, td: str, allowed: str | None):
+        import types
+        import autonomy_tick
+        wave = Path(td) / ".claude" / "wave"
+        (wave / "runs" / "ent-5").mkdir(parents=True)
+        (wave / "config.env").write_text("WAVE_TRACKER=jira\nWAVE_RUNTIME=direct\n", encoding="utf-8")
+        status = wave / "runs" / "ent-5" / "status.json"
+        pick = backlog_watch.Pick(ticket_id="ENT-5", title="t", rating="medium", action="plan_first",
+                                  reason="plan needed", roles=model_roles.assign_roles("medium").to_dict())
+        watch = types.SimpleNamespace(picks=[pick], notices=[], flagged_risky=[], to_dict=lambda: {})
+        calls, loops = [], []
+
+        def sh(args, cwd, **kw):
+            calls.append(list(args))
+            return subprocess.CompletedProcess(args, 0, "PLAN_REVIEW_RESULT:\n  decision: PASS\n  summary: ok\n", "")
+
+        def plan_loop(**kw):
+            loops.append(kw["reviewer"]("the plan"))
+            return types.SimpleNamespace(approved=True, hold_reason=None, plan_md="the plan")
+
+        def spawn(**kw):
+            status.write_text(json.dumps({"ticket_id": "ENT-5", "state": "running"}), encoding="utf-8")
+            return types.SimpleNamespace(status_path=str(status), pid=1, branch="b", mode="direct")
+
+        env = {} if allowed is None else {"WAVE_ALLOWED_MODELS": allowed}
+        with mock.patch.dict(os.environ, env), \
+             mock.patch.object(autonomy_tick, "run_watch", lambda **kw: watch), \
+             mock.patch.object(autonomy_tick, "_sh", sh), \
+             mock.patch.object(autonomy_tick, "_resolve_agent_bin", lambda n: n), \
+             mock.patch.object(autonomy_tick, "run_plan_loop", plan_loop), \
+             mock.patch.object(autonomy_tick, "write_plan_artifacts", lambda *a: None), \
+             mock.patch.object(autonomy_tick, "record_start", lambda *a: None):
+            if allowed is None:
+                os.environ.pop("WAVE_ALLOWED_MODELS", None)
+            tick = autonomy_tick.Tick(repo=Path(td), execute=True, log=lambda m: None)
+            tick._prompt_for = lambda *a: "prompt"
+            tick.tracker = lambda: None
+            tick.runtime = lambda: types.SimpleNamespace(spawn=spawn)
+            tick.spawn(None)
+        codex = [c for c in calls if c[0] == "codex"]
+        return tick.report, codex, loops, (json.loads(status.read_text(encoding="utf-8")) if status.exists() else {})
+
+    def test_plan_reviewer_outside_the_list_holds_the_pick(self):
+        with tempfile.TemporaryDirectory() as td:
+            rep, codex, loops, _ = self._spawn(td, "opus")
+        self.assertEqual((codex, loops), ([], []))   # the reviewer never ran on a disallowed model
+        held = [e for e in rep["events"] if e["event"] == "plan_held"]
+        self.assertEqual([e["reason"] for e in held], ["plan reviewer model not allowed: gpt-5.6-terra"])
+        self.assertNotIn("spawned", [e["event"] for e in rep["events"]])
+
+    def test_plan_reviewer_is_pinned_to_the_checked_model(self):
+        with tempfile.TemporaryDirectory() as td:
+            rep, codex, loops, st = self._spawn(td, "opus,gpt-5.6-terra")
+        self.assertEqual(len(codex), 1)
+        self.assertEqual(codex[0][codex[0].index("--model") + 1], "gpt-5.6-terra")
+        self.assertEqual(st.get("allowed_models"), "opus,gpt-5.6-terra")   # review.sh reads it in an Orca worker
+
+    def test_no_list_leaves_the_plan_reviewer_unchanged(self):
+        with tempfile.TemporaryDirectory() as td:
+            rep, codex, loops, st = self._spawn(td, None)
+        self.assertEqual(codex, [["codex", "exec", "-s", "read-only", "-"]])
+        self.assertNotIn("allowed_models", st)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
