@@ -40,6 +40,7 @@
 // Usage:
 //   BRAIN_ROOT=<vault> node label-communities.mjs --digest [repo ...] [--top N]
 //   BRAIN_ROOT=<vault> node label-communities.mjs --apply <repo> --labels <file.json> [--force]
+//   (<repo> may be `graphify-out`, the vault's own wiki concept graph: INNOV-412)
 //   BRAIN_ROOT=<vault> node label-communities.mjs --reconcile <repo>
 //   BRAIN_ROOT=<vault> node label-communities.mjs --reconcile graphify-out --existing <pre-build report>
 //
@@ -135,26 +136,40 @@ function uniqueLabel(label, taken) {
 
 // ---- mirror reading ----------------------------------------------------------
 
+// The vault's own wiki concept graph (INNOV-412): a target like a mirror, but
+// at <vault>/graphify-out/ with an un-namespaced GRAPH_REPORT.md, a hub list of
+// plain `- <label>` lines, and note slugs as its derived names.
+const WIKI = 'graphify-out';
+const mirrorDir = (repo) => (repo === WIKI ? join(VAULT, WIKI) : join(VAULT, 'graphify', repo));
+
+// Every mirror, plus the wiki graph once it has a report: the same default set
+// build-community-notes.mjs regenerates.
 function mirrorNames() {
   const dir = join(VAULT, 'graphify');
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && existsSync(join(dir, d.name, 'graph.json')))
-    .map((d) => d.name);
+  const names = existsSync(dir)
+    ? readdirSync(dir, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && existsSync(join(dir, d.name, 'graph.json')))
+        .map((d) => d.name)
+    : [];
+  if (existsSync(join(VAULT, WIKI, 'graph.json')) && existsSync(join(VAULT, WIKI, 'GRAPH_REPORT.md'))) names.push(WIKI);
+  return names;
 }
 
-// `at` overrides where the mirror lives and which report text it carries; only
-// the wiki concept graph reconcile uses it (INNOV-405).
+// `at.report` overrides the report text; only the wiki concept graph reconcile
+// uses it (INNOV-405).
 function readMirror(repo, at = {}) {
-  const dir = at.dir ?? join(VAULT, 'graphify', repo);
+  const dir = mirrorDir(repo);
   const graph = JSON.parse(readFileSync(join(dir, 'graph.json'), 'utf8'));
   const nodes = graph.nodes ?? [];
   const links = graph.links ?? []; // NetworkX node-link: edges live under `links`
   const members = new Map(); // community id (number) → node[]
   for (const n of nodes) {
     if (n.community === undefined || n.community === null) continue;
-    if (!members.has(n.community)) members.set(n.community, []);
-    members.get(n.community).push(n);
+    // Emitters ship `community` as a number or a string. Report ids parse as
+    // numbers, so a string key here made every heading an orphan to --apply.
+    const c = typeof n.community === 'string' && /^\d+$/.test(n.community) ? Number(n.community) : n.community;
+    if (!members.has(c)) members.set(c, []);
+    members.get(c).push(n);
   }
   // Degree ranks a community's member labels for the naming prompt — hubs first,
   // the same idea as graphify's god-nodes-first ordering.
@@ -163,14 +178,14 @@ function readMirror(repo, at = {}) {
     degree.set(l.source, (degree.get(l.source) ?? 0) + 1);
     degree.set(l.target, (degree.get(l.target) ?? 0) + 1);
   }
-  const reportPath = at.reportPath ?? join(dir, `${repo}-GRAPH_REPORT.md`);
+  const reportPath = join(dir, repo === WIKI ? 'GRAPH_REPORT.md' : `${repo}-GRAPH_REPORT.md`);
   const report = at.report !== undefined ? at.report : existsSync(reportPath) ? readFileSync(reportPath, 'utf8') : null;
   // id (number) → label as written. Parsed by the shared module so this script
   // and sync-graph.sh cannot disagree about which lines are community headings.
   const reportLabels = report !== null ? readReportLabels(report) : new Map();
   const [reportMembers, reportSizes] = readReportMembers(report);
   return {
-    dir, reportPath, report, reportLabels, reportMembers, reportSizes, members, degree,
+    wiki: repo === WIKI, dir, reportPath, report, reportLabels, reportMembers, reportSizes, members, degree,
     provenance: readProvenance(dir), anchors: readAnchors(dir),
     nodeCount: nodes.length, linkCount: links.length,
   };
@@ -323,7 +338,7 @@ function isPreserved(m, id, existing) {
   // A name for a cluster that no longer exists is not work worth preserving,
   // whatever the sidecar says about who wrote it.
   if (isStale(m, id)) return false;
-  if (!isAgentName(m, id, existing) && !isNamedLabel(existing, m.members.get(id))) return false;
+  if (isFiller(m, id, existing, m.members.get(id))) return false;
   const rec = m.provenance.get(id);
   if (!rec || rec.provenance !== 'derived') return true;
   return nameKey(rec.name ?? '') !== nameKey(existing);
@@ -334,6 +349,25 @@ const isAgentName = (m, id, label) => {
   const rec = m.provenance.get(id);
   return rec?.provenance === 'agent' && nameKey(rec.name ?? '') === nameKey(label);
 };
+
+// Is `label` filler rather than a name for the cluster `nodes`, unless an agent
+// chose it? graphify's node-name filler (INNOV-403), and in the wiki graph a
+// note slug: deriveName's output for one of the members' notes. A wiki report
+// carries those without a 'derived' record when it was renamed by hand or
+// written before the sidecar, and then they read as names nothing may replace
+// (INNOV-412: 18 of 39 on personal-brain). Wiki only: a mirror's derived file
+// basename must keep counting as named (label-guard DERIVED_LABEL).
+const isFiller = (m, id, label, nodes) =>
+  !isAgentName(m, id, label) && (!isNamedLabel(label, nodes) || (m.wiki && isNoteSlug(label, nodes)));
+
+function isNoteSlug(label, nodes) {
+  const want = nameKey(String(label ?? '').replace(/ \(\d+\)$/, '')); // uniqueLabel's suffix
+  return (nodes ?? []).some((n) => {
+    const parts = String(n.source_file ?? '').replace(/\\/g, '/').split('/');
+    const base = (parts.pop() ?? '').replace(/\.[^.]+$/, '');
+    return base !== '' && [base, `${parts.pop() ?? ''} ${base}`].some((c) => nameKey(sanitizeLabel(c)) === want);
+  });
+}
 
 // ---- naming inputs -----------------------------------------------------------
 
@@ -409,7 +443,7 @@ function remapNames(m, inPlaceIds, takenNames) {
     for (const [id, nodes] of m.members) {
       if (inPlaceIds.has(id)) continue; // that id's current name is off-limits
       // graphify's own name for that cluster is not a name to carry (INNOV-403).
-      if (!isAgentName(m, oldId, label) && !isNamedLabel(label, nodes)) continue;
+      if (isFiller(m, oldId, label, nodes)) continue;
       const overlap = fit(m, oldId, label, nodes);
       if (overlap >= STALE_OVERLAP) scored.push({ oldId, id, label, overlap });
     }
@@ -439,7 +473,7 @@ function classify(repo, m) {
   const remapped = {}; // new id → { label, from } — digest observability + --apply
   for (const [id, r] of remap) { preserved[id] = r.name; remapped[id] = { label: r.name, from: r.from }; }
   const unnamed = [];  // ids needing a label (generic heading, or absent from report)
-  for (const [id, nodes] of m.members) if (preserved[id] === undefined) unnamed.push({ id, nodes });
+  for (const [id, nodes] of m.members) if (preserved[id] === undefined && !thinOmitted(m, id)) unnamed.push({ id, nodes });
   unnamed.sort((a, b) => b.nodes.length - a.nodes.length);
   const llm = unnamed.slice(0, TOP_K);
   const tail = unnamed.slice(TOP_K);
@@ -466,6 +500,11 @@ function classify(repo, m) {
   return { repo, total: m.members.size, preserved, remapped, derived, batches, stale_headings, labels_key_form: LABELS_KEY_FORM, labels_template };
 }
 
+// A wiki cluster graphify left out of its report as thin stays out, as
+// --reconcile graphify-out leaves it: naming it would mint a heading and a stub
+// for a 1-2 node cluster. Mirrors append theirs (see transformReport).
+const thinOmitted = (m, id) => m.wiki && m.report !== null && !m.reportLabels.has(id);
+
 // ---- report writing ----------------------------------------------------------
 
 const hubLink = (label) => `[[_COMMUNITY_${label}|${label}]]`; // raw label — build-community-notes aliases it to the sanitized filename
@@ -482,6 +521,7 @@ function transformReport(m, finalLabels, preservedIds, keepLinkNames = new Set()
   // In-place: rename renamable headings + their hub links; append omitted ids.
   let text = m.report;
   const appended = [];
+  const hubRenames = new Map(); // old label → new ('' drops), for the wiki graph's plain hub lines
   for (const [idStr, label] of Object.entries(finalLabels)) {
     const id = Number(idStr);
     if (preservedIds.has(id)) continue; // preserved — never touched
@@ -494,6 +534,7 @@ function transformReport(m, finalLabels, preservedIds, keepLinkNames = new Set()
     // pointing at it, not follow this id's fresh label.
     if (!keepLinkNames.has(nameKey(existing))) {
       text = text.replaceAll(`[[_COMMUNITY_${existing}|${existing}]]`, hubLink(label));
+      hubRenames.set(existing, label);
     }
   }
   if (appended.length) {
@@ -548,7 +589,7 @@ function transformReport(m, finalLabels, preservedIds, keepLinkNames = new Set()
     // name can legitimately move to a new id).
     const liveLabels = new Set([...readReportLabels(text).values()].map(nameKey));
     const orphanLabels = [...orphanIds].map((id) => m.reportLabels.get(id)).filter((l) => !liveLabels.has(nameKey(l)));
-    for (const l of orphanLabels) text = text.replaceAll(hubLink(l), '');
+    for (const l of orphanLabels) { text = text.replaceAll(hubLink(l), ''); hubRenames.set(l, ''); }
     text = text.split('\n').filter((line) => !/^-\s*\r?$/.test(line)).join('\n');
     text = text.replace(/^## Communities \(\d+ total(, \d+ thin omitted)?\)/m, (_w, thin) =>
       `## Communities (${m.members.size} total${thin ?? ''})`);
@@ -572,6 +613,24 @@ function transformReport(m, finalLabels, preservedIds, keepLinkNames = new Set()
       cur = null;
     }
     text = lines.join('\n');
+  }
+
+  // The wiki graph's hub list is plain `- <label>` lines, which the link
+  // rewrites above never match: follow each rename, drop each orphan. One pass
+  // with a lookup, so a label renamed to another's old name is not renamed twice.
+  if (hubRenames.size) {
+    let inHubs = false;
+    text = text
+      .split('\n')
+      .flatMap((line) => {
+        const body = line.replace(/\r$/, '');
+        if (/^## /.test(body)) inHubs = /^## Community Hubs/.test(body);
+        const hub = inHubs && /^- (.+)$/.exec(body);
+        if (!hub || !hubRenames.has(hub[1])) return [line];
+        const to = hubRenames.get(hub[1]);
+        return to ? [`- ${to}${line.slice(body.length)}`] : [];
+      })
+      .join('\n');
   }
 
   // ---- INNOV-264: rewrite the LINK LIST, not just the detail headings -------
@@ -632,9 +691,9 @@ function generateReport(repo, m, finalLabels, date) {
 // copied aside before the rebuild) is only the source of names: classify() moves
 // each one with its members, exactly as on a mirror. The FRESH report is the
 // text written: its ids, sizes and sections describe the graph beside it, so no
-// orphan heading survives (there is no /brain:label path for graphify-out to
-// delete them later). A cluster no old name fits takes its Step 5 name, else a
-// derived one. Nothing is written until everything is computed; on a non-zero
+// orphan heading survives. A cluster no old name fits takes its Step 5 name,
+// else a derived one, which /brain:label graphify-out (--digest/--apply)
+// offers for naming later (INNOV-412). Nothing is written until everything is computed; on a non-zero
 // exit save 5c copies back the pre-build graphify-out/ instead of committing.
 if (argVal('--reconcile') === 'graphify-out') {
   const prevPath = argVal('--existing');
@@ -642,14 +701,14 @@ if (argVal('--reconcile') === 'graphify-out') {
     console.error('usage: label-communities.mjs --reconcile graphify-out --existing <pre-build GRAPH_REPORT.md>');
     process.exit(1);
   }
-  const dir = join(VAULT, 'graphify-out');
+  const dir = mirrorDir(WIKI);
   const reportPath = join(dir, 'GRAPH_REPORT.md');
-  const cur = readMirror('graphify-out', { dir, reportPath });
+  const cur = readMirror(WIKI);
   if (cur.report === null) {
     console.error(`error reconcile graphify-out: no ${reportPath} — nothing was written.`);
     process.exit(1);
   }
-  const old = readMirror('graphify-out', { dir, reportPath, report: readFileSync(prevPath, 'utf8') });
+  const old = readMirror(WIKI, { report: readFileSync(prevPath, 'utf8') });
   const p = join(dir, PROV_FILE);
   if (existsSync(p)) {
     let side = null;
@@ -743,8 +802,8 @@ if (argVal('--reconcile') === 'graphify-out') {
   process.exit(0);
 }
 
-if (!existsSync(join(VAULT, 'graphify'))) {
-  console.error(`error: no graphify/ under '${VAULT}'. Set BRAIN_ROOT or run from the vault.`);
+if (!existsSync(join(VAULT, 'graphify')) && !existsSync(join(VAULT, WIKI, 'graph.json'))) {
+  console.error(`error: no graphify/ or graphify-out/ under '${VAULT}'. Set BRAIN_ROOT or run from the vault.`);
   process.exit(1);
 }
 
@@ -753,7 +812,7 @@ if (argv.includes('--digest')) {
   const repos = names.length ? names : mirrorNames();
   const out = [];
   for (const repo of repos) {
-    if (!existsSync(join(VAULT, 'graphify', repo, 'graph.json'))) {
+    if (!existsSync(join(mirrorDir(repo), 'graph.json'))) {
       console.error(`skip ${repo}: no graph.json`);
       continue;
     }
@@ -772,6 +831,11 @@ if (argv.includes('--apply')) {
     process.exit(1);
   }
   const m = readMirror(repo);
+  if (m.wiki && m.report === null) {
+    // generateReport writes a mirror-shaped report; the wiki graph's comes from save 5c.
+    console.error(`error ${repo}: no ${m.reportPath}, nothing was written. Build the concept graph first (/brain:save step 5c).`);
+    process.exit(1);
+  }
   const supplied = JSON.parse(readFileSync(labelsFile, 'utf8'));
   if (supplied === null || typeof supplied !== 'object' || Array.isArray(supplied)) {
     console.error(`error: ${labelsFile} must be a JSON object of {"<community id>": "<label>"}.`);
@@ -844,6 +908,7 @@ if (argv.includes('--apply')) {
   let named = 0, invalid = 0, collided = 0;
   const bySize = [...m.members.keys()].sort((a, b) => m.members.get(b).length - m.members.get(a).length);
   for (const id of bySize) {
+    if (thinOmitted(m, id) && preserved[id] === undefined) continue; // stays omitted, unnamed
     if (preserved[id] !== undefined) {
       // An agent's name stays 'agent' when kept, or the next run could not tell it
       // from graphify filler (isPreserved). A remapped name's record is the old id's.
@@ -910,6 +975,7 @@ if (argv.includes('--apply')) {
   // gets none.
   const provOut = { version: 2, repo, updated: date, labels: {}, anchors: {} };
   for (const id of bySize) {
+    if (finalLabels[id] === undefined) continue; // a thin wiki cluster left omitted
     provOut.labels[id] = { name: finalLabels[id], provenance: origin[id] };
     if (origin[id] === 'derived') continue;
     const k = nameKey(finalLabels[id]);
@@ -920,7 +986,7 @@ if (argv.includes('--apply')) {
   writeFileSync(join(m.dir, PROV_FILE), JSON.stringify(provOut, null, 2) + '\n', 'utf8');
   console.log(
     `${repo}: ${m.members.size} communities — ${Object.keys(preserved).length} preserved, ` +
-      `${named} agent-named, ${m.members.size - Object.keys(preserved).length - named} derived` +
+      `${named} agent-named, ${Object.keys(finalLabels).length - Object.keys(preserved).length - named} derived` +
       (invalid ? ` (${invalid} agent label(s) invalid/generic → derived fallback)` : '') +
       (collided ? ` (${collided} agent label(s) collided case-insensitively → suffixed)` : '') +
       ` → ${m.reportPath.replace(/\\/g, '/')}`

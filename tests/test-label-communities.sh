@@ -1728,6 +1728,112 @@ assert_ne "wiki-fail/corrupt-graph-non-zero" "0" "$status"
 assert_files_identical "wiki-fail/report-untouched" "$box/report.before" "$box/$GO_REPORT_REL"
 if [[ -e "$box/$GO_SIDECAR_REL" ]]; then fail "wiki-fail/no-sidecar-written" "found $GO_SIDECAR_REL"; else pass "wiki-fail/no-sidecar-written"; fi
 
+# ================================================================== PART K6 ==
+# INNOV-412: /brain:label had no path for graphify-out, so the note-slug names
+# save 5c derives (18 of 39 on personal-brain) could never be replaced.
+# --digest/--apply graphify-out now name them in place. Fixture: a wiki-only
+# vault (no graphify/). id 1 "anotes" is a slug with NO sidecar record (hand-fed
+# report), id 3 "x" a slug recorded derived, id 4 the parent-dir slug form, id 2
+# a real name, id 5 thin (omitted by graphify), id 9 an orphan heading.
+echo "--- K6. --digest/--apply graphify-out (INNOV-412) ---"
+write_wiki_labelable() { # box eol
+  local box="$1" eol="$2" dir="$1/vault/graphify-out"
+  mkdir -p "$dir"
+  printf '{"nodes":[%s,%s,%s,%s,%s],"links":[]}\n' \
+    "$(seq_nodes 3 a 1 wiki/anotes.md)" "$(seq_nodes 3 b 2 wiki/bnotes.md)" "$(seq_nodes 3 x 3 wiki/x.md)" \
+    "$(seq_nodes 3 c 4 sports-management/cnotes.md)" "$(seq_nodes 1 t 5 wiki/t.md)" >"$dir/graph.json"
+  {
+    printf '# Graph Report - wiki  (2026-10-30)\n\n## Community Hubs (Navigation)\n'
+    printf -- '- anotes\n- Beta Things\n- x\n- sports-management cnotes\n- Old Orphan\n\n'
+    printf '## Communities (5 total, 1 thin omitted)\n\n'
+    printf '### Community 1 - "anotes"\nCohesion: 0.5\nNodes (3): a1, a2, a3\n\n'
+    printf '### Community 2 - "Beta Things"\nCohesion: 0.5\nNodes (3): b1, b2, b3\n\n'
+    printf '### Community 3 - "x"\nCohesion: 0.5\nNodes (3): x1, x2, x3\n\n'
+    printf '### Community 4 - "sports-management cnotes"\nCohesion: 0.5\nNodes (3): c1, c2, c3\n\n'
+    printf '### Community 9 - "Old Orphan"\nCohesion: 0.5\nNodes (2): o1, o2\n\n'
+    printf '## Knowledge Gaps\n- anotes\n'
+  } >"$dir/GRAPH_REPORT.md"
+  printf '{"repo":"graphify-out","version":2,"labels":{"3":{"name":"x","provenance":"derived"}},"anchors":{}}\n' \
+    >"$dir/.community-labels.json"
+  crlf_if "$dir/GRAPH_REPORT.md" "$eol"
+}
+
+for eol in lf crlf; do
+  box="$(mktemp -d "$TMPROOT/boxXXXXXX")"
+  write_wiki_labelable "$box" "$eol"
+  rep="$box/$GO_REPORT_REL"
+  status="$(run_label "$box" --digest graphify-out)"
+  cp "$box/out.txt" "$box/digest.json"
+  assert_eq "wiki-label-$eol/digest-exit-0" "0" "$status" "stderr: [$(cat "$box/err.txt")]"
+  assert_eq "wiki-label-$eol/digest-offers-slugs-only" "1,3,4" \
+    "$(jexpr "$box/digest.json" "Object.keys(d[0].labels_template).sort().join(',')")" "digest: [$(cat "$box/digest.json")]"
+  assert_eq "wiki-label-$eol/real-name-preserved" "Beta Things" "$(jexpr "$box/digest.json" "d[0].preserved['2']")"
+  # Bare --digest covers the wiki graph too, as build-community-notes does.
+  run_label "$box" --digest >/dev/null
+  assert_eq "wiki-label-$eol/bare-digest-includes-wiki" "graphify-out" "$(jexpr "$box/out.txt" "d.map(r=>r.repo).join(',')")"
+
+  printf '{"1":"Alpha Notes","3":"Xray Notes","4":"Charlie Notes"}' >"$box/labels.json"
+  status="$(run_label "$box" --apply graphify-out --labels "$(to_native "$box/labels.json")")"
+  assert_eq "wiki-label-$eol/apply-exit-0" "0" "$status" "out: [$(cat "$box/all.txt")]"
+  assert_grep "wiki-label-$eol/slug-renamed" '### Community 1 - "Alpha Notes"' "$rep" "report: [$(cat "$rep")]"
+  assert_grep "wiki-label-$eol/derived-renamed" '### Community 3 - "Xray Notes"' "$rep"
+  assert_grep "wiki-label-$eol/parent-slug-renamed" '### Community 4 - "Charlie Notes"' "$rep"
+  assert_grep "wiki-label-$eol/real-name-kept" '### Community 2 - "Beta Things"' "$rep"
+  assert_eq "wiki-label-$eol/hub-list-follows" "1|1|0|0" \
+    "$(printf '%s|%s|%s|%s' "$(grep -c '^- Alpha Notes.\?$' "$rep")" "$(grep -c '^- Charlie Notes.\?$' "$rep")" \
+      "$(grep -c '^- sports-management cnotes' "$rep")" "$(grep -c '^- x.\?$' "$rep")")"
+  assert_eq "wiki-label-$eol/only-hub-section-rewritten" "1" "$(grep -c '^- anotes' "$rep")"
+  assert_not_grep "wiki-label-$eol/orphan-dropped" 'Old Orphan' "$rep"
+  assert_not_grep "wiki-label-$eol/thin-stays-omitted" '### Community 5 ' "$rep"
+  assert_eq "wiki-label-$eol/other-lines-kept" "4" "$(grep -c '^Cohesion: 0.5' "$rep")"
+  crs="$(tr -cd '\r' <"$rep" | wc -c | tr -d ' ')"
+  lines="$(wc -l <"$rep" | tr -d ' ')"
+  assert_eq "wiki-label-$eol/line-endings-kept" "$([[ $eol == crlf ]] && echo "$lines" || echo 0)" "$crs"
+  assert_eq "wiki-label-$eol/sidecar" "graphify-out|agent|agent|undefined" \
+    "$(jexpr "$box/$GO_SIDECAR_REL" "[d.repo,d.labels['1'].provenance,d.labels['3'].provenance,String(d.labels['5'])].join('|')")" \
+    "sidecar: [$(cat "$box/$GO_SIDECAR_REL")]"
+  ( BRAIN_ROOT="$(to_native "$box/vault")" node "$(to_native "$STUBS_MJS")" graphify-out ) >"$box/stubs.out" 2>&1
+  assert_grep "wiki-label-$eol/stub-regenerated" '"a1"' "$box/vault/graphify-out/communities/_COMMUNITY_Alpha Notes.md" \
+    "stubs: [$(ls "$box/vault/graphify-out/communities" 2>/dev/null | tr '\n' ' ')] [$(cat "$box/stubs.out")]"
+  run_label "$box" --digest graphify-out >/dev/null
+  assert_eq "wiki-label-$eol/second-digest-empty" "0" "$(jexpr "$box/out.txt" "d[0].batches.length")"
+  # The next save's 5c carries the agent names across an unchanged rebuild.
+  cp "$rep" "$box/prev.md"
+  status="$(run_wiki_reconcile "$box")"
+  assert_eq "wiki-label-$eol/reconcile-carries" "0|Alpha Notes|agent" \
+    "$status|$(grep -o 'Community 1 - "[^"]*"' "$rep" | cut -d'"' -f2)|$(jexpr "$box/$GO_SIDECAR_REL" "d.labels['1'].provenance")" \
+    "stderr: [$(cat "$box/err.txt")]"
+done
+
+# String community ids: every heading used to read as an orphan to --apply.
+box="$(mktemp -d "$TMPROOT/boxXXXXXX")"
+write_wiki_labelable "$box" lf
+sed -i 's/"community":\([0-9]*\)/"community":"\1"/g' "$box/vault/graphify-out/graph.json"
+printf '{"1":"Alpha Notes"}' >"$box/labels.json"
+status="$(run_label "$box" --apply graphify-out --labels "$(to_native "$box/labels.json")")"
+assert_eq "wiki-label-string-ids/exit-0" "0" "$status" "out: [$(cat "$box/all.txt")]"
+assert_grep "wiki-label-string-ids/real-name-kept" '### Community 2 - "Beta Things"' "$box/$GO_REPORT_REL" "report: [$(cat "$box/$GO_REPORT_REL")]"
+assert_grep "wiki-label-string-ids/renamed" '### Community 1 - "Alpha Notes"' "$box/$GO_REPORT_REL"
+
+# No report: refuse rather than generate a mirror-shaped one.
+box="$(mktemp -d "$TMPROOT/boxXXXXXX")"
+write_wiki_labelable "$box" lf
+rm "$box/$GO_REPORT_REL"
+printf '{"1":"Alpha Notes"}' >"$box/labels.json"
+status="$(run_label "$box" --apply graphify-out --labels "$(to_native "$box/labels.json")")"
+assert_eq "wiki-label-no-report/refused" "1" "$status"
+if [[ -e "$box/$GO_REPORT_REL" ]]; then fail "wiki-label-no-report/nothing-written" "report appeared"; else pass "wiki-label-no-report/nothing-written"; fi
+
+# Negative control: the slug rule is wiki-only. A mirror heading equal to its
+# file's basename stays a name (label-guard counts deriveName output as named).
+box="$(mktemp -d "$TMPROOT/boxXXXXXX")"
+mkdir -p "$box/vault/graphify/demo"
+printf '{"nodes":[%s],"links":[]}\n' "$(seq_nodes 3 a 1 src/anotes.ts)" >"$box/vault/graphify/demo/graph.json"
+printf '## Communities\n\n### Community 1 - "anotes"\nNodes (3): a1, a2, a3\n' >"$box/vault/graphify/demo/demo-GRAPH_REPORT.md"
+run_label "$box" --digest demo >/dev/null
+assert_eq "wiki-label-mirror-scope/basename-still-preserved" "anotes" "$(jexpr "$box/out.txt" "d[0].preserved['1']")" \
+  "digest: [$(cat "$box/out.txt")]"
+
 # ================================================================= SUMMARY ==
 echo
 echo "$PASSED passed, $FAILED failed"
