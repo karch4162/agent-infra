@@ -246,6 +246,51 @@ writeFileSync('graphify-out/graph.json', JSON.stringify({ nodes: [{ id: 'a', lab
   assert.match(refused.error, /local-changes/); assert.match(refused.error, /Do not discard/); assert.match(refused.error, /stash push --include-untracked/);
 });
 
+test('graph build takes a subPath folder of a checkout and publishes under its repos.json name (INNOV-451)', t => {
+  const f = fixture(t);
+  // hub: one checkout, a bare row plus subPath rows. CRLF on purpose: the vault is autocrlf.
+  const remote = 'https://github.com/acme/hub.git';
+  writeFileSync(join(f.source, 'repos.json'), JSON.stringify({ repos: { hub: { remote }, 'hub-frontend': { remote, subPath: 'frontend' }, 'hub-core': { remote, subPath: 'services/core' }, 'hub-docs': { remote, subPath: 'docs' } } }, null, 2).replace(/\n/g, '\r\n'));
+  git(f.source, 'add', 'repos.json'); git(f.source, 'commit', '-m', 'repos'); git(f.source, 'push', 'origin', 'main');
+  const bound = f.run('init', '--vault', pathToFileURL(f.remote).href); assert.equal(bound.exit, 0, JSON.stringify(bound));
+  for (const d of ['frontend/src', 'services/core/src']) mkdirSync(join(f.project, d), { recursive: true });
+  writeFileSync(join(f.project, 'frontend/src/a.js'), 'export const a = 1;'); writeFileSync(join(f.project, 'services/core/src/b.js'), 'export const b = 1;');
+  writeFileSync(join(f.project, '.gitignore'), 'graphify-out/\n.graphifyignore\n');
+  // An scp-style origin: the match is on the normalized remote, not the spelling.
+  git(f.project, 'init', '-b', 'main'); git(f.project, 'remote', 'add', 'origin', 'git@github.com:acme/hub.git'); git(f.project, 'add', '.'); git(f.project, 'commit', '-m', 'seed');
+  const fake = join(f.dir, 'fake-graphify.mjs');
+  writeFileSync(fake, `import { mkdirSync, writeFileSync } from 'node:fs';
+if (process.argv[2] === '--version') { console.log('graphify 0.0.0-fake'); process.exit(0); }
+mkdirSync('graphify-out', { recursive: true });
+writeFileSync('graphify-out/graph.json', JSON.stringify({ nodes: [{ id: 'a', label: 'a', source_file: 'src/a.js', community: 0 }], links: [] }));`);
+  const env = { BRAIN_GRAPHIFY: JSON.stringify([process.execPath, fake]) };
+  const built = f.run('graph', 'build', '--root', join(f.project, 'frontend'), '--stack', 'node-ts', env);
+  assert.equal(built.state, 'built', JSON.stringify(built));
+  assert.equal(built.name, 'hub-frontend');
+  assert.equal(built.sync.state, 'synced', built.sync.output);
+  assert.equal(built.commit.state, 'committed', built.commit.output);
+  const wt = built.session.path;
+  assert.ok(existsSync(join(wt, 'graphify/hub-frontend/graph.json')), 'published under the repos.json name');
+  assert.ok(existsSync(join(wt, 'graphify/hub-frontend/.graphifyignore')), 'carve-out under the repos.json name');
+  assert.ok(!existsSync(join(wt, 'graphify/frontend')), 'never under the folder basename');
+  assert.ok(!existsSync(join(wt, 'repos.local.json')), 'the sync hint is not left behind');
+  assert.equal(git(wt, 'status', '--porcelain'), '', 'worktree left clean');
+  // A nested subPath resolves the same way, in the same session.
+  const core = f.run('graph', 'build', '--root', join(f.project, 'services/core'), '--stack', 'node-ts', '--session', built.session.id, env);
+  assert.equal(core.name, 'hub-core', JSON.stringify(core));
+  assert.equal(core.sync.state, 'synced', core.sync.output);
+  assert.ok(existsSync(join(wt, 'graphify/hub-core/graph.json')));
+  // The checkout root of mirrored subPath rows is not a mirror: name them instead of seeding graphify/hub.
+  const top = f.run('graph', 'build', '--root', f.project, '--session', built.session.id, env);
+  assert.equal(top.state, 'error', JSON.stringify(top));
+  assert.match(top.error, /hub-frontend/); assert.match(top.error, /services\/core/);
+  assert.doesNotMatch(top.error, /hub-docs/, 'a subPath row with no mirror is an anchor alias, not a build target');
+  assert.ok(!existsSync(join(wt, 'graphify/hub')), 'no bogus root mirror');
+  // Not a checkout at all is still refused.
+  mkdirSync(join(f.dir, 'loose'));
+  assert.match(f.run('graph', 'build', '--root', join(f.dir, 'loose'), '--stack', 'node-ts', '--vault', bound.vault.path, env).error, /git checkout/);
+});
+
 test('land puts a session save on the default branch without GitHub: fast-forward push with a bare origin, local fast-forward with none (INNOV-416)', t => {
   const f = fixture(t);
   const save = (id, title) => {
