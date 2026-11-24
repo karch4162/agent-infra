@@ -313,11 +313,12 @@ gate_ok() { # file -> 0 when step 2b names every verdict and step 3 stamps the v
   [[ "$gate" == *'`PLUGIN-VERSION: OK`** → drain'* ]] || return 1
   [[ "$gate" == *'`PLUGIN-VERSION: SKIPPED`** → drain'* ]] || return 1
   [[ "$gate" == *'Create nothing, comment nothing, leave the queue intact'* ]] || return 1
-  [[ "$drain" == *'Plugin version: <plugin_version>") instead of creating'* ]] || return 1
-  [[ "$drain" == *'a `Plugin version: <plugin_version>` line'* ]] || return 1
+  # INNOV-425: payloads (incl. Plugin version) come from drain-findings.mjs, passed verbatim.
+  [[ "$drain" == *'bin/drain-findings.mjs" plan --open'* ]] || return 1
+  [[ "$drain" == *'Pass each action to the tracker verbatim'* ]] || return 1
 }
 gate_ok "$SAVE" && pass "drain/gate-names-all-four-verdicts" \
-  || fail "drain/gate-names-all-four-verdicts" "$SAVE step 2b must run check-plugin-version.sh 2>&1, hold on DRIFTED/STALE-CLONE, drain on OK/SKIPPED, and step 3 must carry Plugin version"
+  || fail "drain/gate-names-all-four-verdicts" "$SAVE step 2b must run check-plugin-version.sh 2>&1, hold on DRIFTED/STALE-CLONE, drain on OK/SKIPPED, and steps 3-4 must take payloads from drain-findings.mjs verbatim"
 sb_new
 sed 's/$/\r/' "$SAVE" >"$BOX/crlf.md"
 gate_ok "$BOX/crlf.md" && pass "drain/crlf-still-matches" || fail "drain/crlf-still-matches" "a CRLF copy lost the match"
