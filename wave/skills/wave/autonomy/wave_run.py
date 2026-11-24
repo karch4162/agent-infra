@@ -98,8 +98,10 @@ class Config:
         self.stop_file = control / (v["STOP_FILE"] or "STOP")
         self.python = v["PYTHON"] or sys.executable
         self.tick_timeout_s = int(float(v["TICK_TIMEOUT_MIN"] or 90) * 60)
-        mws = v["MAX_WAVE_SIZE"].strip()   # not a count -> -1, reported by problems() as a config error
-        self.max_wave_size = (int(mws) if mws.isdigit() else -1) if mws else None
+        try:   # not a count -> -1, reported by problems() as a config error
+            self.max_wave_size = int(v["MAX_WAVE_SIZE"]) if v["MAX_WAVE_SIZE"].strip() else None
+        except ValueError:
+            self.max_wave_size = -1
         self.allowed_models = ",".join(m.strip() for m in v["ALLOWED_MODELS"].split(",") if m.strip())
 
     def problems(self) -> list[str]:
