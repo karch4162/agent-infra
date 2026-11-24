@@ -51,6 +51,17 @@ def assign_roles(rating: str, *, codex_implement_low: bool = True) -> RoleAssign
     )
 
 
+# The model each agent runs when a role names none: review.sh pins the Codex reviewer to
+# Terra and the Claude worker defaults to Opus (worker_runtime.py). ALLOWED_MODELS gates on these.
+AGENT_MODEL = {"claude": "opus", "codex": "gpt-5.6-terra"}
+
+
+def role_models(roles: dict) -> tuple[str, str]:
+    """(implementer model, reviewer model) a pick's roles will run."""
+    return (roles.get("implementer_model") or AGENT_MODEL[roles["implementer"]],
+            AGENT_MODEL[roles["reviewer"]])
+
+
 def rating_from_tags(tags: list[str] | None) -> str | None:
     for t in tags or []:
         tl = t.lower()

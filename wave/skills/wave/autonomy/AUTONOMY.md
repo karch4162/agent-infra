@@ -41,6 +41,14 @@ python <control>/bin/wave_run.py status
 installed version) and runs `autonomy/wave_run.py`. Each firing takes the machine lock and
 runs **one tick per repo** with the caps the machine has left (`MAX_WORKERS`,
 `DAILY_TICKET_CAP`, `BUDGET_PER_DAY`, `CLAUDE_PAUSE_PCT`) handed to it as env overrides.
+`MAX_WAVE_SIZE` (empty = no cap) is the most workers one firing may start across all repos;
+`MAX_WORKERS` caps live workers, not starts. What earlier repos started in the firing comes off
+the start cap handed to later ones, which are still ticked so their CI, merges and closeout run.
+`ALLOWED_MODELS` (comma list, e.g. `opus,gpt-5.6-terra`; empty = any) is passed down as
+`WAVE_ALLOWED_MODELS`: a pick whose implementer or reviewer model is outside it is skipped with
+one `ALLOWED_MODELS ...` notice per tick, never swapped. With a list set, a Codex worker is
+pinned to the model checked (`gpt-5.6-terra`) instead of Codex's own default. Every assignment
+pairs Claude with Codex, so a list missing either skips every pick.
 Gates: stop file, trigger, empty `SCHEDULE_WAVE`, `MAX_WAVES_PER_DAY`, per-repo cooldown
 after a failed tick. Exit codes: 0 ok, 1 a repo failed (escalated), 2 config error, 3 skipped.
 

@@ -507,6 +507,65 @@ class WaveRun(unittest.TestCase):
         self.assertEqual(seen["a"]["WAVE_CLAUDE_PAUSE_PCT"], "70")
         self.assertEqual([r["stage"] for r in audit][:5], ["start", "tick", "tick", "repo", "end"])
 
+    def test_max_wave_size_caps_a_firing_mid_repo_list(self):
+        # INNOV-453: MAX_WORKERS caps live workers, not starts per firing.
+        seen = {}
+
+        def tick(repo, trigger, env):
+            seen[repo.name] = env
+            if repo.name == "a":   # a starts one worker this firing
+                (repo / ".claude" / "wave" / "autonomy").mkdir(exist_ok=True)
+                (repo / ".claude" / "wave" / "autonomy" / "tick-last.json").write_text(json.dumps(
+                    {"ts": datetime.now(timezone.utc).isoformat(), "events": [{"ticket": "X", "event": "spawned"}]}), encoding="utf-8")
+            return 0, [], ""
+
+        for size, b_cap in (("1", "0"), ("2", "1"), ("", "2")):   # "" = no wave cap: only the daily cap (2 left)
+            with self.subTest(size=size), tempfile.TemporaryDirectory() as td, contextlib.redirect_stdout(io.StringIO()):
+                seen.clear()
+                control, _ = self._control(td, f"MAX_WAVE_SIZE={size}\n")
+                self.assertEqual(self._ctl(control, tick).run("owner"), 0)
+                # b is still ticked at zero allowance: its CI, merges and closeout live in the tick
+                self.assertEqual(sorted(seen), ["a", "b"])
+                self.assertEqual(seen["b"]["WAVE_DAILY_TICKET_CAP"], b_cap)
+                self.assertEqual(seen["a"]["WAVE_DAILY_TICKET_CAP"], "2" if size == "1" else "3")   # a: 1 started today, + its allowance
+
+    def test_disallowed_model_skipped_with_a_notice(self):
+        # INNOV-453: a low pick is Codex (Terra) implementing, Opus reviewing; never swapped to fit.
+        import autonomy_tick
+        import backlog_watch
+        ticket = {"id": "ENT-9", "name": "x", "tags": ["agent-ready", "rating:low"],
+                  "text": "File src/a.ts:10.\nAcceptance: given a when b then c.\nExpected: test asserts behavior."}
+        real_watch = backlog_watch.run_watch
+        ticks = {}
+
+        def tick(repo, trigger, env):   # the real tick's picker, fed one ticket
+            if repo.name != "b":
+                return 0, [], ""
+            with mock.patch.dict(os.environ, env), \
+                 mock.patch.object(autonomy_tick, "run_watch", lambda **kw: real_watch(**kw, force_enabled=True, tickets=[ticket])):
+                t = autonomy_tick.Tick(repo=repo, execute=False, log=lambda m: None)
+                t.spawn(None)
+            ticks[env.get("WAVE_ALLOWED_MODELS")] = t.report
+            return 0, t.report["notices"], ""
+
+        for allowed in ("opus", " opus , gpt-5.6-terra", ""):
+            with self.subTest(allowed=allowed), tempfile.TemporaryDirectory() as td, \
+                 contextlib.redirect_stdout(io.StringIO()) as out, mock.patch.dict(os.environ, {"WAVE_ALLOWED_MODELS": ""}):
+                control, repos = self._control(td, f"ALLOWED_MODELS={allowed}\n")
+                (repos[1] / ".claude" / "wave" / "config.env").write_text(
+                    "WAVE_TRACKER=jira\nWAVE_BUDGET_GUARD=0\nWAVE_RUNTIME=direct\n", encoding="utf-8")
+                self.assertEqual(self._ctl(control, tick).run("owner"), 0)
+                rep = ticks[allowed.replace(" ", "") or None]
+                spawns = [e for e in rep["events"] if e["event"] == "would_spawn"]
+                if allowed == "opus":
+                    self.assertEqual(spawns, [])
+                    self.assertIn("notice: ALLOWED_MODELS (opus) skipped ENT-9 (model not allowed: gpt-5.6-terra)", out.getvalue())
+                else:
+                    self.assertEqual(rep["notices"], [])
+                    # an allowlist pins Codex to the model it checked; no allowlist leaves Codex's own default
+                    self.assertEqual([(e["agent"], e["model"]) for e in spawns],
+                                     [("codex", "gpt-5.6-terra" if allowed else None)])
+
     def test_ticks_that_start_nothing_are_not_waves(self):
         with tempfile.TemporaryDirectory() as td, contextlib.redirect_stdout(io.StringIO()):
             control, _ = self._control(td, "MAX_WAVES_PER_DAY=1\n")

@@ -31,12 +31,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from autonomy_config import load_autonomy_config
 from budget_guard import check_budget
 from daily_cap import ET, RunLock, can_start, load_daily, pause_for_day, record_start
-from model_roles import assign_roles, rating_from_tags
+from model_roles import assign_roles, rating_from_tags, role_models
 from ticket_sufficiency import assess_ticket
 from worker_runtime import run_alive
 
 
 AUDIT_NAME = "wave-autonomy.jsonl"
+MODEL_NOTICE = "ALLOWED_MODELS"   # the tick raises watch notices with this prefix to the human
 
 
 @dataclass
@@ -181,6 +182,11 @@ def select_candidates(
         nth = started_today + len(picks) + 1
         codex_turn = cfg.codex_implements_low and nth % cfg.codex_implement_every == 0
         roles = assign_roles(rating, codex_implement_low=codex_turn).to_dict()
+        # Never swap a model in to fit ALLOWED_MODELS: the pick is skipped and the human told (INNOV-453).
+        barred = [m for m in role_models(roles) if cfg.allowed_models and m not in cfg.allowed_models]
+        if barred:
+            skipped.append({"id": tid, "reason": f"model not allowed: {', '.join(barred)}"})
+            continue
         suf = assess_ticket(title=title, body=body, tags=tags)
         if suf.plan_needed:
             picks.append(
@@ -335,6 +341,10 @@ def run_watch(
         report.picks = picks
         report.flagged_risky = risky
         report.skipped = skipped
+        barred = [x for x in skipped if x["reason"].startswith("model not allowed")]
+        if barred:
+            report.notices.append(f"{MODEL_NOTICE} ({', '.join(cfg.allowed_models)}) skipped "
+                                  + "; ".join(f"{x['id']} ({x['reason']})" for x in barred))
 
         if risky:
             notice = wave_dir / "autonomy" / "mason_risky.md"

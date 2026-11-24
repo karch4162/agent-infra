@@ -42,6 +42,7 @@ DEFAULTS = {
     "WAVE_CODEX_IMPLEMENT_EVERY": "1",   # Codex implements every Nth low start of the day; 1 = all low, 3 = 1 in 3
     "WAVE_BUDGET_PER_DAY_USD": "",       # empty = no spend cap
     "WAVE_JIRA_SITE": "",
+    "WAVE_ALLOWED_MODELS": "",           # comma list; a pick whose roles name another model is skipped. Empty = any
 }
 
 
@@ -135,6 +136,7 @@ class AutonomyConfig:
     scheduled_medium: int
     budget_per_day_usd: float | None
     jira_site: str
+    allowed_models: tuple[str, ...] = ()
 
     @property
     def enabled(self) -> bool:
@@ -178,4 +180,5 @@ def load_autonomy_config(config_path: Path | None = None) -> AutonomyConfig:
         scheduled_medium=max(0, int(_get("WAVE_SCHEDULED_MEDIUM", file_vals) or "0")),
         queue=_get("WAVE_QUEUE", file_vals),             # Jira: the JQL the picker runs verbatim
         jira_site=_get("WAVE_JIRA_SITE", file_vals),
+        allowed_models=tuple(m.strip().lower() for m in _get("WAVE_ALLOWED_MODELS", file_vals).split(",") if m.strip()),
     )
