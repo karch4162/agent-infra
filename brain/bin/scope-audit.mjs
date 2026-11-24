@@ -166,7 +166,11 @@ const NEVER_SOURCE_ROOT = new Set([
   'graphify-out', 'graphify',
 ]);
 
-const MAX_DEPTH = 6;      // deep enough for src/a/b/c/d/e, shallow enough to stay fast
+// Package depth must never decide carved-vs-missing (INNOV-434): Java/Kotlin keep
+// code at module/src/main/java/com/org/feature/x/File.kt, 8+ levels down. The walk
+// stops at the first source file it finds, so this is only a runaway guard
+// (symlinks are never followed: Dirent.isDirectory() is false for them).
+const MAX_DEPTH = 64;
 const MAX_LISTED = 12;    // how many offending files/dirs to print
 
 // --- argument parsing -------------------------------------------------------
