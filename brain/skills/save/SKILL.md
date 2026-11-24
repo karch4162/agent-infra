@@ -91,6 +91,14 @@ Resolve the vault root as `$BRAIN_ROOT` (else the current project dir / cwd). Al
    ```
 
 5. **Build repo graphs at the standard scope, then sync mirrors.** A *covered repo* is any repo that has a mirror folder under `graphify/<repo>/` **or** is listed in the vault `CLAUDE.md` "Repos this brain covers" table — the latter catches a freshly-`/brain:init`-ed repo whose **first** graph hasn't been built yet (this is the seed `/brain:init` offers; `/brain:save` is the one place builds actually run). Build a covered repo when its **source changed this session** *or* it has **no graph yet** (first build / seed):
+   - **First, ask whether this vault builds its mirrors in CI (INNOV-468).** The signal is a committed `.github/workflows/brain-mirrors.yml` in the vault (file presence, no config flag): that workflow rebuilds every mirror nightly on ubuntu, and community ids are stable per platform only, so a save that rebuilds and publishes the same mirror here re-clusters it against the nightly build every time.
+     ```bash
+     bash "${CLAUDE_PLUGIN_ROOT}/bin/sync-graph.sh" --ci-check   # read-only; prints one `Graph sync:` line, exit 0
+     ```
+     - **`Graph sync: skipped - mirrors built in CI (...)` →** do **not** build or sync any covered repo that already has a mirror (`graphify/<repo>/graph.json`), even if its source changed this session. Put that line on the output block's `Graph sync:` line, verbatim. Never skip silently or report it as synced.
+     - **Still build a repo with no mirror yet, once, here.** CI rebuilds only repos that already have a mirror, so the first build of a newly covered repo (the `/brain:init` seed) runs locally through the rest of this step. Its sync prints `MIRRORS: WARN` about the platform mismatch; that is expected for a seed. Carry it on the `Graph sync:` line, then the nightly run takes the mirror over.
+     - **`Graph sync: local - ...` →** carry on below, unchanged.
+     Steps 5b and 5c are unaffected: CI builds only code mirrors.
    - **Place the carve-out FIRST — the build is not reproducible without it (INNOV-267).** `graphify` scans a single positional root, so any scope wider than one directory is really "scan the root, carve back with `.graphifyignore`". That carve-out lives **vault-side and in version control** at `graphify/<repo>/.graphifyignore`, and must be copied into the repo checkout **before** the build reads it. Skip this and the build silently uses whatever stray `.graphifyignore` that machine happens to have — which is exactly how two people onboarding the same repo produced different graphs and the vault could not tell.
      ```bash
      # seed the vault-side carve-out from the per-stack template on first use (never overwrite an existing one)
@@ -254,7 +262,7 @@ Saved. Log: logs/<date>-<slug>.md
 Session: <started on '<branch>' | WARN — <script's line>>
 Freshness: <up to date | fast-forwarded from origin/main | BLOCKED — <script's reason>>
 hot.md <refreshed (<n> words / <budget> budget) | refresh SKIPPED (branch not fresh) | write REFUSED — <script's reason>> · log.md appended
-Graph sync: <synced repos | not needed this session>
+Graph sync: <synced repos | not needed this session | the --ci-check skip line, verbatim>
 Concept graph: <the CONCEPT-GRAPH: line, verbatim> [· CONCEPT-GRAPH: BLOCKED - graphify not installed, run /brain:init | · 5c SKIPPED (<reason>) — CONCEPT-GRAPH: STALE - N document(s) behind, was M at last save]
 Commit: <committed <n> paths on '<branch>' | nothing to commit | REFUSED — <script's reason>>
 Land: <merged #N | left open #N — <reason> | skipped — <reason>>   (the LAND: line, verbatim)

@@ -92,6 +92,14 @@
 # moved (a concurrent session merged a PR and moved HEAD mid-run), the commit is
 # refused. --force-commit does NOT override that one.
 #
+# CI-BUILT MIRRORS (INNOV-468): a vault that commits .github/workflows/brain-mirrors.yml
+# rebuilds its code mirrors in CI, on ubuntu. Community ids are stable per platform
+# only, so a local publish re-clusters the mirror against the nightly one. --ci-check
+# is /brain:save step 5's probe: it prints `Graph sync: skipped - ...` (CI vault) or
+# `Graph sync: local - ...` and exits 0 without touching anything. A normal sync in a
+# CI vault prints `MIRRORS: WARN` and carries on; ci-mirrors.mjs sets
+# BRAIN_MIRRORS_BUILDER=ci to say it is the CI build.
+#
 # Override per machine: REPOS_DIR=~/code BRAIN_ROOT=<vault> bash sync-graph.sh
 set -euo pipefail
 
@@ -207,6 +215,8 @@ mirror_name_for() { # repo_path
 COMMIT=1
 FORCE_COMMIT=0
 SYNC_ALL=0
+CI_CHECK=0
+CI_SIGNAL=".github/workflows/brain-mirrors.yml"
 # Flags may be given in any order and anywhere before the repo args; the first
 # non-flag argument ends flag parsing (repo paths can legitimately start with
 # anything, and `--` explicitly terminates the flags).
@@ -215,12 +225,18 @@ while [[ $# -gt 0 ]]; do
     --no-commit)    COMMIT=0; shift ;;
     --force-commit) FORCE_COMMIT=1; shift ;;
     --all)          SYNC_ALL=1; shift ;;
+    --ci-check)     CI_CHECK=1; shift ;;
     --)             shift; break ;;
     *)              break ;;
   esac
 done
 # --no-commit wins over --force-commit if both were passed.
 if [[ $COMMIT -eq 0 ]]; then FORCE_COMMIT=0; fi
+if [[ $CI_CHECK -eq 1 ]]; then
+  if [[ -f "$VAULT/$CI_SIGNAL" ]]; then echo "Graph sync: skipped - mirrors built in CI ($CI_SIGNAL)"
+  else echo "Graph sync: local - no $CI_SIGNAL in this vault"; fi
+  exit 0
+fi
 
 # THE LABEL RULE LIVES IN bin/label-guard.mjs (INNOV-274).
 #
@@ -503,6 +519,12 @@ if [[ ${#repos[@]} -eq 0 ]]; then
     exit 0
   fi
   echo "selected ${#selected[@]} mirror(s): ${selected[*]}" >&2
+fi
+
+if [[ -f "$VAULT/$CI_SIGNAL" && "${BRAIN_MIRRORS_BUILDER:-}" != ci ]]; then
+  _names=""
+  for repo in "${repos[@]}"; do _names="${_names:+$_names,}$(mirror_name_for "$repo")"; done
+  echo "MIRRORS: WARN - this vault builds its code mirrors in CI ($CI_SIGNAL). A local build clusters differently (community ids are stable per platform only), so this publish and the next nightly rebuild will re-cluster the mirror. Prefer running the workflow with --only $_names. Publishing anyway."
 fi
 
 synced=()

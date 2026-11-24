@@ -196,7 +196,7 @@ function buildRow(name, spec) {
 
   const before = dirty();
   const s = run(bashBin(), [fwd(join(pluginRoot, 'bin', 'sync-graph.sh')), '--no-commit', name],
-    { cwd: vault, env: { BRAIN_ROOT: fwd(vault), CLAUDE_PROJECT_DIR: fwd(vault), REPOS_DIR: fwd(work) } });
+    { cwd: vault, env: { BRAIN_ROOT: fwd(vault), CLAUDE_PROJECT_DIR: fwd(vault), REPOS_DIR: fwd(work), BRAIN_MIRRORS_BUILDER: 'ci' } });
   process.stdout.write(s.out.split('\n').map((l) => (l ? `  | ${l}` : l)).join('\n'));
   const changed = [...dirty()].filter((p) => !before.has(p) && !p.startsWith(`graphify/${name}/`));
   // sync-graph.sh appends a wiki/log.md line (the PR is graphify/ only, so it is dropped
