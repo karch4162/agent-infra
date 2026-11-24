@@ -450,7 +450,8 @@ assert_eq "allowed-none/no-sonnet" "" "$(cat "$STUB/claude.calls" 2>/dev/null)"
 # an Orca worker has no WAVE_* env: the list comes from the file the tick wrote into the run; Grok is skipped
 mkdir -p "$BOX/.claude/wave/runs/abc-7"
 printf 'opus,gpt-5.6-terra,sonnet\r\n' >"$BOX/.claude/wave/runs/abc-7/allowed_models"
-st="$(unset WAVE_ALLOWED_MODELS; CODEX_QUOTA=1 RISK=0 grok_run review.sh "$FB_OUT")"
+# the run's list wins over an env/config.env value that would allow Grok
+st="$(WAVE_ALLOWED_MODELS=grok,sonnet CODEX_QUOTA=1 RISK=0 grok_run review.sh "$FB_OUT")"
 assert_eq "allowed-status/exit-0" "0" "$st"
 assert_contains "allowed-status/sonnet" "$(cat "$BOX/out.txt")" "REVIEWER: sonnet-fallback (codex quota exhausted)"
 assert_eq "allowed-status/no-grok" "" "$(cat "$STUB/grok.n" 2>/dev/null)"
