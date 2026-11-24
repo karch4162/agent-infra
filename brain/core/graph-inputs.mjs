@@ -1,8 +1,9 @@
-import { existsSync, readFileSync, lstatSync, readlinkSync, readdirSync, mkdirSync, copyFileSync, writeFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, lstatSync, readlinkSync, readdirSync, mkdirSync, copyFileSync, writeFileSync, statSync, rmSync } from 'node:fs';
 import { join, resolve, relative, isAbsolute, basename } from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { git, readJson, writeJson, bashScript, runMaintenance, pluginRoot } from './runtime.mjs';
+import { remoteOf, normalizeRemote } from '../bin/resolve-repos.mjs';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 function fingerprint(root, scopes) {
@@ -91,13 +92,31 @@ export function graphifyRunner(cwd) {
   return args => spawnSync(bin, [...pre, ...args], { cwd, env, encoding: 'utf8', timeout: 900000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
 }
 
+// INNOV-451: which repos.json row is this directory? One checkout can carry several rows
+// (hub: hub-frontend = frontend/, hub-core = services/core/ ...), told apart by subPath, so
+// the match is remote + subPath, never the folder name. Read from the vault's tracked
+// repos.json: a session worktree has no repos.local.json.
+const slashed = p => (p || '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+function repoRow(vaultPath, top, prefix) {
+  const repos = readJson(join(vaultPath, 'repos.json'))?.repos || {};
+  const remote = remoteOf(top);
+  const rows = remote ? Object.entries(repos).filter(([, spec]) => normalizeRemote(spec?.remote) === remote) : [];
+  return { name: rows.find(([, spec]) => slashed(spec?.subPath) === prefix)?.[0],
+    subRows: rows.filter(([, spec]) => slashed(spec?.subPath)).map(([n, spec]) => `${n} (${slashed(spec.subPath)})`) };
+}
+
 export function buildGraph(root, vault, { scopes = ['.'], stack, session } = {}) {
   root = resolve(root);
-  if (!existsSync(join(root, '.git'))) throw new Error('graph build needs a git checkout as --root.');
-  const name = basename(root);
+  // A subfolder of a checkout is a valid root: that is what a subPath row builds.
+  const prefix = git(root, ['rev-parse', '--show-prefix'], true);
+  if (prefix === null) throw new Error('graph build needs a git checkout (or a folder inside one) as --root.');
+  const top = git(root, ['rev-parse', '--show-toplevel']);
+  const row = repoRow(vault.path, top, slashed(prefix));
+  const name = row.name || basename(root);
   const stacks = readdirSync(templates).filter(f => f !== 'README.md');
   const carveOut = join(vault.path, 'graphify', name, '.graphifyignore');
   if (!existsSync(carveOut)) {
+    if (!prefix && row.subRows.length) throw new Error(`${name} is the checkout of repos.json subPath rows, not a mirror: pass --root <checkout>/<subPath> for each of ${row.subRows.join(', ')}.`);
     if (!stacks.includes(stack)) throw new Error(`First build: pass --stack, one of ${stacks.join(', ')}.`);
     mkdirSync(join(vault.path, 'graphify', name), { recursive: true });
     copyFileSync(join(templates, stack), carveOut);
@@ -112,8 +131,15 @@ export function buildGraph(root, vault, { scopes = ['.'], stack, session } = {})
   if (build.status !== 0) throw new Error(`graphify update failed:\n${(build.stdout + build.stderr).trim().split('\n').slice(-8).join('\n')}`);
   const record = recordGraph(root);
   let sync;
+  // sync-graph.sh names the mirror from repos.local.json, which a session worktree lacks,
+  // so a subPath row would publish under its basename. Hand it this row's path for the
+  // call (as ci-mirrors.mjs does) and put the file back, so the worktree stays clean.
+  const cache = join(vault.path, 'repos.local.json');
+  const prior = row.name && existsSync(cache) ? readFileSync(cache) : null;
+  if (row.name) writeJson(cache, { ...readJson(cache, {}), [name]: root.replace(/\\/g, '/') });
   try { sync = { state: 'synced', output: bashScript('sync-graph.sh', ['--no-commit', root.replace(/\\/g, '/')], vault.path, session) }; }
   catch (error) { sync = { state: 'refused', output: error.message }; }
+  finally { if (row.name) prior ? writeFileSync(cache, prior) : rmSync(cache, { force: true }); }
   // INNOV-415: with a session the vault path is its worktree, so the mirror is committed
   // there (the allowlist covers graphify/ and wiki/log.md) and the base checkout stays
   // clean for the next session start. Without one the copy is left for the caller.
